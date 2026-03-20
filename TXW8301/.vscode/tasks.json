@@ -1,0 +1,129 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Project (CDK)",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "SHELL=sh.exe",
+                "-C",
+                "${workspaceFolder}/FMAC_SDK/project",
+                "-f",
+                "cdkws.mk",
+                "All"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/FMAC_SDK/project",
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/d", "/c"]
+                },
+                "env": {
+                    "SHELL": "D:\\Program Files\\Git\\bin\\sh.exe",
+                    "MAKESHELL": "D:\\Program Files\\Git\\bin\\sh.exe",
+                    "COMSPEC": "cmd.exe",
+                    "PATH": ".;F:\\C-Sky\\CDKRepo\\Toolchain\\CKV2ElfMinilib\\V3.10.32\\R\\bin;D:\\Program Files\\Git\\bin;${env:PATH}"
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": [],
+            "detail": "使用 CDK 工具链构建项目"
+        },
+        {
+            "label": "Clean Project",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "SHELL=sh.exe",
+                "-C",
+                "${workspaceFolder}/FMAC_SDK/project",
+                "-f",
+                "cdkws.mk",
+                "clean"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/FMAC_SDK/project",
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/d", "/c"]
+                },
+                "env": {
+                    "SHELL": "D:\\Program Files\\Git\\bin\\sh.exe",
+                    "MAKESHELL": "D:\\Program Files\\Git\\bin\\sh.exe"
+                }
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Prebuild",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "SHELL=sh.exe",
+                "-C",
+                "${workspaceFolder}/FMAC_SDK/project",
+                "-f",
+                "cdkws.mk",
+                "Project_PreBuild"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/FMAC_SDK/project",
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/d", "/c"]
+                },
+                "env": {
+                    "SHELL": "D:\\Program Files\\Git\\bin\\sh.exe",
+                    "MAKESHELL": "D:\\Program Files\\Git\\bin\\sh.exe"
+                }
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "PostBuild",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "SHELL=sh.exe",
+                "-C",
+                "${workspaceFolder}/FMAC_SDK/project",
+                "-f",
+                "cdkws.mk",
+                "Project_PostBuild"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/FMAC_SDK/project",
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/d", "/c"]
+                },
+                "env": {
+                    "SHELL": "D:\\Program Files\\Git\\bin\\sh.exe",
+                    "MAKESHELL": "D:\\Program Files\\Git\\bin\\sh.exe"
+                }
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        }
+    ]
+}

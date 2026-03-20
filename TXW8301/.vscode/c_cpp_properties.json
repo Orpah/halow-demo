@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "C-Sky",
+            "includePath": [
+                "${workspaceFolder}/FMAC_SDK/sdk/**",
+                "${workspaceFolder}/FMAC_SDK/csky/**",
+                "${workspaceFolder}/FMAC_SDK/libs/**",
+                "${workspaceFolder}/FMAC_SDK/project/**"
+            ],
+            "defines": [],
+            // 请根据您的工具链安装路径选择以下一个 compilerPath：
+            // 1. 如果已设置 CSKY_TOOLCHAIN 环境变量：
+            // "compilerPath": "${env:CSKY_TOOLCHAIN}/csky-elfabiv2-gcc.exe",
+            // 2. 默认路径（根据典型 CDK 安装）：
+            "compilerPath": "${workspaceFolder}/../../../C-Sky/CDKRepo/Toolchain/CKV2ElfMinilib/V3.10.32/R/bin/csky-abiv2-elf-gcc.bat",
+            // 3. 备用路径（如果上述路径不存在）：
+            // "compilerPath": "F:/C-Sky/CDKRepo/Toolchain/CKV2ElfMinilib/V3.10.32/R/bin/csky-abiv2-elf-gcc.exe",
+            "cStandard": "c99",
+            "cppStandard": "gnu++11",
+            "intelliSenseMode": "gcc-x86"
+        }
+    ],
+    "version": 4
+}

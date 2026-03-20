@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "C-Sky Debug (GDB)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/FMAC_SDK/project/project.elf",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceFolder}/../../../C-Sky/CDKRepo/Toolchain/CKV2ElfMinilib/V3.10.32/R/bin/csky-abiv2-elf-gdb.exe",
+            // 如果已设置 CSKY_TOOLCHAIN 环境变量，可以使用：
+            // "miDebuggerPath": "${env:CSKY_TOOLCHAIN}/csky-abiv2-elf-gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "为 gdb 启用整齐打印",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "将反汇编风格设置为 Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Build Project (CDK)",
+            "postDebugTask": null
+        }
+    ]
+}
