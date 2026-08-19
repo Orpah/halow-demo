@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>TXW8301 模拟器 UI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">📡 TXW8301 模拟器 <span class="sub">CH32V203 · 无射频 · 虚拟空口</span></div>
+  <div class="tools">
+    <span id="srvstatus" class="badge">未连接</span>
+    <button id="btnClearConsole" class="btn">清空控制台</button>
+    <button id="btnClearFrames" class="btn">清空帧</button>
+    <button id="btnFrameMonitor" class="btn">帧监视: 关</button>
+  </div>
+</header>
+
+<!-- ============ 双机拓扑 ============ -->
+<section id="topology" class="card">
+  <div class="topo">
+    <div class="node" id="nodeA">
+      <div class="node-title">设备 A <span class="chip" id="modeA">--</span></div>
+      <div class="node-row">SSID <b id="ssidA">-</b></div>
+      <div class="node-row">连接 <b class="conn" id="connA">OFFLINE</b></div>
+      <div class="rssi-bar" id="rssiA"><i></i><i></i><i></i><i></i></div>
+      <div class="node-row small">TX <span id="txA">0</span> · RX <span id="rxA">0</span> · 运行 <span id="upA">0s</span></div>
+    </div>
+    <div class="link">
+      <div class="link-label">虚拟空口 (UART)</div>
+      <div class="flow"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="link-state" id="linkState">--</div>
+    </div>
+    <div class="node" id="nodeB">
+      <div class="node-title">设备 B <span class="chip" id="modeB">--</span></div>
+      <div class="node-row">SSID <b id="ssidB">-</b></div>
+      <div class="node-row">连接 <b class="conn" id="connB">OFFLINE</b></div>
+      <div class="rssi-bar" id="rssiB"><i></i><i></i><i></i><i></i></div>
+      <div class="node-row small">TX <span id="txB">0</span> · RX <span id="rxB">0</span> · 运行 <span id="upB">0s</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 双设备面板 ============ -->
+<section id="panels">
+  <div class="card panel" id="panelA">
+    <h3>设备 A <span class="chip" id="chipA">COM?</span> <span class="conn badge" id="badgeA">OFFLINE</span></h3>
+    <div class="console"><pre id="consoleA"></pre></div>
+    <div class="cmdrow">
+      <input id="cmdA" placeholder="AT 命令，如 AT+MODE=AP" autocomplete="off">
+      <button class="btn send" data-dev="A">发送</button>
+    </div>
+    <div class="quick" data-dev="A">
+      <button data-cmd="AT+MODE?">MODE?</button>
+      <button data-cmd="AT+CONN_STATE">CONN</button>
+      <button data-cmd="AT+RSSI">RSSI</button>
+      <button data-cmd="AT+SSID?">SSID?</button>
+      <button data-cmd="AT+PAIR=1">PAIR=1</button>
+      <button data-cmd="AT+PAIR=0">PAIR=0</button>
+      <button data-cmd="AT+WNBCFG">WNBCFG</button>
+    </div>
+  </div>
+  <div class="card panel" id="panelB">
+    <h3>设备 B <span class="chip" id="chipB">COM?</span> <span class="conn badge" id="badgeB">OFFLINE</span></h3>
+    <div class="console"><pre id="consoleB"></pre></div>
+    <div class="cmdrow">
+      <input id="cmdB" placeholder="AT 命令，如 AT+MODE=STA" autocomplete="off">
+      <button class="btn send" data-dev="B">发送</button>
+    </div>
+    <div class="quick" data-dev="B">
+      <button data-cmd="AT+MODE?">MODE?</button>
+      <button data-cmd="AT+CONN_STATE">CONN</button>
+      <button data-cmd="AT+RSSI">RSSI</button>
+      <button data-cmd="AT+SSID?">SSID?</button>
+      <button data-cmd="AT+PAIR=1">PAIR=1</button>
+      <button data-cmd="AT+PAIR=0">PAIR=0</button>
+      <button data-cmd="AT+WNBCFG">WNBCFG</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 帧监视器 ============ -->
+<section class="card" id="framesec">
+  <h3>帧监视器 <span class="hint">(需开启“帧监视”，走 AT+SYSDBG=WNB)</span></h3>
+  <table id="frameTable">
+    <thead><tr><th>时间</th><th>方向</th><th>目的MAC</th><th>源MAC</th><th>类型</th><th>长度</th><th>Hex</th></tr></thead>
+    <tbody id="frameList"></tbody>
+  </table>
+</section>
+
+<!-- ============ 配置面板 ============ -->
+<section class="card" id="configsec">
+  <h3>配置面板 <span class="hint">(生成 AT 命令下发)</span></h3>
+  <div class="config-row">
+    <label>设备 <select id="cfgDevice"><option value="A">A</option><option value="B">B</option></select></label>
+    <label>模式 <select id="cfgMode"><option value="AP">AP</option><option value="STA" selected>STA</option><option value="APSTA">APSTA</option><option value="GROUP">GROUP</option></select></label>
+    <label>SSID <input id="cfgSsid" value="halowlink"></label>
+    <label>加密
+      <select id="cfgKey"><option value="NONE" selected>NONE</option><option value="WPA-PSK">WPA-PSK</option></select>
+    </label>
+    <label>PSK(64hex) <input id="cfgPsk" placeholder="WPA-PSK 时填写"></label>
+    <label>带宽
+      <select id="cfgBw"><option>1</option><option>2</option><option>4</option><option selected>8</option></select>
+    </label>
+    <label>信道 <input id="cfgChan" value="9080"></label>
+    <button class="btn primary" id="btnApply">应用配置</button>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

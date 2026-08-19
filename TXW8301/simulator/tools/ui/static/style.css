@@ -1,0 +1,121 @@
+/* TXW8301 模拟器 UI — 深色仪表盘主题 */
+:root {
+  --bg: #0f1420;
+  --card: #161d2e;
+  --line: #26314a;
+  --fg: #d7e0f0;
+  --dim: #8b97b3;
+  --acc: #3ea6ff;
+  --ok: #37d67a;
+  --warn: #ffb020;
+  --err: #ff5d5d;
+  --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.5 "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: #0b0f1a; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 5;
+}
+.brand { font-size: 16px; font-weight: 700; }
+.brand .sub { font-weight: 400; font-size: 12px; color: var(--dim); margin-left: 8px; }
+.tools { display: flex; gap: 8px; align-items: center; }
+.badge {
+  padding: 2px 10px; border-radius: 10px; font-size: 12px;
+  background: #2a3145; color: var(--dim);
+}
+.badge.ok { background: #16351f; color: var(--ok); }
+.btn {
+  background: #22304a; color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px;
+}
+.btn:hover { background: #2c3d5e; }
+.btn.primary { background: var(--acc); color: #06121f; font-weight: 600; }
+.btn.on { background: #16351f; color: var(--ok); border-color: var(--ok); }
+
+main, body > section { padding: 0 16px; }
+section.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 16px; margin: 12px 16px;
+}
+h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); }
+.hint { color: var(--dim); font-weight: 400; font-size: 12px; }
+
+/* ---------- 拓扑 ---------- */
+.topo { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 10px 0; }
+.node {
+  width: 210px; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 10px; background: #10162a; transition: box-shadow .2s, border-color .2s;
+}
+.node.linked { border-color: var(--ok); box-shadow: 0 0 12px rgba(55,214,122,.25); }
+.node.flash { border-color: var(--acc); box-shadow: 0 0 14px rgba(62,166,255,.5); }
+.node-title { font-weight: 700; margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
+.node-row { font-size: 13px; color: var(--dim); margin: 2px 0; }
+.node-row b { color: var(--fg); font-weight: 600; }
+.node-row.small { font-size: 12px; }
+.chip {
+  background: #22304a; border-radius: 8px; padding: 1px 8px; font-size: 11px; color: var(--acc);
+}
+.conn { color: var(--dim); }
+.conn.ok { color: var(--ok); }
+.conn.scan { color: var(--warn); }
+.conn.pair { color: var(--acc); }
+.rssi-bar { display: flex; gap: 3px; margin: 8px 0; height: 10px; }
+.rssi-bar i { flex: 1; background: #26314a; border-radius: 2px; }
+.rssi-bar i.on { background: var(--ok); }
+
+.link { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 160px; }
+.link-label { color: var(--dim); font-size: 12px; }
+.link-state { color: var(--dim); font-size: 12px; }
+.link-state.ok { color: var(--ok); }
+.flow { display: flex; gap: 6px; }
+.flow span { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.flow.active span { background: var(--acc); animation: flow 1s linear infinite; }
+.flow.active span:nth-child(2) { animation-delay: .2s; }
+.flow.active span:nth-child(3) { animation-delay: .4s; }
+.flow.active span:nth-child(4) { animation-delay: .6s; }
+.flow.active span:nth-child(5) { animation-delay: .8s; }
+@keyframes flow { 0% { opacity: .2; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.2); } 100% { opacity: .2; transform: scale(.8); } }
+
+/* ---------- 面板 ---------- */
+#panels { display: flex; gap: 12px; margin: 0 16px; }
+.panel { flex: 1; }
+.console {
+  background: #0a0f1c; border: 1px solid var(--line); border-radius: 8px;
+  height: 220px; overflow: auto; padding: 8px 10px; margin: 8px 0;
+}
+.console pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: #b8c6e2; }
+.cmdrow { display: flex; gap: 8px; }
+.cmdrow input {
+  flex: 1; background: #0a0f1c; border: 1px solid var(--line); color: var(--fg);
+  border-radius: 6px; padding: 6px 10px; font: 13px var(--mono);
+}
+.cmdrow input:focus { outline: none; border-color: var(--acc); }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.quick button {
+  background: #1b2538; color: var(--dim); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 9px; font: 12px var(--mono); cursor: pointer;
+}
+.quick button:hover { color: var(--fg); border-color: var(--acc); }
+
+/* ---------- 帧表 ---------- */
+#frameTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+#frameTable th, #frameTable td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #1e2740; }
+#frameTable th { color: var(--dim); font-weight: 600; }
+.mono { font-family: var(--mono); }
+.hex { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir.rx { color: var(--acc); }
+.dir.tx { color: var(--warn); }
+
+/* ---------- 配置 ---------- */
+.config-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.config-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+.config-row select, .config-row input {
+  background: #0a0f1c; border: 1px solid var(--line); color: var(--fg);
+  border-radius: 6px; padding: 5px 8px; min-width: 110px;
+}
+.config-row select:focus, .config-row input:focus { outline: none; border-color: var(--acc); }

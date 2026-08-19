@@ -1,0 +1,21 @@
+# 编译产物
+firmware/build/
+firmware/*.elf
+firmware/*.bin
+firmware/*.hex
+firmware/*.map
+firmware/*.lst
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Fritzing 备份
+*.fzz~

@@ -1,0 +1,23 @@
+== 1. AT 基础 ==
+  [PASS] A 返回 OK
+  [PASS] A VERSION
+  [PASS] A MODE=AP
+  [PASS] A SSID
+== 2. 自动连接（AP+STA 同 SSID） ==
+  [PASS] B MODE=STA
+  [PASS] B CONNECTED
+  [PASS] B 收到 +CONNECTED 事件
+  [PASS] A CONNECTED(有STA)
+== 3. 数据转发（B 发 -> A 收） ==
+  [PASS] A 收到数据帧  (len=27)
+  [PASS] A 控制台输出 FRAME:RX
+  [PASS] B 控制台输出 FRAME:TX
+== 4. 配对（清配置后 PAIR=1） ==
+  [PASS] B 收到 +PAIR SUCCESS
+  [PASS] B 已获取 AP 的 SSID
+  [PASS] B 配对后连接
+== 5. 收尾 ==
+
+结果: 14/14 通过
+
+--- stderr ---

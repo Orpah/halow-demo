@@ -1,0 +1,123 @@
+# 快速开始
+
+本文覆盖：编译固件 → 烧录 → 两板联调 → 上位机工具使用。
+
+## 0. 无硬件：PC 版模拟器（最快体验）
+
+开发板未到也能完整跑通 AT / 连接 / 数据通路 / 帧监视：
+
+```bash
+cd tools/ui
+python server.py --host-sim     # 进程内启动 A(AP)+B(STA) 两台 PC 模拟器，自动配对
+# 浏览器打开 http://127.0.0.1:8899/
+```
+
+- 双机拓扑立即显示 CONNECTED；帧监视开启后，在设备 A 控制台
+  `AT+TXDATA=20` + 20 字节原始数据，帧监视器显示 A `TX` / B `RX`。
+- `host/sim.py` 是固件逻辑的 Python 移植，与固件共用同一套
+  AT 命令 / 帧格式（`AA 55 TYPE LEN CRC`）/ 状态机，可交叉验证。
+- 回归测试：`python host/run_tests.py`（14/14 通过）。
+- 详细见 `tools/ui/README.md`。
+
+## 1. 准备
+
+- **硬件**：按 `hardware/`（Fritzing 元件 `.fzpz` + 搭建指南 + BOM + docs/hardware.md 接线）准备 1~2 块板。
+- **烧录器**：WCH-Link（SWD 四线：3.3V / SWDIO / SWCLK / GND）。
+- **工具链**：`riscv-none-elf-gcc`（MounRiver 自带，或 xPack 版）。见 `firmware/README.md`。
+- **Python 3 + pyserial**（上位机工具）。
+
+## 2. 编译固件
+
+```bash
+cd firmware
+make                 # 生成 build/txw8301-sim.bin
+```
+
+工具链路径在 `Makefile` 顶部 `RISCV_PREFIX` / `CROSS_COMPILE` 配置。
+
+## 3. 烧录
+
+方式 A（推荐，WCH-Link）：
+```bash
+# 用 WCH 的 ISP/下载工具或 openocd 均可；MounRiver 里直接点下载
+openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \
+        -c "program build/txw8301-sim.bin 0x08000000 verify reset exit"
+```
+
+方式 B（串口 ISP，可选）：连接 BOOT0 到高，用 WCHISPTool 通过 USB-C 烧录，
+烧完把 BOOT0 拉回低复位。
+
+## 4. 单板自检（可选）
+
+- 上电：PWR（若有）亮，CONN 灯灭。
+- PC 打开串口（CH340C，115200 8N1），发送 `AT` → 返回 `OK`。
+- `AT+VERSION` → 返回模拟器版本。
+
+## 5. 两板联调（AP + STA）
+
+### 接线
+
+```
+[模拟器 A · AP]                     [模拟器 B · STA]
+  PA2(TX2) ────────────────▶ PA3(RX2)
+  PA3(RX2) ◀──────────────── PA2(TX2)
+  GND     ──────── GND ────── GND
+```
+
+PC 用两根 USB 线分别接 A/B 的 CH340C 控制台。
+
+### 配置（命令行）
+
+```bash
+# 板 A 为 AP，板 B 为 STA，同 SSID/带宽/频率，无加密
+python tools/sim_config.py COM3 ap  --ssid halowlink --freq 9080 --bw 8 --open
+python tools/sim_config.py COM4 sta --ssid halowlink --freq 9080 --bw 8 --open
+```
+
+或手动 AT：
+
+```
+A: AT+MODE=AP
+A: AT+SSID=halowlink
+A: AT+BSS_BW=8
+A: AT+CHAN_LIST=9080
+B: AT+MODE=STA
+B: AT+SSID=halowlink
+B: AT+BSS_BW=8
+B: AT+CHAN_LIST=9080
+```
+
+### 验证
+
+```bash
+python tools/sim_config.py COM4 status
+# 期望看到 CONN_STATE:CONNECTED 和合理 RSSI
+```
+
+- 板 A CONN 灯亮，板 B CONN 灯亮；两侧 RSSI 灯按模拟信号强度点亮。
+- 未配对用 `AT+PAIR=1`（双端同时开）也能快速配对。
+
+## 6. 数据联调（SPI 宿主总线）
+
+1. Host（你的 MCU 或 USB-SPI 适配器，如 CH341A/CH347A）接模拟器 SPI 口。
+2. 按 `docs/spi_protocol.md` 组帧：
+   - `SET_CFG` / `AT_CMD` 配置；
+   - `DATA_TX` 发以太网帧（≥14B 头）；
+   - 观察对端模拟器 `IRQ` 拉高 → `DATA_RX` 取帧。
+3. 用 `tools/sim_config.py` 的 `--bus spi` 走 CH341A 通道（见 tools/README.md）。
+
+## 7. 常见问题
+
+| 现象 | 原因 / 处理 |
+|------|-------------|
+| 串口无 `OK` | 波特率不对（应为 115200）/ 线没接 / BOOT0 状态异常 |
+| 两板连不上 | 确认 SSID、BSS_BW、CHAN_LIST 一致；虚拟空口 TX↔RX 交叉且共地 |
+| `AT+RSSI` 恒定 | 模拟 RSSI 默认固定，可在 `sim_cfg` 调整或注入 |
+| CONN 灯不亮 | 检查 PC13 接线与 `board.h` 中 `CONN_LED_ACTIVE_LOW` |
+| SPI 无应答 | 检查模式 0、CS/IRQ 电平、`AT_CMD` 需以 `\r\n` 结尾 |
+
+## 8. 出厂复位
+
+```bash
+python tools/sim_config.py COM3 reset   # AT+LOADDEF=1，恢复默认并重启
+```
