@@ -226,7 +226,34 @@ class Console:
 
 
 # ---------------------------------------------------------------------------
-# 虚拟空口（TCP，帧格式与固件 sim_link 一致）
+# 空口串口适配：把 pyserial 包装成与 socket 兼容的接口（帧格式同 TCP 空口）
+# ---------------------------------------------------------------------------
+class _SerialPeer:
+    """把 pyserial 包装成与 socket 兼容的 recv/sendall 接口，供 Link 使用。
+    帧格式与 TCP 空口完全一致（AA 55 TYPE LEN CRC），因此 PC 模拟器可直接
+    接到真实 CH32V203 板的 UART2 上（需 USB 转串口）自动建链。"""
+    is_serial = True
+
+    def __init__(self, ser, port, baud):
+        self.ser = ser
+        self.link_port = port
+        self.link_baud = baud
+
+    def recv(self, n):
+        return self.ser.read(n)
+
+    def sendall(self, data):
+        self.ser.write(data)
+
+    def close(self):
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# 虚拟空口（TCP 或串口，帧格式与固件 sim_link 一致）
 # ---------------------------------------------------------------------------
 class Link:
     def __init__(self, core):
@@ -263,16 +290,42 @@ class Link:
         self.core.out("log", "[link] 连接对端失败")
         return False
 
+    def open_serial(self, port, baud=115200):
+        """打开串口空口，连接真实 CH32V203 板的 UART2。
+        真机未插/端口未就绪时，后台每 2s 自动重试（自动建链）。"""
+        def _try():
+            while True:
+                try:
+                    import serial
+                    ser = serial.Serial(port, baud, timeout=0.05, write_timeout=1.0)
+                    ser.reset_input_buffer()
+                    self.sock = _SerialPeer(ser, port, baud)
+                    self.core.out("log", f"[{self.core.name}] 串口空口已连接 {port} @{baud}")
+                    threading.Thread(target=self._reader, args=(self.sock,),
+                                     daemon=True).start()
+                    return
+                except Exception:
+                    self.core.out("log", f"[{self.core.name}] 等待串口空口 {port} …")
+                    time.sleep(2)
+
+        threading.Thread(target=_try, daemon=True).start()
+
     def _reader(self, c):
         try:
             while True:
                 data = c.recv(4096)
                 if not data:
+                    if getattr(c, "is_serial", False):
+                        time.sleep(0.01)    # 串口空闲（无数据）不算断开
+                        continue
                     break
                 self.feed(data)
         except OSError:
             pass          # 对端断开或连接错误
         self.sock = None
+        # 串口空口断开后自动重连（如真机掉线/重新上电）
+        if getattr(c, "is_serial", False):
+            self.open_serial(c.link_port, c.link_baud)
 
     def _frame(self, t, payload):
         p = bytes(payload)
@@ -530,8 +583,9 @@ class Wifi:
 # AT 引擎（对应固件 sim_at）
 # ---------------------------------------------------------------------------
 class At:
-    def __init__(self, core):
+    def __init__(self, core, tj45=False):
         self.core = core
+        self.tj45 = tj45
         self.dbg_lmac = 0
         self.dbg_wnb = 0
         self.txdata = None       # None 或 (len, buf)
@@ -546,13 +600,16 @@ class At:
         self.out("ERROR")
 
     def resp(self, key, val):
-        self.out(f"{key}:{val}")
+        # T-Halow-RJ45 状态响应带 + 前缀（如 +MODE:AP），便于 thalow_config.py
+        # 等真实板工具直接对 PC 模拟器使用。
+        self.out(f"{'+' if self.tj45 else ''}{key}:{val}")
         self.ok()
 
     # ---------------- handlers ----------------
     def h_mode(self, a):
         c = self.core.cfg
-        if a == "?":
+        # T-Halow-RJ45 用裸 AT+MODE 查询当前模式（thalow_config.py 的 resync/status）
+        if a == "?" or (self.tj45 and a == ""):
             self.resp("MODE", MODE_STR.get(c.mode, "?"))
             return
         m = {"AP": MODE_AP, "STA": MODE_STA, "APSTA": MODE_APSTA, "GROUP": MODE_GROUP}.get(a.upper())
@@ -919,13 +976,15 @@ At.TABLE = {
 # 核心：组装 + 主循环
 # ---------------------------------------------------------------------------
 class Core:
-    def __init__(self, name, role, console_port, link_port, peer_link, autoconf=True):
+    def __init__(self, name, role, console_port, link_port, peer_link,
+                 autoconf=True, tj45=False, link_serial=None, link_baud=115200):
         self.name = name
+        self.tj45 = tj45
         self.cfg = SimCfg()
         if role.upper() in ("AP", "STA", "APSTA", "GROUP"):
             self.cfg.mode = {"AP": MODE_AP, "STA": MODE_STA,
                              "APSTA": MODE_APSTA, "GROUP": MODE_GROUP}[role.upper()]
-        self.at = At(self)
+        self.at = At(self, tj45=tj45)
         self.wifi = Wifi(self)
         self.link = Link(self)
         self.console = Console(console_port, self.at.run,
@@ -934,11 +993,18 @@ class Core:
         self._t0 = time.monotonic()
         self._last5 = 0.0
         self._last_stats = 0.0
-        self.link.listen(link_port)
-        if peer_link:
-            threading.Thread(target=self.link.connect, args=(peer_link,), daemon=True).start()
+        if link_serial:
+            # 串口空口：直接连真实 CH32V203 板的 UART2（自动重连），不走 TCP
+            self.link.open_serial(link_serial, link_baud)
+            self.link_port_desc = f"serial:{link_serial}"
+        else:
+            self.link.listen(link_port)
+            self.link_port_desc = f"tcp:{link_port}"
+            if peer_link:
+                threading.Thread(target=self.link.connect, args=(peer_link,),
+                                 daemon=True).start()
         self.console.start()
-        self.out("log", f"[{self.name}] TXW8301 模拟器 PC 版启动 (AT 控制台 :{console_port}, 空口 :{link_port})")
+        self.out("log", f"[{self.name}] TXW8301 模拟器 PC 版启动 (AT 控制台 :{console_port}, 空口 {self.link_port_desc})")
         if autoconf:
             self._autoconf()
 
@@ -988,6 +1054,13 @@ def main():
     ap.add_argument("--link", type=int, default=9011, help="虚拟空口 TCP 端口")
     ap.add_argument("--peer", default=None, help="对端空口 host:port（连接方）")
     ap.add_argument("--ssid", default="halowlink")
+    ap.add_argument("--tj45", action="store_true",
+                    help="T-Halow-RJ45 兼容模式：状态响应带 + 前缀（+MODE:AP 等），"
+                         "使 thalow_config.py 等真实板工具可直接使用")
+    ap.add_argument("--link-serial", default=None,
+                    help="串口空口（连真实 CH32V203 板的 UART2，需 USB 转串口），如 COM5；"
+                         "设置后不再使用 TCP 空口")
+    ap.add_argument("--link-baud", type=int, default=115200)
     args = ap.parse_args()
 
     peer = None
@@ -995,7 +1068,8 @@ def main():
         host, _, port = args.peer.partition(":")
         peer = (host, int(port))
 
-    core = Core(args.name, args.role, args.console, args.link, peer)
+    core = Core(args.name, args.role, args.console, args.link, peer, tj45=args.tj45,
+                link_serial=args.link_serial, link_baud=args.link_baud)
     core.cfg.ssid = args.ssid
     print(f"[{args.name}] 就绪: AT 控制台 127.0.0.1:{args.console}  空口 :{args.link}")
     core.loop()

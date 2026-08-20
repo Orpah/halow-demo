@@ -8,7 +8,7 @@
 </head>
 <body>
 <header>
-  <div class="brand">📡 TXW8301 模拟器 <span class="sub">CH32V203 · 无射频 · 虚拟空口</span></div>
+  <div class="brand">📡 TXW8301 模拟器 <span class="sub" id="bannerSub">CH32V203 · 无射频 · 虚拟空口</span></div>
   <div class="tools">
     <span id="srvstatus" class="badge">未连接</span>
     <button id="btnClearConsole" class="btn">清空控制台</button>
@@ -21,19 +21,25 @@
 <section id="topology" class="card">
   <div class="topo">
     <div class="node" id="nodeA">
-      <div class="node-title">设备 A <span class="chip" id="modeA">--</span></div>
+      <div class="node-title">设备 A
+        <span class="chip" id="typeA">--</span><span class="chip" id="modeA">--</span>
+      </div>
+      <div class="node-row small" id="portA">--</div>
       <div class="node-row">SSID <b id="ssidA">-</b></div>
       <div class="node-row">连接 <b class="conn" id="connA">OFFLINE</b></div>
       <div class="rssi-bar" id="rssiA"><i></i><i></i><i></i><i></i></div>
       <div class="node-row small">TX <span id="txA">0</span> · RX <span id="rxA">0</span> · 运行 <span id="upA">0s</span></div>
     </div>
     <div class="link">
-      <div class="link-label">虚拟空口 (UART)</div>
+      <div class="link-label" id="linkLabel">虚拟空口 (TCP)</div>
       <div class="flow"><span></span><span></span><span></span><span></span><span></span></div>
       <div class="link-state" id="linkState">--</div>
     </div>
     <div class="node" id="nodeB">
-      <div class="node-title">设备 B <span class="chip" id="modeB">--</span></div>
+      <div class="node-title">设备 B
+        <span class="chip" id="typeB">--</span><span class="chip" id="modeB">--</span>
+      </div>
+      <div class="node-row small" id="portB">--</div>
       <div class="node-row">SSID <b id="ssidB">-</b></div>
       <div class="node-row">连接 <b class="conn" id="connB">OFFLINE</b></div>
       <div class="rssi-bar" id="rssiB"><i></i><i></i><i></i><i></i></div>
@@ -45,7 +51,7 @@
 <!-- ============ 双设备面板 ============ -->
 <section id="panels">
   <div class="card panel" id="panelA">
-    <h3>设备 A <span class="chip" id="chipA">COM?</span> <span class="conn badge" id="badgeA">OFFLINE</span></h3>
+    <h3>设备 A 控制台</h3>
     <div class="console"><pre id="consoleA"></pre></div>
     <div class="cmdrow">
       <input id="cmdA" placeholder="AT 命令，如 AT+MODE=AP" autocomplete="off">
@@ -62,7 +68,7 @@
     </div>
   </div>
   <div class="card panel" id="panelB">
-    <h3>设备 B <span class="chip" id="chipB">COM?</span> <span class="conn badge" id="badgeB">OFFLINE</span></h3>
+    <h3>设备 B 控制台</h3>
     <div class="console"><pre id="consoleB"></pre></div>
     <div class="cmdrow">
       <input id="cmdB" placeholder="AT 命令，如 AT+MODE=STA" autocomplete="off">

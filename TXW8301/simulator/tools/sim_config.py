@@ -17,6 +17,10 @@ sim_config.py — 配置 / 调试 TXW8301 模拟器（CH32V203）
   python sim_config.py COM4 reset
   python sim_config.py COM4 at  "AT+CHAN_LIST=9080,9160"
 
+  # T-Halow-RJ45 真实板（同一套命令，--variant tj45 自动关调试刷屏）
+  python sim_config.py COM3 status --variant tj45
+  python sim_config.py COM3 ap --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
+
   # SPI（CH341A，实验性）
   python sim_config.py spi ap  --ssid halowlink --freq 9080 --bw 8 --open
   python sim_config.py spi status
@@ -84,9 +88,16 @@ class UartTransport:
             self.ser.write(b"\x55" * 1700)
             time.sleep(0.2)
             self.read_for(0.4)
-            if "+MODE" in self.cmd("AT+MODE", 1.0):
+            r = self.cmd("AT+MODE", 1.0)
+            # 兼容本模拟器(MODE:AP) 与 T-Halow-RJ45(+MODE:AP)
+            if "+MODE" in r or "MODE:" in r:
                 return True
         return False
+
+    def quiet(self):
+        """关闭 T-Halow-RJ45 的 LMAC/WNB 周期调试刷屏。"""
+        self.cmd("AT+SYSDBG=LMAC,0")
+        self.cmd("AT+SYSDBG=WNB,0")
 
     def close(self):
         self.ser.close()
@@ -291,6 +302,8 @@ def main():
     ap.add_argument("--psk", metavar="HEX64", help="WPA-PSK 64位hex")
     ap.add_argument("--line", default="", help="at 动作要发送的命令")
     ap.add_argument("--pid", type=lambda x: int(x, 0), default=None, help="CH341A PID（SPI）")
+    ap.add_argument("--variant", default="sim", choices=["sim", "tj45"],
+                    help="sim=本模拟器；tj45=T-Halow-RJ45 真实板（自动关闭调试刷屏）")
     args = ap.parse_args()
 
     if args.action == "list":
@@ -308,6 +321,9 @@ def main():
         if not HAS_PYSERIAL:
             sys.exit("需要 pyserial：pip install pyserial")
         t = UartTransport(args.target)
+        if args.variant == "tj45":
+            print("目标 T-Halow-RJ45：关闭 LMAC/WNB 调试输出。")
+            t.quiet()
 
     try:
         if args.action in ("ap", "sta"):

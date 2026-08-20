@@ -109,7 +109,45 @@ python server.py --host-sim        # 进程内启动 AP+STA 两台 PC 模拟器�
   也用于交叉验证固件逻辑（曾发现 3 处固件 bug：beacon 长度、查询解析、配对格式）。
 - 帧监视：点"帧监视: 开"后，在设备 A 控制台发 `AT+TXDATA=20` + 20 字节原始数据，
   即可在帧监视器看到 A `TX` / B `RX` 两条记录（无硬件演示数据通路）。
-- 回归测试：`python host/run_tests.py`（14/14 通过）。
+- 回归测试：`python host/run_tests.py`（24/24 通过）。
+- 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）、`docs/ui_hostsim_demo.png`、
+  `docs/ui_hostsim_tj45_demo.png`。
+
+## 支持 T-Halow-RJ45 与混合设备
+
+A/B 两台设备可**逐台独立**指定「来源×目标」：`pc / pc:tj45 / COM3 / COM3:tj45`
+（= CH32V203 虚拟机 / T-Halow-RJ45 虚拟机 / CH32V203 真机 / T-Halow-RJ45 真机）：
+
+```bash
+# Web UI：任意组合
+python tools/ui/server.py --a pc --b pc:tj45      # A=CH32V203虚拟, B=T-Halow虚拟
+python tools/ui/server.py --a COM3 --b COM4:tj45  # A=CH32V203真机, B=T-Halow真机
+
+# PC 模拟器扮演 T-Halow-RJ45（状态带 + 前缀，T-Halow 的 thalow_config.py 可直接用）
+python host/sim.py --name A --role AP --console 9001 --link 9011 --tj45
+
+# 命令行配置真实板（--variant tj45 自动关调试刷屏）
+python tools/sim_config.py COM3 ap --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
+```
+
+关键兼容点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`）且用裸命令查询
+（`AT+MODE`、`AT+VERSION`）；`--tj45` 模式与 UI 逐台规格已对齐。
+
+### PC ↔ 真实 CH32V203 板建链（串口空口）
+
+PC 模拟器空口可改走**串口**直连真实 CH32V203 模拟器板的 UART2（帧格式完全一致，自动
+打开/重连，自动建链；手动用 `AT+PAIR=1`）：
+
+```bash
+# A=PC 模拟器（空口走 COM5，接真机 B 的 UART2），B=真机（AT 控制台 COM4）
+python tools/ui/server.py --a pc --a-link COM5 --b COM4
+```
+
+接线：`板 UART2(PA2 TX/PA3 RX) → USB转串口 → PC COM`，共地 GND。
+> T-Halow-RJ45 真机是射频，无空口串口可桥接，不能与 PC 模拟器建链。
+
+> 互联域：PC↔PC 走虚拟空口；真机↔真机走物理 UART2/RF；PC 与真机（CH32V203 板）
+> 可通过 `--a-link/--b-link` 串口空口建链；UI 可同时管理任意组合。
 
 ---
 

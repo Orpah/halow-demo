@@ -135,7 +135,92 @@ def main():
     b.pump(1.0)
     check("B 配对后连接", "CONN_STATE:CONNECTED" in b.buf)
 
-    print("== 5. 收尾 ==")
+    print("== 5. T-Halow-RJ45 兼容模式（--tj45：状态带 + 前缀） ==")
+    coreT = sim.Core("T", "AP", 9301, 9311, None, tj45=True)
+    threading.Thread(target=loop, args=(coreT,), daemon=True).start()
+    time.sleep(0.4)
+    t = Client(9301)
+    t.send("AT+MODE")                     # 裸命令查询（thalow_config.py resync/status 用）
+    check("T 裸 AT+MODE -> +MODE:AP", t.contains("+MODE:AP", 0.6))
+    t.send("AT+VERSION")
+    t.pump(0.4)
+    check("T AT+VERSION -> +VERSION:", "+VERSION:" in t.buf)
+    t.send("AT+CONN_STATE")
+    t.pump(0.4)
+    check("T AT+CONN_STATE -> +CONN_STATE:", "+CONN_STATE:" in t.buf)
+    t.send("AT+RSSI")
+    t.pump(0.4)
+    check("T AT+RSSI -> +RSSI:", "+RSSI:" in t.buf)
+    t.send("AT+RSSI?")                    # 查询形式也兼容
+    t.pump(0.4)
+    check("T AT+RSSI? 兼容", "+RSSI:" in t.buf)
+    t.send("AT+VERSION=?")                # 真实板文档写法
+    t.pump(0.4)
+    check("T AT+VERSION=? 兼容", "+VERSION:" in t.buf)
+    t.close = None
+    t.s.close()
+
+    print("== 6. 串口空口（PC <-> 真实 CH32V203 板 UART2） ==")
+    # 用 socketpair 模拟串口线：A/B 两个 core 都走 Link 的串口传输（_SerialPeer）。
+    # 只关心链路是否通过"串口"建立（beacon/assoc/连接 + 数据帧）。
+    import serial as _rs
+    _real_serial = _rs.Serial
+    _sa, _sb = socket.socketpair()
+    _sa.setblocking(False)
+    _sb.setblocking(False)
+
+    class _FakeSerial:
+        def __init__(self, port, baud=115200, **kw):
+            self.s = _sa if port == "SERA" else _sb
+        def reset_input_buffer(self):
+            pass
+        def read(self, n):
+            try:
+                return self.s.recv(n)
+            except BlockingIOError:
+                return b""
+        def write(self, data):
+            self.s.sendall(data)
+        def close(self):
+            pass
+
+    _rs.Serial = _FakeSerial            # 让 Link.open_serial 用假串口
+    try:
+        coreSA = sim.Core("SA", "AP", 9401, 9411, None, link_serial="SERA")
+        coreSB = sim.Core("SB", "STA", 9402, 9412, None, link_serial="SERB")
+    finally:
+        _rs.Serial = _real_serial
+
+    threading.Thread(target=loop, args=(coreSA,), daemon=True).start()
+    threading.Thread(target=loop, args=(coreSB,), daemon=True).start()
+    time.sleep(2.5)                     # 等串口打开 + beacon + 关联
+
+    sa = Client(9401)
+    sb = Client(9402)
+    sb.send("AT+CONN_STATE")
+    sb.pump(1.0)
+    check("串口空口 B(STA) CONNECTED", "CONN_STATE:CONNECTED" in sb.buf)
+    sa.send("AT+CONN_STATE")
+    sa.pump(1.0)
+    check("串口空口 A(AP) CONNECTED", "CONN_STATE:CONNECTED" in sa.buf)
+
+    # 数据帧经串口空口转发（广播帧 dst=FF*6，模拟器会正确过滤单播）
+    sa.send("AT+SYSDBG=WNB,1")
+    sb.send("AT+SYSDBG=WNB,1")
+    time.sleep(0.3)
+    sa.send("AT+TXDATA=20")
+    sa.pump(0.3)
+    sa.send_raw(bytes([0xFF] * 6) + bytes(range(14)))   # 20B：广播目的MAC + 载荷
+    time.sleep(0.6)
+    rx = coreSB.wifi.take_rx()
+    check("串口空口 B 收到数据帧", rx is not None and len(rx) == 20,
+          f"len={len(rx) if rx else 0}")
+    sa.pump(1.0)
+    check("串口空口 A 输出 FRAME:TX", "FRAME:TX" in sa.buf)
+    sa.s.close()
+    sb.s.close()
+
+    print("== 7. 收尾 ==")
     stop.set()
     a.s.close()
     b.s.close()

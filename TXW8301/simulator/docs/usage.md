@@ -16,8 +16,40 @@ python server.py --host-sim     # 进程内启动 A(AP)+B(STA) 两台 PC 模拟�
   `AT+TXDATA=20` + 20 字节原始数据，帧监视器显示 A `TX` / B `RX`。
 - `host/sim.py` 是固件逻辑的 Python 移植，与固件共用同一套
   AT 命令 / 帧格式（`AA 55 TYPE LEN CRC`）/ 状态机，可交叉验证。
-- 回归测试：`python host/run_tests.py`（14/14 通过）。
+- 回归测试：`python host/run_tests.py`（24/24 通过，含 T-Halow-RJ45 与串口空口用例）。
+- 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）。
 - 详细见 `tools/ui/README.md`。
+
+## 0.1 支持 T-Halow-RJ45 与混合设备
+
+模拟器工具也能驱动 **真实的 T-Halow-RJ45 板**（手头没有 CH32V203 板时用它联调），
+且 A/B 可**逐台独立**指定「来源×目标」（CH32V203 虚拟机/真机、T-Halow-RJ45 虚拟机/真机）：
+
+```bash
+# 配置两块真实 T-Halow-RJ45（COM3=AP, COM4=STA；--variant tj45 自动关调试刷屏）
+python tools/sim_config.py COM3 ap  --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
+python tools/sim_config.py COM4 sta --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
+python tools/sim_config.py COM4 status --variant tj45
+
+# Web UI：逐台设备规格（pc / pc:tj45 / COM3 / COM3:tj45）
+python tools/ui/server.py --a pc --b pc:tj45              # A=CH32V203虚拟, B=T-Halow虚拟
+python tools/ui/server.py --a COM3 --b COM4:tj45          # A=CH32V203真机, B=T-Halow真机
+
+# PC 模拟器扮演 T-Halow-RJ45（状态带 + 前缀 +MODE:AP，T-Halow 的 thalow_config.py 可直接使用）
+python host/sim.py --name A --role AP --console 9001 --link 9011 --tj45
+python host/sim.py --name B --role STA --console 9002 --link 9012 --peer 127.0.0.1:9011 --tj45
+```
+
+关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
+查询（`AT+MODE`、`AT+VERSION`）；我们的 PC 模拟器 `--tj45` 模式完全对齐这两点。
+
+> **互联域限制**：只有「PC↔PC」能通过虚拟空口(TCP)互联；「真机↔真机」靠物理
+> UART2（CH32V203 模拟器板）或 RF（T-Halow-RJ45）互联；PC 与真机之间无法自动建链，
+> 但 UI 可同时管理任意组合（各自 AT/配置/状态照常可用）。
+>
+> **PC ↔ 真实 CH32V203 板**：PC 模拟器空口可改走**串口**直连板子 UART2 建链：
+> `server.py --a pc --a-link COM5 --b COM4`（A 空口走 COM5，B 真机 AT 在 COM4；
+> 板 UART2 经 USB 转串口接 PC）。自动打开/重连；T-Halow-RJ45 真机除外（射频）。
 
 ## 1. 准备
 

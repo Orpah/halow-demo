@@ -2,8 +2,10 @@
 "use strict";
 
 const state = {
-  A: { ok: false, conn: "OFFLINE", mode: "--", ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
-  B: { ok: false, conn: "OFFLINE", mode: "--", ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
+  A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
+  B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
 };
 const consoles = { A: [], B: [] };
 let frames = [];
@@ -21,6 +23,24 @@ function sendCmd(dev, line) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ device: dev, line: line }),
   }).catch(() => {});
+}
+
+/* ---------------- 顶部标题副文字（按目标动态） ---------------- */
+function loadBanner() {
+  fetch("/api/info")
+    .then((r) => r.json())
+    .then((info) => {
+      if (info && info.sub) $("bannerSub").textContent = info.sub;
+      if (info && info.devices) {
+        const links = Object.values(info.devices).map((d) => d.link || "");
+        const serial = links.find((l) => l.startsWith("串口"));
+        if (serial) $("linkLabel").textContent = serial;                 // 如 "串口 COM5"
+        else if (links.some((l) => l.startsWith("UART2")))
+          $("linkLabel").textContent = "UART2 物理空口";
+        else $("linkLabel").textContent = "虚拟空口 (TCP)";
+      }
+    })
+    .catch(() => {});
 }
 
 /* ---------------- SSE ---------------- */
@@ -61,13 +81,12 @@ function updateStatus(d) {
   const s = state[d];
   const connCls = { CONNECTED: "ok", SCANNING: "scan", ASSOCIATING: "scan",
                     PAIRING: "pair" }[s.conn] || "";
-  $(`badge${d}`).textContent = s.conn || "OFFLINE";
-  $(`badge${d}`).className = "conn badge " + connCls;
   $(`conn${d}`).textContent = s.conn || "OFFLINE";
   $(`conn${d}`).className = "conn " + connCls;
   $(`mode${d}`).textContent = s.mode || "--";
+  $(`type${d}`).textContent = s.type || "--";
+  $(`port${d}`).textContent = s.port || "--";
   $(`ssid${d}`).textContent = s.ssid || "-";
-  $(`chip${d}`).textContent = s.port || "COM?";
   $(`tx${d}`).textContent = s.tx ?? 0;
   $(`rx${d}`).textContent = s.rx ?? 0;
   $(`up${d}`).textContent = (s.uptime ?? 0) + "s";
@@ -218,6 +237,7 @@ window.addEventListener("load", () => {
     ["A", "B"].forEach((d) => { updateStatus(d); });
     updateTopology();
   }).catch(() => {});
+  loadBanner();
   bindUI();
   connectSSE();
 });
