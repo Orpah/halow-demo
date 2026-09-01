@@ -601,9 +601,11 @@ class At:
 
     def resp(self, key, val):
         # T-Halow-RJ45 状态响应带 + 前缀（如 +MODE:AP），便于 thalow_config.py
-        # 等真实板工具直接对 PC 模拟器使用。
+        # 等真实板工具直接对 PC 模拟器使用。查询只回状态行、不再追加 OK：
+        # 否则 UI 轮询（AT+CONN_STATE/AT+RSSI/AT+MODE?/AT+SSID?）会让控制台被 OK 刷屏。
         self.out(f"{'+' if self.tj45 else ''}{key}:{val}")
-        self.ok()
+        if not self.tj45:
+            self.ok()
 
     # ---------------- handlers ----------------
     def h_mode(self, a):

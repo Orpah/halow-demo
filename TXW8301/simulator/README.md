@@ -32,9 +32,7 @@ simulator/
 │   ├── toolchain.md           # 项目工具链（blender2step 工作流）
 │   └── usage.md               # 快速开始：编译、烧录、接线、联调
 ├── hardware/
-│   ├── parts/                 # Fritzing 自定义元件（CH32V203C8T6 / CH340C .fzpz）
-│   ├── gen_fritzing.py        # 元件生成脚本（可复现）
-│   └── BOM.md                 # 物料清单
+│   └── BOM.md                 # 物料清单（Fritzing 元件在 fritzing-parts-langhua 仓库）
 ├── firmware/
 │   ├── README.md              # 固件编译 / 烧录说明
 │   ├── Makefile               # riscv-none-elf-gcc 构建

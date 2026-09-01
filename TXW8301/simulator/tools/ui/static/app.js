@@ -17,12 +17,25 @@ const esc = (s) => String(s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtTime = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
 
-function sendCmd(dev, line) {
-  fetch("/api/command", {
+function fetchCmd(dev, line, hex) {
+  return fetch("/api/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ device: dev, line: line }),
+    body: JSON.stringify({ device: dev, line: line, hex: !!hex }),
   }).catch(() => {});
+}
+
+async function sendCmd(dev, line, hex) {
+  if (hex) {
+    // HEX 模式：自动先进入数据模式（AT+TXDATA=<字节数>），再发原始字节，避免漏步
+    const hexOnly = line.replace(/\s+/g, "");
+    const n = hexOnly.length / 2;
+    if (hexOnly.length % 2 !== 0) { alert("HEX 字节数必须是偶数"); return; }
+    if (n < 14) { alert("以太网帧最短 14 字节（6 目的MAC + 6 源MAC + 2 类型）"); return; }
+    await fetchCmd(dev, "AT+TXDATA=" + n, false);
+    await new Promise((r) => setTimeout(r, 600));   // 等 sim 建立数据模式（防轮询/时序竞争）
+  }
+  await fetchCmd(dev, line, !!hex);
 }
 
 /* ---------------- 顶部标题副文字（按目标动态） ---------------- */
@@ -208,7 +221,8 @@ function bindUI() {
     b.addEventListener("click", () => {
       const d = b.dataset.dev;
       const inp = $(`cmd${d}`);
-      if (inp.value.trim()) { sendCmd(d, inp.value.trim()); inp.value = ""; }
+      const hex = $(`hex${d}`).checked;
+      if (inp.value.trim()) { sendCmd(d, inp.value.trim(), hex); inp.value = ""; }
     }));
   ["A", "B"].forEach((d) =>
     $(`cmd${d}`).addEventListener("keydown", (e) => {

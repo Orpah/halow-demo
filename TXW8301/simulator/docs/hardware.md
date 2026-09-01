@@ -7,7 +7,8 @@ UART 虚拟空口 + LED/按键/拨码 + SWD 烧录。
 > 注意：CH32V203 **无 SDIO**，SPI 从机是宿主总线的现实选择（TXW8301 SDK 亦支持
 > `MACBUS_SPI`）。若日后需要 RMII 以太网（WNB 桥场景），应换 CH32V208/CH32V307。
 
-> Fritzing：自定义元件 `hardware/parts/*.fzpz` 可直接导入 Fritzing；
+> Fritzing：自定义元件在 `fritzing-parts-langhua` 仓库顶层 `fzpz/`
+> （`CH32V203C8T6.fzpz`、`CH340C.fzpz`）可直接导入 Fritzing；
 > 原理图组装步骤见 [docs/Fritzing_Build_Guide.md](Fritzing_Build_Guide.md)。
 
 ## 1. 原理框图

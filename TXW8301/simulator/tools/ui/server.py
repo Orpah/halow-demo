@@ -156,6 +156,9 @@ class SerialTransport:
     def send(self, line):
         self.ser.write((line + "\r\n").encode())
 
+    def send_raw(self, data):
+        self.ser.write(data)
+
     def read(self, maxbytes=4096):
         return self.ser.read(maxbytes)
 
@@ -173,6 +176,9 @@ class TcpTransport:
 
     def send(self, line):
         self.sock.sendall((line + "\r\n").encode())
+
+    def send_raw(self, data):
+        self.sock.sendall(data)
 
     def read(self, maxbytes=4096):
         try:
@@ -245,10 +251,26 @@ class Device:
         }
         self.t0 = time.time()
         self.buf = b""
+        self.poll_paused_until = 0.0   # 数据模式（AT+TXDATA）期间暂停轮询的时间戳
+        self._poll_until = 0.0         # 轮询响应窗口：窗口内到达的状态行不进控制台（避免刷屏）
 
     def send(self, line):
         try:
             self.transport.send(line)
+            return True
+        except Exception:
+            return False
+
+    def send_hex(self, hexstr):
+        """HEX 串（可含空格）→ 原始字节，直接写入传输（数据模式/二进制帧，如广播 FF*6）。"""
+        try:
+            raw = bytes.fromhex(hexstr)
+        except ValueError:
+            return False
+        if not hasattr(self.transport, "send_raw"):
+            return False
+        try:
+            self.transport.send_raw(raw)
             return True
         except Exception:
             return False
@@ -262,11 +284,12 @@ class Device:
         line = raw.strip()
         if not line:
             return
-        # 帧监视
+        # 帧监视：进帧监视器，同时显示到控制台（像真实串口：收发都在窗口）
         if line.startswith("FRAME:RX ") or line.startswith("FRAME:TX "):
             parts = line.split(" ", 1)          # ["FRAME:TX", "<hex>"]
             if len(parts) == 2:
                 self.push("frame", dir=parts[0][6:], hex=parts[1])
+                self.push("console", text=line)
             return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45）
         had_plus = line.startswith("+")
@@ -280,6 +303,8 @@ class Device:
                 self.state["ok"] = True
                 self.state["uptime"] = int(time.time() - self.t0)
                 self.push("status", state=dict(self.state))
+                if time.time() >= self._poll_until:
+                    self.push("console", text=line)
                 return
             if k == "RSSI":
                 try:
@@ -287,23 +312,34 @@ class Device:
                 except ValueError:
                     pass
                 self.push("status", state=dict(self.state))
+                if time.time() >= self._poll_until:
+                    self.push("console", text=line)
                 return
             if k == "MODE":
                 self.state["mode"] = v
                 self.push("status", state=dict(self.state))
+                if time.time() >= self._poll_until:
+                    self.push("console", text=line)
                 return
             if k == "SSID":
                 self.state["ssid"] = v
                 self.push("status", state=dict(self.state))
+                if time.time() >= self._poll_until:
+                    self.push("console", text=line)
                 return
             if k == "VERSION":
                 self.state["version"] = v
                 self.push("status", state=dict(self.state))
+                if time.time() >= self._poll_until:
+                    self.push("console", text=line)
                 return
         # 事件：+CONNECTED / +PAIR SUCCESS 等（无冒号或非状态键）
         if had_plus:
             self.push("event", text=line)
             return
+        # 数据模式结束（TXDATA 帧完成）→ 恢复轮询
+        if line in ("TX DATA OK", "TX DATA FAIL"):
+            self.poll_paused_until = 0
         # 其它控制台输出（含 OK/ERROR）
         self.push("console", text=line)
 
@@ -330,6 +366,10 @@ class Device:
         # T-Halow-RJ45 用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）
         self.send("AT+VERSION" if self.target == "tj45" else "AT+VERSION?")
         while not STOP.is_set():
+            if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询，避免污染 TXDATA 字节
+                time.sleep(0.5)
+                continue
+            self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
             for c in POLL_STATUS:
                 self.send(c)
             now = time.time()
@@ -433,8 +473,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not dev or not line:
             self._send(400, json.dumps({"ok": False}).encode())
             return
-        ok = dev.send(line)
-        dev.push("console", text="> " + line)
+        if req.get("hex"):
+            ok = dev.send_hex(line)
+            dev.push("console", text="> HEX: " + line)
+        else:
+            ok = dev.send(line)
+            dev.push("console", text="> " + line)
+            dev._poll_until = 0                       # 用户命令：响应立即显示控制台
+            # 进入数据模式：暂停轮询，避免 AT+CONN_STATE 等字节污染 TXDATA
+            if line.strip().upper().startswith("AT+TXDATA="):
+                dev.poll_paused_until = time.time() + 30
         self._send(200, json.dumps({"ok": ok}).encode())
 
 

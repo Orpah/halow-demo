@@ -12,9 +12,9 @@
 ## 1. 导入自定义元件
 
 1. 打开 Fritzing。
-2. 菜单 **文件 → 导入 → 零件…**，选择：
-   - `hardware/parts/CH32V203C8T6_LQFP48.fzpz`
-   - `hardware/parts/CH340C_SOP16.fzpz`
+2. 菜单 **文件 → 导入 → 零件…**，选择（来自 `fritzing-parts-langhua` 仓库顶层 `fzpz/`）：
+   - `fritzing-parts-langhua/fzpz/CH32V203C8T6.fzpz`
+   - `fritzing-parts-langhua/fzpz/CH340C.fzpz`
 3. 导入成功后，这两个元件会出现在右侧 **我的零件** 面板中。
 
 ## 2. 新建工程并放置元件

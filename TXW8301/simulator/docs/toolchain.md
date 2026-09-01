@@ -21,7 +21,7 @@ flowchart LR
 
 | 环节 | 本项目产出 |
 |------|-----------|
-| Fritzing 电路设计 | `hardware/parts/*.fzpz`（自定义元件）+ `docs/Fritzing_Build_Guide.md`（netlist），在 Fritzing 中组装原理图 |
+| Fritzing 电路设计 | `fritzing-parts-langhua/fzpz/*.fzpz`（自定义元件）+ `docs/Fritzing_Build_Guide.md`（netlist），在 Fritzing 中组装原理图 |
 | Gerber / PNP | 在 Fritzing PCB 视图完成布局后导出 Gerber(RS-274X) + PNP 文件 → PCB 工厂 |
 | pnp2cpl | PNP 经 `pnp2cpl` 转 CSV 装配文件 → 贴片 |
 | FritzingToBlender | Gerber 导入 Blender → 设计外壳 |

@@ -90,6 +90,11 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); }
 }
 .console pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: #b8c6e2; }
 .cmdrow { display: flex; gap: 8px; }
+.hexbox {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--dim); font-size: 13px; cursor: pointer; user-select: none;
+}
+.hexbox input.hexchk { flex: none; width: auto; height: auto; margin: 0; accent-color: var(--acc); }
 .cmdrow input {
   flex: 1; background: #0a0f1c; border: 1px solid var(--line); color: var(--fg);
   border-radius: 6px; padding: 6px 10px; font: 13px var(--mono);
