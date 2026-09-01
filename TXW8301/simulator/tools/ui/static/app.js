@@ -173,18 +173,49 @@ function updateTopology() {
 }
 
 /* ---------------- 控制台 ---------------- */
-function appendConsole(d, text, dir) {
-  const c = consoles[d];
-  c.push({ text, dir });
-  if (c.length > 500) c.shift();
+let spamSeq = 0;   // 折叠块唯一 id
+
+// 真机固件周期打印（LMAC 状态/SSID 等）→ 折叠成可展开块，避免刷屏
+function isSpam(t) {
+  return /^(-{3,}|\[\d+\](LMAC STATUS|SSID:)|freq= \d|bgr:|chn:|buf:|irq:|cca:|sta_list|chip-temperat|\btx :|\brx :)/.test(t);
+}
+
+function renderConsole(d) {
   const pre = $(`console${d}`);
-  // 双通道：颜色(辅助) + 方向前缀符号(主通道)，色弱/黑白也一眼区分收发
-  pre.innerHTML = c.map((l) => {
+  pre.innerHTML = consoles[d].map((l) => {
+    if (l.kind === "spam") {
+      const body = l.open
+        ? `<div class="ac-spam-body">${l.lines.map((x) => esc(x)).join("\n")}</div>` : "";
+      return `<div class="ac-spam" data-id="${l.id}"><span class="ac-spam-mark">${l.open ? "▼" : "▶"}</span> 设备自动调试信息</div>${body}`;
+    }
     const tx = l.dir === "tx";
     const mark = tx ? "→ " : "← ";
     return `<span class="c-${tx ? "tx" : "rx"}">${esc(mark + l.text)}</span>`;
   }).join("\n");
   pre.scrollTop = pre.scrollHeight;
+  pre.querySelectorAll(".ac-spam").forEach((el) => {
+    el.addEventListener("click", () => {
+      const item = consoles[d].find((x) => x.kind === "spam" && x.id === Number(el.dataset.id));
+      if (item) { item.open = !item.open; renderConsole(d); }
+    });
+  });
+}
+
+function appendConsole(d, text, dir) {
+  const c = consoles[d];
+  if (isSpam(text)) {
+    const last = c[c.length - 1];
+    if (last && last.kind === "spam") {
+      last.lines.push(text);
+      if (last.lines.length > 50) last.lines.shift();   // 单块最多留 50 行
+    } else {
+      c.push({ kind: "spam", id: ++spamSeq, lines: [text], open: false });
+    }
+  } else {
+    c.push({ kind: "line", text, dir });
+  }
+  if (c.length > 500) c.shift();
+  renderConsole(d);
 }
 
 function clearConsole(d) {

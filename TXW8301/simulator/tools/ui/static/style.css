@@ -92,6 +92,14 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-
 .console pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: #b8c6e2; }
 .console pre .c-tx { color: #7ee787; }   /* 自己发送：绿色 */
 .console pre .c-rx { color: #79c0ff; }   /* 接收：蓝色 */
+.ac-spam {
+  color: var(--dim); font-size: 11px; cursor: pointer; user-select: none;
+  background: rgba(255, 255, 255, .04); border: 1px dashed var(--line);
+  border-radius: 4px; padding: 2px 8px; margin: 2px 0;
+}
+.ac-spam:hover { background: rgba(255, 255, 255, .08); }
+.ac-spam-mark { color: var(--acc); }
+.ac-spam-body { color: var(--dim); padding: 4px 8px; }
 .cmdrow { display: flex; gap: 8px; }
 .cmdwrap { position: relative; flex: 1; min-width: 0; }
 .cmdwrap input { width: 100%; box-sizing: border-box; }
