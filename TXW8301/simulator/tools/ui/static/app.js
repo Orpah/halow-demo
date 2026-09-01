@@ -187,6 +187,11 @@ function appendConsole(d, text, dir) {
   pre.scrollTop = pre.scrollHeight;
 }
 
+function clearConsole(d) {
+  consoles[d] = [];
+  $(`console${d}`).textContent = "";
+}
+
 function appendLog(text) {
   // 服务器级日志（无特定设备）——同时显示在两台控制台
   appendConsole("A", text);
@@ -331,6 +336,18 @@ function bindUI() {
     b.addEventListener("click", () => sendCmd(b.closest(".quick").dataset.dev, b.dataset.cmd)));
 
   $("btnApply").addEventListener("click", applyConfig);
+  $("clearA").addEventListener("click", () => clearConsole("A"));
+  $("clearB").addEventListener("click", () => clearConsole("B"));
+  // Ctrl+L 清屏：聚焦哪台清哪台，未聚焦输入框则两台都清
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === "l") {
+      e.preventDefault();
+      const ae = document.activeElement;
+      if (ae === $("cmdA")) clearConsole("A");
+      else if (ae === $("cmdB")) clearConsole("B");
+      else { clearConsole("A"); clearConsole("B"); }
+    }
+  });
   $("btnClearConsole").addEventListener("click", () => { consoles.A = []; consoles.B = []; $(`consoleA`).textContent = ""; $(`consoleB`).textContent = ""; });
   $("btnClearFrames").addEventListener("click", () => { frames = []; renderFrames(); });
 

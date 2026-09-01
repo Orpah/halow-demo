@@ -42,7 +42,8 @@ section.card {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 12px 16px; margin: 12px 16px;
 }
-h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); }
+h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-items: center; gap: 8px; }
+.btn.mini { padding: 2px 9px; font-size: 11px; font-weight: 400; }
 .hint { color: var(--dim); font-weight: 400; font-size: 12px; }
 
 /* ---------- 拓扑 ---------- */
