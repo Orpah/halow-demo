@@ -1,2 +1,5 @@
 *_SDK/
 SDK_*/
+
+# VS Code 多根工作区文件（机器/本地专用）
+*.code-workspace

@@ -11,6 +11,43 @@ const consoles = { A: [], B: [] };
 let frames = [];
 let frameMonitor = false;
 
+/* AT 命令提示库（TXW8301 / T-Halow-RJ45 兼容） */
+const AT_CMDS = [
+  { cmd: "AT+MODE=", hint: "[ap/sta/group/apsta] 工作模式" },
+  { cmd: "AT+MODE?", hint: "查询当前模式" },
+  { cmd: "AT+SSID=", hint: "[ssid] 网络名（≤32字符）" },
+  { cmd: "AT+SSID?", hint: "查询 SSID" },
+  { cmd: "AT+KEYMGMT=", hint: "[WPA-PSK/NONE] 加密方式" },
+  { cmd: "AT+PSK=", hint: "[64位hex] 加密密码" },
+  { cmd: "AT+PAIR=", hint: "[0/1] 快速配对" },
+  { cmd: "AT+BSS_BW=", hint: "[1/2/4/8] 带宽 MHz" },
+  { cmd: "AT+FREQ_RANGE=", hint: "[起始,结束] 频率范围 MHz" },
+  { cmd: "AT+CHAN_LIST=", hint: "[freq1,freq2,...] 工作频率列表" },
+  { cmd: "AT+RSSI", hint: "[?/索引/MAC] 查询信号强度" },
+  { cmd: "AT+CONN_STATE", hint: "查看连接状态" },
+  { cmd: "AT+WNBCFG", hint: "查看设备参数" },
+  { cmd: "AT+SCAN_AP", hint: "扫描 AP（STA 模式）" },
+  { cmd: "AT+BSSLIST", hint: "获取扫描到的 AP 列表" },
+  { cmd: "AT+TXPOWER=", hint: "[6..20] 发射功率 dBm" },
+  { cmd: "AT+ACKTMO=", hint: "[us] ACK 超时（>1km 通信时）" },
+  { cmd: "AT+TX_MCS=", hint: "[0..7/255] TX MCS" },
+  { cmd: "AT+HEART_INT=", hint: "[ms] 心跳间隔" },
+  { cmd: "AT+UNPAIR=", hint: "[mac_addr] 解除指定 STA 配对" },
+  { cmd: "AT+LOADDEF=", hint: "[1] 恢复出厂设置" },
+  { cmd: "AT+SYSDBG=", hint: "[LMAC/WNB,0/1] 调试打印开关" },
+  { cmd: "AT+JOINGROUP=", hint: "[组播地址,AID] 加入组播网络" },
+  { cmd: "AT+R_SSID=", hint: "[ssid] 中继上级 AP 的 SSID" },
+  { cmd: "AT+R_PSK=", hint: "[64hex] 中继上级 AP 的密码" },
+  { cmd: "AT+ROAM=", hint: "[0/1] 漫游开关（STA 侧）" },
+  { cmd: "AT+PS_MODE=", hint: "[0..4] STA 休眠模式" },
+  { cmd: "AT+WAKEUP", hint: "唤醒休眠模块" },
+  { cmd: "AT+VERSION", hint: "查询固件版本" },
+  { cmd: "AT+MAC_ADDR", hint: "查询本机 MAC 地址" },
+  { cmd: "AT+TXDATA=", hint: "[长度] 进入数据模式发送数据" },
+  { cmd: "AT+RST", hint: "复位模块" },
+];
+const acState = { A: { list: [], idx: 0 }, B: { list: [], idx: 0 } };
+
 /* ---------------- 基础工具 ---------------- */
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g,
@@ -220,6 +257,60 @@ function applyConfig() {
   cmds.forEach((c) => sendCmd(d, c));
 }
 
+/* ---------------- AT 命令输入提示 ---------------- */
+function acFilter(d) {
+  const v = $(`cmd${d}`).value.trim().toUpperCase();
+  if (!v || $(`hex${d}`).checked) return [];   // HEX 模式不提示 AT 命令
+  if (v === "AT" || v === "AT+") return AT_CMDS;
+  return AT_CMDS.filter((c) => c.cmd.toUpperCase().startsWith(v));
+}
+
+function renderAC(d, list) {
+  const s = acState[d];
+  const menu = $(`acMenu${d}`);
+  menu.innerHTML = "";
+  list.forEach((c, i) => {
+    const div = document.createElement("div");
+    div.className = "ac-item" + (i === s.idx ? " active" : "");
+    div.innerHTML = `<span class="ac-cmd">${esc(c.cmd)}</span><span class="ac-hint">${esc(c.hint)}</span>`;
+    div.addEventListener("mousedown", (e) => { e.preventDefault(); acPick(d, c.cmd); });
+    div.addEventListener("mouseenter", () => { s.idx = i; renderAC(d, list); });
+    menu.appendChild(div);
+  });
+  menu.hidden = list.length === 0;
+}
+
+function acPick(d, cmd) {
+  $(`cmd${d}`).value = cmd;
+  $(`acMenu${d}`).hidden = true;
+  $(`cmd${d}`).focus();
+}
+
+function handleACKey(d, e) {
+  const s = acState[d];
+  const menu = $(`acMenu${d}`);
+  if (menu.hidden) return false;
+  if (e.key === "ArrowDown") { e.preventDefault(); s.idx = (s.idx + 1) % s.list.length; renderAC(d, s.list); return true; }
+  if (e.key === "ArrowUp") { e.preventDefault(); s.idx = (s.idx - 1 + s.list.length) % s.list.length; renderAC(d, s.list); return true; }
+  if (e.key === "Escape") { e.preventDefault(); menu.hidden = true; return true; }
+  if (e.key === "Enter" || e.key === "Tab") {
+    const c = s.list[s.idx];
+    if (c) { e.preventDefault(); acPick(d, c.cmd); return true; }
+  }
+  return false;
+}
+
+function setupAutocomplete(d) {
+  const inp = $(`cmd${d}`);
+  inp.addEventListener("input", () => {
+    acState[d].list = acFilter(d);
+    acState[d].idx = 0;
+    renderAC(d, acState[d].list);
+  });
+  inp.addEventListener("blur", () => setTimeout(() => { $(`acMenu${d}`).hidden = true; }, 150));
+  $(`hex${d}`).addEventListener("change", () => { $(`acMenu${d}`).hidden = true; });
+}
+
 /* ---------------- 事件绑定 ---------------- */
 function bindUI() {
   document.querySelectorAll(".send").forEach((b) =>
@@ -229,10 +320,13 @@ function bindUI() {
       const hex = $(`hex${d}`).checked;
       if (inp.value.trim()) { sendCmd(d, inp.value.trim(), hex); inp.value = ""; }
     }));
-  ["A", "B"].forEach((d) =>
+  ["A", "B"].forEach((d) => {
+    setupAutocomplete(d);
     $(`cmd${d}`).addEventListener("keydown", (e) => {
+      if (handleACKey(d, e)) return;            // 补全优先（↑/↓ 导航、Enter/Tab 选中、Esc 关闭）
       if (e.key === "Enter") { e.preventDefault(); document.querySelector(`.send[data-dev="${d}"]`).click(); }
-    }));
+    });
+  });
   document.querySelectorAll(".quick button").forEach((b) =>
     b.addEventListener("click", () => sendCmd(b.closest(".quick").dataset.dev, b.dataset.cmd)));
 

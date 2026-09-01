@@ -54,7 +54,10 @@
     <h3>设备 A 控制台</h3>
     <div class="console"><pre id="consoleA"></pre></div>
     <div class="cmdrow">
-      <input id="cmdA" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+      <div class="cmdwrap">
+        <input id="cmdA" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+        <div class="ac-menu" id="acMenuA" hidden></div>
+      </div>
       <label class="hexbox"><input type="checkbox" id="hexA" class="hexchk" data-dev="A"> HEX</label>
       <button class="btn send" data-dev="A">发送</button>
     </div>
@@ -72,7 +75,10 @@
     <h3>设备 B 控制台</h3>
     <div class="console"><pre id="consoleB"></pre></div>
     <div class="cmdrow">
-      <input id="cmdB" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+      <div class="cmdwrap">
+        <input id="cmdB" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+        <div class="ac-menu" id="acMenuB" hidden></div>
+      </div>
       <label class="hexbox"><input type="checkbox" id="hexB" class="hexchk" data-dev="B"> HEX</label>
       <button class="btn send" data-dev="B">发送</button>
     </div>

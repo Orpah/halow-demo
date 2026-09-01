@@ -92,6 +92,20 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); }
 .console pre .c-tx { color: #7ee787; }   /* 自己发送：绿色 */
 .console pre .c-rx { color: #79c0ff; }   /* 接收：蓝色 */
 .cmdrow { display: flex; gap: 8px; }
+.cmdwrap { position: relative; flex: 1; min-width: 0; }
+.cmdwrap input { width: 100%; box-sizing: border-box; }
+.ac-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  background: #0f1526; border: 1px solid var(--line); border-radius: 6px;
+  max-height: 240px; overflow: auto; box-shadow: 0 6px 16px rgba(0, 0, 0, .45);
+}
+.ac-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 5px 10px; font: 12px var(--mono); cursor: pointer;
+}
+.ac-item.active { background: #16304f; }
+.ac-cmd { color: #7ee787; flex: none; }
+.ac-hint { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hexbox {
   display: inline-flex; align-items: center; gap: 4px;
   color: var(--dim); font-size: 13px; cursor: pointer; user-select: none;
