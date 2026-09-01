@@ -89,6 +89,8 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); }
   height: 220px; overflow: auto; padding: 8px 10px; margin: 8px 0;
 }
 .console pre { margin: 0; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; color: #b8c6e2; }
+.console pre .c-tx { color: #7ee787; }   /* 自己发送：绿色 */
+.console pre .c-rx { color: #79c0ff; }   /* 接收：蓝色 */
 .cmdrow { display: flex; gap: 8px; }
 .hexbox {
   display: inline-flex; align-items: center; gap: 4px;

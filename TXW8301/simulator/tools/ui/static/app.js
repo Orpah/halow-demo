@@ -75,16 +75,16 @@ function onEvent(m) {
       if (d) { Object.assign(state[d], m.state); updateStatus(d); updateTopology(); }
       break;
     case "console":
-      if (d) appendConsole(d, m.text);
+      if (d) appendConsole(d, m.text, m.dir);
       break;
     case "event":
-      if (d) { appendConsole(d, m.text); flashNode(d); }
+      if (d) { appendConsole(d, m.text, m.dir || "rx"); flashNode(d); }
       break;
     case "frame":
       addFrame(d, m.dir, m.hex);
       break;
     case "log":
-      appendConsole(d, m.text);
+      appendConsole(d, m.text, m.dir || "rx");
       break;
   }
 }
@@ -136,12 +136,17 @@ function updateTopology() {
 }
 
 /* ---------------- 控制台 ---------------- */
-function appendConsole(d, text) {
+function appendConsole(d, text, dir) {
   const c = consoles[d];
-  c.push(text);
+  c.push({ text, dir });
   if (c.length > 500) c.shift();
   const pre = $(`console${d}`);
-  pre.textContent = c.join("\n");
+  // 双通道：颜色(辅助) + 方向前缀符号(主通道)，色弱/黑白也一眼区分收发
+  pre.innerHTML = c.map((l) => {
+    const tx = l.dir === "tx";
+    const mark = tx ? "→ " : "← ";
+    return `<span class="c-${tx ? "tx" : "rx"}">${esc(mark + l.text)}</span>`;
+  }).join("\n");
   pre.scrollTop = pre.scrollHeight;
 }
 

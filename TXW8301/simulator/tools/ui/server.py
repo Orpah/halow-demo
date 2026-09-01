@@ -288,8 +288,16 @@ class Device:
         if line.startswith("FRAME:RX ") or line.startswith("FRAME:TX "):
             parts = line.split(" ", 1)          # ["FRAME:TX", "<hex>"]
             if len(parts) == 2:
-                self.push("frame", dir=parts[0][6:], hex=parts[1])
-                self.push("console", text=line)
+                d = parts[0][6:]                # "TX" / "RX"
+                if d == "TX":
+                    self.state["tx"] += 1       # 顶部卡片 TX/RX 计数
+                    cdir = "tx"                 # 控制台样式：自己发出的帧
+                else:
+                    self.state["rx"] += 1
+                    cdir = "rx"                 # 控制台样式：收到的帧
+                self.push("status", state=dict(self.state))
+                self.push("frame", dir=d, hex=parts[1])
+                self.push("console", text=line, dir=cdir)
             return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45）
         had_plus = line.startswith("+")
@@ -304,7 +312,7 @@ class Device:
                 self.state["uptime"] = int(time.time() - self.t0)
                 self.push("status", state=dict(self.state))
                 if time.time() >= self._poll_until:
-                    self.push("console", text=line)
+                    self.push("console", text=line, dir="rx")
                 return
             if k == "RSSI":
                 try:
@@ -313,35 +321,35 @@ class Device:
                     pass
                 self.push("status", state=dict(self.state))
                 if time.time() >= self._poll_until:
-                    self.push("console", text=line)
+                    self.push("console", text=line, dir="rx")
                 return
             if k == "MODE":
                 self.state["mode"] = v
                 self.push("status", state=dict(self.state))
                 if time.time() >= self._poll_until:
-                    self.push("console", text=line)
+                    self.push("console", text=line, dir="rx")
                 return
             if k == "SSID":
                 self.state["ssid"] = v
                 self.push("status", state=dict(self.state))
                 if time.time() >= self._poll_until:
-                    self.push("console", text=line)
+                    self.push("console", text=line, dir="rx")
                 return
             if k == "VERSION":
                 self.state["version"] = v
                 self.push("status", state=dict(self.state))
                 if time.time() >= self._poll_until:
-                    self.push("console", text=line)
+                    self.push("console", text=line, dir="rx")
                 return
         # 事件：+CONNECTED / +PAIR SUCCESS 等（无冒号或非状态键）
         if had_plus:
-            self.push("event", text=line)
+            self.push("event", text=line, dir="rx")
             return
         # 数据模式结束（TXDATA 帧完成）→ 恢复轮询
         if line in ("TX DATA OK", "TX DATA FAIL"):
             self.poll_paused_until = 0
-        # 其它控制台输出（含 OK/ERROR）
-        self.push("console", text=line)
+        # 其它控制台输出（含 OK/ERROR）——均为接收
+        self.push("console", text=line, dir="rx")
 
     # ---------------- threads ----------------
     def reader_loop(self):
@@ -475,10 +483,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if req.get("hex"):
             ok = dev.send_hex(line)
-            dev.push("console", text="> HEX: " + line)
+            dev.push("console", text="> HEX: " + line, dir="tx")
         else:
             ok = dev.send(line)
-            dev.push("console", text="> " + line)
+            dev.push("console", text="> " + line, dir="tx")
             dev._poll_until = 0                       # 用户命令：响应立即显示控制台
             # 进入数据模式：暂停轮询，避免 AT+CONN_STATE 等字节污染 TXDATA
             if line.strip().upper().startswith("AT+TXDATA="):
