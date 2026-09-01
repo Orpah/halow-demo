@@ -59,8 +59,8 @@ BAUD = 115200
 HTTP_PORT = 8899
 STATIC_DIR = "static"
 
-# 全局事件队列：设备线程 -> SSE 推送
-EVENTS = queue.Queue()
+# 全局事件队列：设备线程 -> SSE 推送（有界，防消费慢/断连时无限堆积）
+EVENTS = queue.Queue(maxsize=2000)
 STOP = threading.Event()
 
 # 状态轮询命令
@@ -277,7 +277,18 @@ class Device:
 
     def push(self, etype, **kw):
         kw.update(type=etype, device=self.name)
-        EVENTS.put(kw)
+        # 有界入队：满时丢弃最旧事件（界面永远显示最新，防内存爆）
+        try:
+            EVENTS.put_nowait(kw)
+        except queue.Full:
+            try:
+                EVENTS.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                EVENTS.put_nowait(kw)
+            except queue.Full:
+                pass
 
     # ---------------- line handling ----------------
     def handle_line(self, raw):
@@ -361,6 +372,9 @@ class Device:
                 time.sleep(0.01)
                 continue
             self.buf += data
+            # 防无换行数据无限累积（二进制 flood）：超阈值只留尾部，给下一条换行机会
+            if len(self.buf) > 65536:
+                self.buf = self.buf[-4096:]
             # 按行拆分
             while b"\n" in self.buf:
                 line, self.buf = self.buf.split(b"\n", 1)
