@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>TXW8301 模拟器 UI</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260902">
 </head>
 <body>
 <header>
@@ -34,6 +34,7 @@
       <div class="link-label" id="linkLabel">虚拟空口 (TCP)</div>
       <div class="flow"><span></span><span></span><span></span><span></span><span></span></div>
       <div class="link-state" id="linkState">--</div>
+      <div class="link-tip">ℹ️ <b>真机↔真机</b>（RF）或 <b>虚拟机↔虚拟机</b>（虚拟空口）可互通；<b>真机↔虚拟机不互通</b></div>
     </div>
     <div class="node" id="nodeB">
       <div class="node-title">设备 B
@@ -69,6 +70,7 @@
       <button data-cmd="AT+PAIR=1">PAIR=1</button>
       <button data-cmd="AT+PAIR=0">PAIR=0</button>
       <button data-cmd="AT+WNBCFG">WNBCFG</button>
+      <button data-cmd="AT+SYSDBG=LMAC,0" title="关闭 LMAC 调试打印">LMAC=0</button>
     </div>
   </div>
   <div class="card panel" id="panelB">
@@ -90,6 +92,7 @@
       <button data-cmd="AT+PAIR=1">PAIR=1</button>
       <button data-cmd="AT+PAIR=0">PAIR=0</button>
       <button data-cmd="AT+WNBCFG">WNBCFG</button>
+      <button data-cmd="AT+SYSDBG=LMAC,0" title="关闭 LMAC 调试打印">LMAC=0</button>
     </div>
   </div>
 </section>
@@ -122,6 +125,20 @@
   </div>
 </section>
 
-<script src="app.js"></script>
+<!-- ============ 启动命令说明 ============ -->
+<section class="card" id="startsec">
+  <h3>启动模拟器</h3>
+  <details>
+    <summary>常用启动命令（点击展开）</summary>
+    <div class="start-cmds">
+      <div class="start-cmd"><code>python server.py --host-sim --target tj45</code><span>两台 T-Halow-RJ45 虚拟机（无硬件）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b pc:tj45</code><span>一台真机 + 一台虚拟机（两者不互通）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b COM4:tj45</code><span>两台真机（真实 RF 互联）</span></div>
+      <div class="start-cmd"><code>python server.py --list</code><span>列出本机串口</span></div>
+    </div>
+  </details>
+</section>
+
+<script src="app.js?v=20260902"></script>
 </body>
 </html>

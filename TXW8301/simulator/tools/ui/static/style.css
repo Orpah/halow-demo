@@ -44,12 +44,27 @@ section.card {
 }
 h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-items: center; gap: 8px; }
 .btn.mini { padding: 2px 9px; font-size: 11px; font-weight: 400; }
+.link-tip {
+  margin-top: auto; padding: 6px 8px; font-size: 11px; line-height: 1.45; color: var(--dim);
+  background: rgba(255, 193, 7, .07); border: 1px dashed #a3760a; border-radius: 6px;
+  width: 100%; box-sizing: border-box; text-align: left; word-break: break-word;
+}
+.link-tip b { color: var(--fg); }
+#startsec details { margin-top: 8px; }
+#startsec summary { cursor: pointer; color: var(--acc); font-size: 13px; }
+#startsec summary:hover { text-decoration: underline; }
+.start-cmds { margin: 10px 0 0; display: flex; flex-direction: column; gap: 7px; }
+.start-cmd { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--dim); flex-wrap: wrap; }
+.start-cmd code {
+  background: #0a0f1c; border: 1px solid var(--line); border-radius: 4px;
+  padding: 3px 8px; color: #79c0ff; font: 12px var(--mono);
+}
 .hint { color: var(--dim); font-weight: 400; font-size: 12px; }
 
 /* ---------- 拓扑 ---------- */
-.topo { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 10px 0; }
+.topo { display: flex; align-items: stretch; justify-content: center; gap: 24px; padding: 10px 0; }
 .node {
-  width: 210px; padding: 12px 14px; border: 1px solid var(--line);
+  flex: 1 1 280px; min-width: 280px; padding: 12px 14px; border: 1px solid var(--line);
   border-radius: 10px; background: #10162a; transition: box-shadow .2s, border-color .2s;
 }
 .node.linked { border-color: var(--ok); box-shadow: 0 0 12px rgba(55,214,122,.25); }
@@ -69,7 +84,10 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-
 .rssi-bar i { flex: 1; background: #26314a; border-radius: 2px; }
 .rssi-bar i.on { background: var(--ok); }
 
-.link { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 160px; }
+.link {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  min-width: 160px; width: 230px; max-width: 230px; flex: none;
+}
 .link-label { color: var(--dim); font-size: 12px; }
 .link-state { color: var(--dim); font-size: 12px; }
 .link-state.ok { color: var(--ok); }
