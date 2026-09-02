@@ -65,4 +65,18 @@
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 
+## 7. 新增设备类型检查清单（如 tj45→txah，勿漏）
+
+新增 target（`norm_target` 归一）后，以下位置**必须同步**，否则 UI/文档不一致：
+
+- `server.py`：`norm_target()` 加别名；`device_type()` 加中文标签；
+  `parse_device_spec()` docstring；`HostSims.add()` 的协议族标志（泰芯 AH 系
+  tj45/txah 都传 `tj45=True`）；argparse `--target` choices。
+- **`index.html`「启动模拟器」常用启动命令列表（`#startsec`，最易漏）**：加一条新设备的启动示例。
+- `app.js`：`AT_CMDS` 命令库若新设备有特有命令/参数需补。
+- `AGENTS.md`：本文件 §1 设备规格 / 启动命令同步。
+- 验证：`--a pc:xxx --b pc:xxx` 看 banner / `device_type` 显示；有真机则实测 AT 响应。
+
+（真实教训 2026-09-02：加 txah 时后端/AGENTS 都改了，唯独漏了 UI 常用命令列表，后被用户指出补上。）
+
 （fritzing 元件规则见 `fritzing-parts-langhua/AGENTS.md`；详细历史踩坑在仓库 docs/ 各文件。）
