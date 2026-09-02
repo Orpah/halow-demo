@@ -1,0 +1,66 @@
+# TXW8301 模拟器开发规则（simulator）
+
+本目录是 TXW8301 的纯软件模拟器（`host/` Python 移植 + `tools/ui/` Web UI +
+`firmware/` CH32V203 固件）。开发、修改、调试任何部分前，**先遵循以下规则与踩坑记录**。
+
+## 1. 定位与启动
+
+- 给泰芯 TXW8301（802.11ah HaLow）做的**无射频**模拟器，形态参考 T-Halow-RJ45
+  （AT 命令 / AP-STA / RSSI / 数据通路一致）。
+- Web UI 启动（不依赖 cwd，`server.py` 用 `os.path.dirname(__file__)` 定位 static/host）：
+  - 两台 T-Halow 虚拟机：`python tools/ui/server.py --host-sim --target tj45`
+  - 一台真机 + 一台虚拟机：`python tools/ui/server.py --a pc:tj45 --b COM13:tj45`
+  - 两台真机（真实 RF）：`python tools/ui/server.py --a COM3:tj45 --b COM4:tj45`
+  - 列出串口：`python tools/ui/server.py --list`
+- 设备规格：`pc | pc:sim | pc:tj45 | COM3 | COM3:sim | COM3:tj45`（来源×目标，
+  source=pc/serial，target=sim/tj45）。
+
+## 2. 互联域（硬规则）
+
+- 虚拟空口(TCP) **只在 PC↔PC 之间**建立；真机↔真机走物理 RF（802.11ah）。
+- **PC↔真机不互通**：真机走真实射频、PC 模拟器无射频，二者不能自动建链，
+  UI 只能同时管理。别指望"模拟器 A 发帧 → 真机 B 收帧"。
+- 帧过滤：目的 MAC 必须 `FF*6`（广播）或匹配，否则对端按单播过滤丢弃（忠实模拟，**非 bug**）。
+
+## 3. 命令 / 响应约定
+
+- tj45 模式状态响应带 `+` 前缀（`+MODE:AP`），且**不追加 OK**（避免轮询刷屏）；
+  设置命令仍走 `ok()` 回 OK。
+- tj45 查询用**裸命令**（`AT+MODE` / `AT+VERSION` / `AT+CONN_STATE` / `AT+RSSI`）。
+- `AT+TXDATA` 用**等号**：`AT+TXDATA=<len≥14>`；随后数据模式收 len 字节原始数据。
+
+## 4. 前端控制台 / UI 约定
+
+- console 事件带 `dir`：`tx`=自己发送（命令/HEX 回显、FRAME:TX），`rx`=接收
+  （OK/状态行/FRAME:RX/TX DATA OK）。
+- 显示**双通道**：方向前缀 `→`/`←`（主）+ 颜色 绿`#7ee787`/蓝`#79c0ff`（辅）——
+  色弱友好，**禁止只靠颜色传递收发信息**。
+- 轮询响应（CONN_STATE/RSSI/MODE/SSID/VERSION）默认静默（`_poll_until` 窗口抑制），
+  用户命令回显 + 状态响应才显示，避免控制台刷屏。
+- 真机固件周期打印（`LMAC STATUS`/`freq=`/`bgr:`/`chn:`/`buf:`/`irq:`/`tx :`/`rx :`/
+  `cca:`/`chip-temperature`/`sta_list`/分隔线/`[时间戳]SSID:`）识别为 spam，折叠成
+  「▶ 设备自动调试信息」可展开块；AT 响应（无时间戳的 `SSID:` 等）不误折叠。
+- 改样式/脚本后刷新即生效：静态文件已加版本号查询串（`style.css?v=xxx`）+
+  `Cache-Control: no-store`。
+
+## 5. 防爆 / 健壮性
+
+- EVENTS 事件队列**有界**（`maxsize=2000`），push 满时丢最旧（SSE 断连不再无限堆积）。
+- `reader_loop` 行缓冲超 64KB 只留尾部 4KB（防无换行二进制 flood）。
+- 数据模式期间暂停该设备轮询（`poll_paused_until`，`AT+TXDATA=` 后 30s），
+  防轮询字节污染/提前结束数据帧。
+
+## 6. 踩坑记录（2026-09 补，务必记住）
+
+- **顶部 TX/RX 计数曾始终 0**：后端只初始化 `state["tx"]/["rx"]=0` 从不递增，
+  须在 FRAME 分支 TX→`tx+=1`、RX→`rx+=1` 并 push status。
+- **版本号防缓存的连环坑**：给 `style.css?v=xxx` 加版本号后，`server.py` 的 `do_GET`
+  必须**剥离查询串**（`rel.split("?",1)[0]`），否则带 `?` 的路径被当文件名 → **404** →
+  CSS/JS 全挂 → 页面无样式无 JS（表现为"未连接"、设备占位、布局乱）。曾误以为是缓存。
+- **布局**：`.node` 用 `width:280px` 会在窄视口被 flex 压缩 → 设备名断行
+  （"T- Halow- RJ45"）。须 `flex:1 1 280px; min-width:280px` 防压缩。
+- `sim.py` Link `connect/accept` 后必须 `c.settimeout(None)`（否则 1s 空闲被 `_reader` 断开）。
+- 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
+  一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
+
+（fritzing 元件规则见 `fritzing-parts-langhua/AGENTS.md`；详细历史踩坑在仓库 docs/ 各文件。）
