@@ -15,6 +15,7 @@
 body {
   margin: 0; background: var(--bg); color: var(--fg);
   font: 14px/1.5 "Microsoft YaHei", "Segoe UI", sans-serif;
+  min-width: 800px;   /* 实测：<800 出现横向滚动条；>=800 完整显示（拓扑+面板内容所需） */
 }
 header {
   display: flex; align-items: center; justify-content: space-between;
@@ -45,8 +46,8 @@ section.card {
 h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-items: center; gap: 8px; }
 .btn.mini { padding: 2px 9px; font-size: 11px; font-weight: 400; }
 .link-tip {
-  margin-top: auto; padding: 6px 8px; font-size: 11px; line-height: 1.45; color: var(--dim);
-  background: rgba(255, 193, 7, .07); border: 1px dashed #a3760a; border-radius: 6px;
+  margin-top: auto; padding: 4px 6px; font-size: 9px; line-height: 1.4; color: var(--dim);
+  background: rgba(255, 193, 7, .07); border: 1px dashed #a3760a; border-radius: 5px;
   width: 100%; box-sizing: border-box; text-align: left; word-break: break-word;
 }
 .link-tip b { color: var(--fg); }
@@ -64,7 +65,7 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-
 /* ---------- 拓扑 ---------- */
 .topo { display: flex; align-items: stretch; justify-content: center; gap: 24px; padding: 10px 0; }
 .node {
-  flex: 1 1 280px; min-width: 280px; padding: 12px 14px; border: 1px solid var(--line);
+  flex: 0 0 280px; padding: 12px 14px; border: 1px solid var(--line);
   border-radius: 10px; background: #10162a; transition: box-shadow .2s, border-color .2s;
 }
 .node.linked { border-color: var(--ok); box-shadow: 0 0 12px rgba(55,214,122,.25); }
@@ -86,9 +87,9 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-
 
 .link {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  min-width: 160px; width: 230px; max-width: 230px; flex: none;
+  min-width: 140px; width: 140px; max-width: 140px; flex: none;
 }
-.link-label { color: var(--dim); font-size: 12px; }
+.link-label { color: var(--dim); font-size: 11px; }
 .link-state { color: var(--dim); font-size: 12px; }
 .link-state.ok { color: var(--ok); }
 .flow { display: flex; gap: 6px; }
