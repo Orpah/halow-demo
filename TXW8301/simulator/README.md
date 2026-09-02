@@ -1,5 +1,7 @@
 # TXW8301 Simulator（CH32V203 纯软件模拟器）
 
+> 🤖 本项目主要由 **DeepSeek V4 Flash** 完成。
+
 > 给泰芯 **TXW8301**（802.11ah HaLow）做的一个**无射频纯软件模拟器**，整体形态参考
 > [Xinyuan-LilyGO/T-Halow-RJ45](https://github.com/Xinyuan-LilyGO/T-Halow-RJ45)：
 > 用一颗 **沁恒 CH32V203**（最低成本、无以太网）在固件层面模拟 TXW8301 的
