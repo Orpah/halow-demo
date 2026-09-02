@@ -113,25 +113,33 @@ python server.py --host-sim        # 进程内启动 AP+STA 两台 PC 模拟器�
 - 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）、`docs/ui_hostsim_demo.png`、
   `docs/ui_hostsim_tj45_demo.png`。
 
-## 支持 T-Halow-RJ45 与混合设备
+## 支持多模组与混合设备（T-Halow-RJ45 / TX-AH / HT-HC01）
 
-A/B 两台设备可**逐台独立**指定「来源×目标」：`pc / pc:tj45 / COM3 / COM3:tj45`
-（= CH32V203 虚拟机 / T-Halow-RJ45 虚拟机 / CH32V203 真机 / T-Halow-RJ45 真机）：
+A/B 两台设备可**逐台独立**指定「来源×目标」。设备档案 / 协议族（key、别名、中文显示名、
+family：`native` / `tah` / `hc01`）的**单一事实来源是 `host/devprofiles.py`**：
+`sim`=CH32V203、`tj45`=T-Halow-RJ45、`txah`=TX-AH（泰芯原厂模块，与 tj45 同属泰芯 AH 族）、
+`hc01`=HT-HC01（惠特自动化 ESP32+MM6108，**占位**：真实 AT 待手册，暂复用泰芯 AH 方言）。
 
 ```bash
 # Web UI：任意组合
 python tools/ui/server.py --a pc --b pc:tj45      # A=CH32V203虚拟, B=T-Halow虚拟
 python tools/ui/server.py --a COM3 --b COM4:tj45  # A=CH32V203真机, B=T-Halow真机
 
-# PC 模拟器扮演 T-Halow-RJ45（状态带 + 前缀，T-Halow 的 thalow_config.py 可直接用）
-python host/sim.py --name A --role AP --console 9001 --link 9011 --tj45
+# PC 模拟器扮演 T-Halow-RJ45 / TX-AH（状态带 + 前缀，thalow_config.py 可直接用）
+python host/sim.py --name A --role AP --console 9001 --link 9011 --family tah
 
-# 命令行配置真实板（--variant tj45 自动关调试刷屏）
+# 两台 HT-HC01 虚拟机（占位）
+python tools/ui/server.py --host-sim --target hc01
+
+# 命令行配置真实板（--variant tj45/txah/hc01 自动关调试刷屏）
 python tools/sim_config.py COM3 ap --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
 ```
 
+> 目录：本模拟器现已作为独立子项目放在仓库根 `simulator/`（2026-09 从 `TXW8301/simulator`
+> 迁入），便于后续承载更多 HaLow 模组。
+
 关键兼容点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`）且用裸命令查询
-（`AT+MODE`、`AT+VERSION`）；`--tj45` 模式与 UI 逐台规格已对齐。
+（`AT+MODE`、`AT+VERSION`）；泰芯 AH 族（tah）与 UI 逐台规格已对齐，hc01 占位暂同族。
 
 ### PC ↔ 真实 CH32V203 板建链（串口空口）
 

@@ -135,8 +135,8 @@ def main():
     b.pump(1.0)
     check("B 配对后连接", "CONN_STATE:CONNECTED" in b.buf)
 
-    print("== 5. T-Halow-RJ45 兼容模式（--tj45：状态带 + 前缀） ==")
-    coreT = sim.Core("T", "AP", 9301, 9311, None, tj45=True)
+    print("== 5. 泰芯 AH 兼容模式（family=tah：状态带 + 前缀） ==")
+    coreT = sim.Core("T", "AP", 9301, 9311, None, family=sim.FAMILY_TAH)
     threading.Thread(target=loop, args=(coreT,), daemon=True).start()
     time.sleep(0.4)
     t = Client(9301)

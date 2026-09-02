@@ -9,8 +9,15 @@
 |------|------|
 | `pc` | CH32V203 **虚拟机**（进程内 host/sim.py） |
 | `pc:tj45` | T-Halow-RJ45 **虚拟机**（host/sim.py 兼容模式） |
+| `pc:txah` | TX-AH **虚拟机**（泰芯 AH 兼容模式） |
+| `pc:hc01` | HT-HC01 **虚拟机**（兼容模式 · 占位） |
 | `COM3` | CH32V203 **真机**（串口） |
 | `COM3:tj45` | T-Halow-RJ45 **真机**（串口，自动关调试刷屏） |
+| `COM3:hc01` | HT-HC01 **真机**（串口，自动关调试刷屏 · 占位） |
+
+> 目标 key / 别名 / 中文显示名 / 协议族（native / tah / hc01）的**单一事实来源**是
+> [`host/devprofiles.py`](../../host/devprofiles.py)；`sim`=本模拟器、`tj45`/`txah`=泰芯 AH 族、
+> `hc01`=HT-HC01（惠特自动化 ESP32+MM6108，占位，暂按泰芯 AH 方言）。
 
 ## 启动
 
@@ -38,8 +45,8 @@ python server.py --a COM3 --b COM4:tj45
 python server.py --a pc --b COM4:tj45
 ```
 
-`--target sim|tj45` 是未在规格中指定时的默认目标。顶部标题与设备标签会按
-每台实际类型显示（如 `A: CH32V203 虚拟机 · B: T-Halow-RJ45 虚拟机`）。
+`--target sim|tj45|txah|hc01` 是未在规格中指定时的默认目标（choices/别名见 devprofiles.py）。
+顶部标题与设备标签会按每台实际类型显示（如 `A: CH32V203 虚拟机 · B: HT-HC01 虚拟机`）。
 
 ### PC 模拟器 ↔ 真实 CH32V203 板（串口空口建链）
 
@@ -73,6 +80,11 @@ python server.py --a COM3:tj45 --b COM4:tj45
 
 tj45 目标会：连接后自动下发 `AT+SYSDBG=LMAC,0` / `AT+SYSDBG=WNB,0` 关闭真实板的
 调试刷屏；用裸 `AT+VERSION` 查询版本；状态解析同时兼容 `MODE:AP` 与 `+MODE:AP`。
+
+```bash
+# 两块真实 HT-HC01 板（占位：命令集待其手册，先按泰芯 AH 同款处理并关调试刷屏）
+python server.py --a COM3:hc01 --b COM4:hc01
+```
 
 > **互联域限制**：只有「PC↔PC」能通过**虚拟空口(TCP)**互联；「真机↔真机」靠物理
 > UART2（CH32V203 模拟器板）或 RF（T-Halow-RJ45）互联；**PC 与真机之间无法自动建链**，
@@ -114,7 +126,8 @@ python server.py --port 8899         # 自定义端口
 服务器(server.py) ── 传输层(SerialTransport/TcpTransport) ──▶ 设备控制台
 ```
 
-- **逐台设备**：`--a/--b` 各自指定 `pc | pc:tj45 | COM3 | COM3:tj45`；
+- **逐台设备**：`--a/--b` 各自指定 `pc | pc:sim | pc:tj45 | pc:txah | pc:hc01 | COM3 | ...`
+  （规范 key 与别名见 `host/devprofiles.py`）；
   PC 设备用 `TcpTransport` 连其 TCP 控制台（A `127.0.0.1:9001`，B `127.0.0.1:9002`），
   真机用 `SerialTransport` 连 UART 控制台（115200 8N1）。
 - **空口**：PC 设备默认 TCP 虚拟空口；`--a-link/--b-link COMx` 改走串口空口连真机 UART2。

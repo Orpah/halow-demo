@@ -24,6 +24,9 @@ import socket
 import threading
 import time
 
+# 协议族（AT 方言）定义在 devprofiles.py：native=本模拟器，tah=泰芯 AH，hc01=HT-HC01 占位
+from devprofiles import FAMILY_NATIVE, FAMILY_TAH, FAMILY_HC01, tah_style
+
 # ---------------------------------------------------------------------------
 # 与固件一致的常量与工具
 # ---------------------------------------------------------------------------
@@ -583,9 +586,10 @@ class Wifi:
 # AT 引擎（对应固件 sim_at）
 # ---------------------------------------------------------------------------
 class At:
-    def __init__(self, core, tj45=False):
+    def __init__(self, core, family=FAMILY_NATIVE):
         self.core = core
-        self.tj45 = tj45
+        self.family = family          # native / tah / hc01（见 devprofiles.py）
+        self.tah = tah_style(family)  # 泰芯 AH 风格：+ 前缀 / 裸查询 / 状态行不追加 OK
         self.dbg_lmac = 0
         self.dbg_wnb = 0
         self.txdata = None       # None 或 (len, buf)
@@ -600,18 +604,18 @@ class At:
         self.out("ERROR")
 
     def resp(self, key, val):
-        # T-Halow-RJ45 状态响应带 + 前缀（如 +MODE:AP），便于 thalow_config.py
-        # 等真实板工具直接对 PC 模拟器使用。查询只回状态行、不再追加 OK：
-        # 否则 UI 轮询（AT+CONN_STATE/AT+RSSI/AT+MODE?/AT+SSID?）会让控制台被 OK 刷屏。
-        self.out(f"{'+' if self.tj45 else ''}{key}:{val}")
-        if not self.tj45:
+        # 泰芯 AH 族（tah：tj45/txah；hc01 占位暂同）状态响应带 + 前缀（如 +MODE:AP），
+        # 便于 thalow_config.py 等真实板工具直接对 PC 模拟器使用。查询只回状态行、不再
+        # 追加 OK：否则 UI 轮询（AT+CONN_STATE/AT+RSSI/AT+MODE?/AT+SSID?）会刷屏。
+        self.out(f"{'+' if self.tah else ''}{key}:{val}")
+        if not self.tah:
             self.ok()
 
     # ---------------- handlers ----------------
     def h_mode(self, a):
         c = self.core.cfg
-        # T-Halow-RJ45 用裸 AT+MODE 查询当前模式（thalow_config.py 的 resync/status）
-        if a == "?" or (self.tj45 and a == ""):
+        # 泰芯 AH 族用裸 AT+MODE 查询当前模式（thalow_config.py 的 resync/status）
+        if a == "?" or (self.tah and a == ""):
             self.resp("MODE", MODE_STR.get(c.mode, "?"))
             return
         m = {"AP": MODE_AP, "STA": MODE_STA, "APSTA": MODE_APSTA, "GROUP": MODE_GROUP}.get(a.upper())
@@ -979,14 +983,15 @@ At.TABLE = {
 # ---------------------------------------------------------------------------
 class Core:
     def __init__(self, name, role, console_port, link_port, peer_link,
-                 autoconf=True, tj45=False, link_serial=None, link_baud=115200):
+                 autoconf=True, family=FAMILY_NATIVE, link_serial=None,
+                 link_baud=115200):
         self.name = name
-        self.tj45 = tj45
+        self.family = family
         self.cfg = SimCfg()
         if role.upper() in ("AP", "STA", "APSTA", "GROUP"):
             self.cfg.mode = {"AP": MODE_AP, "STA": MODE_STA,
                              "APSTA": MODE_APSTA, "GROUP": MODE_GROUP}[role.upper()]
-        self.at = At(self, tj45=tj45)
+        self.at = At(self, family=family)
         self.wifi = Wifi(self)
         self.link = Link(self)
         self.console = Console(console_port, self.at.run,
@@ -1057,8 +1062,12 @@ def main():
     ap.add_argument("--peer", default=None, help="对端空口 host:port（连接方）")
     ap.add_argument("--ssid", default="halowlink")
     ap.add_argument("--tj45", action="store_true",
-                    help="T-Halow-RJ45 兼容模式：状态响应带 + 前缀（+MODE:AP 等），"
-                         "使 thalow_config.py 等真实板工具可直接使用")
+                    help="[兼容旧用法] T-Halow-RJ45 兼容模式，等价 --family tah："
+                         "状态响应带 + 前缀（+MODE:AP 等）")
+    ap.add_argument("--family", default=FAMILY_NATIVE,
+                    choices=[FAMILY_NATIVE, FAMILY_TAH, FAMILY_HC01],
+                    help="协议族/AT 方言：native=本模拟器(CH32V203)，"
+                         f"tah=泰芯 AH(T-Halow-RJ45/TX-AH)，hc01=HT-HC01(占位)")
     ap.add_argument("--link-serial", default=None,
                     help="串口空口（连真实 CH32V203 板的 UART2，需 USB 转串口），如 COM5；"
                          "设置后不再使用 TCP 空口")
@@ -1070,10 +1079,12 @@ def main():
         host, _, port = args.peer.partition(":")
         peer = (host, int(port))
 
-    core = Core(args.name, args.role, args.console, args.link, peer, tj45=args.tj45,
-                link_serial=args.link_serial, link_baud=args.link_baud)
+    family = FAMILY_TAH if args.tj45 else args.family
+    core = Core(args.name, args.role, args.console, args.link, peer,
+                family=family, link_serial=args.link_serial,
+                link_baud=args.link_baud)
     core.cfg.ssid = args.ssid
-    print(f"[{args.name}] 就绪: AT 控制台 127.0.0.1:{args.console}  空口 :{args.link}")
+    print(f"[{args.name}] 就绪 (family={family}): AT 控制台 127.0.0.1:{args.console}  空口 :{args.link}")
     core.loop()
 
 

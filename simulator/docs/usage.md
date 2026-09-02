@@ -41,7 +41,21 @@ python host/sim.py --name B --role STA --console 9002 --link 9012 --peer 127.0.0
 ```
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
-查询（`AT+MODE`、`AT+VERSION`）；我们的 PC 模拟器 `--tj45` 模式完全对齐这两点。
+查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
+
+### 0.1.1 多模组（设备档案见 `host/devprofiles.py`）
+
+目标 key：`sim`（CH32V203）/ `tj45`（T-Halow-RJ45）/ `txah`（TX-AH，泰芯原厂，同族）/ `hc01`
+（HT-HC01，惠特自动化 ESP32+MM6108，**占位**：真实 AT 待其手册，暂按泰芯 AH 方言）。
+
+```bash
+# 两台 HT-HC01 虚拟机（占位）
+python tools/ui/server.py --host-sim --target hc01
+python host/sim.py --name A --role AP --console 9001 --link 9011 --family hc01
+
+# 配置真实 HT-HC01 板（占位，同款处理）
+python tools/sim_config.py COM3 status --variant hc01
+```
 
 > **互联域限制**：只有「PC↔PC」能通过虚拟空口(TCP)互联；「真机↔真机」靠物理
 > UART2（CH32V203 模拟器板）或 RF（T-Halow-RJ45）互联；PC 与真机之间无法自动建链，

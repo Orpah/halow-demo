@@ -1,0 +1,102 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "sim-git-status",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoLogo",
+				"-Command",
+				"cd f:\\git\\halow-demo; git status --short; git --no-pager log --oneline -6"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "sim-diff-stat",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoLogo",
+				"-Command",
+				"cd f:\\git\\halow-demo; git --no-pager diff --stat; echo '--- untracked sizes ---'; git status --short | Select-String '^\\?\\?'"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "py-compile-sim",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"-m",
+				"py_compile",
+				"f:\\git\\halow-demo\\simulator\\host\\sim.py",
+				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
+				"f:\\git\\halow-demo\\simulator\\tools\\sim_config.py",
+				"f:\\git\\T-Halow-RJ45\\tools\\thalow_config.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "sim-regression",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\host\\run_tests.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "list-ports",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
+				"--list"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "sim-server-host-sim",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
+				"--host-sim"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "sim-server-tj45",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
+				"--host-sim",
+				"--target",
+				"tj45"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "sim-server-hc01",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
+				"--host-sim",
+				"--target",
+				"hc01"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

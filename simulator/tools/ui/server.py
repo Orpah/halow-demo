@@ -5,16 +5,18 @@ server.py — TXW8301 模拟器 Web UI 后端
 ======================================
 本地 HTTP + SSE 服务，把 1~2 台设备（模拟器/真实板）的控制台桥接到浏览器。
 
-每台设备可独立指定「来源 × 目标」：
+每台设备可独立指定「来源 × 目标」，目标档案/协议族见 host/devprofiles.py：
   来源 source : pc（PC 版模拟器，进程内） / serial（真机串口）
-  目标 target : sim（CH32V203） / tj45（T-Halow-RJ45）
-四种组合：CH32V203 虚拟机 / CH32V203 真机 / T-Halow-RJ45 虚拟机 / T-Halow-RJ45 真机
+  目标 target : sim（CH32V203）/ tj45（T-Halow-RJ45）/ txah（TX-AH）/ hc01（HT-HC01 占位）
+  协议族 family：native（本模拟器）/ tah（泰芯 AH：tj45+txah）/ hc01（占位，暂复用 tah 方言，待手册）
 
 设备规格 --a/--b（缺省目标用 --target）：
     pc            PC 版 CH32V203 模拟器
     pc:tj45       PC 版 T-Halow-RJ45 兼容模拟器
+    pc:hc01       PC 版 HT-HC01 兼容模拟器（占位）
     COM3          CH32V203 真机（串口）
     COM3:tj45     T-Halow-RJ45 真机（串口，自动关调试刷屏）
+    COM3:hc01     HT-HC01 真机（串口）
 
 零第三方依赖（仅 pyserial，纯 PC 模拟器时也不需要）。启动后自动打开浏览器：
     python server.py                     # 自动识别 CH340 串口（真机）
@@ -59,6 +61,13 @@ BAUD = 115200
 HTTP_PORT = 8899
 STATIC_DIR = "static"
 
+# 设备档案 / 协议族注册表（单一事实来源），与 host/sim.py 共用
+_HOST_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "host"))
+if _HOST_DIR not in sys.path:
+    sys.path.insert(0, _HOST_DIR)
+import devprofiles as dp
+
 # 全局事件队列：设备线程 -> SSE 推送（有界，防消费慢/断连时无限堆积）
 EVENTS = queue.Queue(maxsize=2000)
 STOP = threading.Event()
@@ -72,22 +81,16 @@ TARGET = "sim"
 
 
 def norm_target(t, default):
-    """把 'sim'/'ch32'/'tj45'/'thalow'/'txah' 等别名归一为 sim / tj45 / txah。"""
-    t = (t or "").lower()
-    if t in ("sim", "ch32", "ch32v203"):
-        return "sim"
-    if t in ("tj45", "thalow", "t-halow", "rj45"):
-        return "tj45"
-    if t in ("txah", "tx-ah", "tx_ah", "ah", "tx-ah-module"):
-        return "txah"
-    return default
+    """别名归一为规范 target key，委托 host/devprofiles.py（sim/tj45/txah/hc01）。"""
+    return dp.norm_target(t, default)
 
 
 def parse_device_spec(spec, default_target="sim"):
     """解析单台设备描述 → (source, target, port) 或 None。
-       支持：pc / pc:sim / pc:tj45 / pc:txah / COM3 / COM3:sim / COM3:tj45 / COM3:txah
+       支持：pc / pc:sim / pc:tj45 / pc:txah / pc:hc01 / COM3 / COM3:sim / ...
        source: pc=PC 版模拟器，serial=真机串口
-       target: sim=CH32V203，tj45=T-Halow-RJ45，txah=TX-AH-MODULE
+       target: 规范 key（见 devprofiles）sim=CH32V203，tj45=T-Halow-RJ45，
+               txah=TX-AH-MODULE，hc01=HT-HC01（占位）
     """
     spec = (spec or "").strip()
     if not spec:
@@ -110,14 +113,13 @@ def parse_device_spec(spec, default_target="sim"):
 
 
 def device_type(source, target):
-    """设备类型中文标签：CH32V203/T-Halow-RJ45/TX-AH × 虚拟机/真机。"""
-    hw = "CH32V203" if target == "sim" else ("TX-AH" if target == "txah" else "T-Halow-RJ45")
+    """设备类型中文标签：档案名（CH32V203/T-Halow-RJ45/TX-AH/HT-HC01）× 虚拟机/真机。"""
     loc = "虚拟机" if source == "pc" else "真机"
-    return f"{hw} {loc}"
+    return f"{dp.name(target)} {loc}"
 
 
 def banner_sub(devices):
-    """顶部标题副文字：按设备类型组合显示。"""
+    """顶部标题副文字：按设备类型组合显示（虚拟/真机 × 档案名）。"""
     if not devices:
         return "CH32V203 · 无射频 · 虚拟空口"
     dtypes = [device_type(d.source, d.target) for d in devices.values()]
@@ -125,8 +127,9 @@ def banner_sub(devices):
         t = dtypes[0]
         if t == "CH32V203 虚拟机":
             return "CH32V203 · 无射频 · 虚拟空口"
-        if t == "T-Halow-RJ45 虚拟机":
-            return "T-Halow-RJ45 兼容 · 无射频 · 虚拟空口"
+        if t.endswith("虚拟机"):
+            base = t[:-len("虚拟机")].rstrip()          # 如 T-Halow-RJ45 / HT-HC01
+            return f"{base} 兼容 · 无射频 · 虚拟空口"
         return t                       # 真机
     # 混合来源/目标：逐台列出
     return " · ".join(f"{n}: {device_type(d.source, d.target)}"
@@ -208,10 +211,8 @@ class HostSims:
 
     def _hsim(self):
         if self._sim is None:
-            host_dir = os.path.normpath(os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "..", "host"))
-            if host_dir not in sys.path:
-                sys.path.insert(0, host_dir)
+            if _HOST_DIR not in sys.path:      # 导入 devprofiles 时已加入
+                sys.path.insert(0, _HOST_DIR)
             import sim as hsim
             self._sim = hsim
         return self._sim
@@ -220,7 +221,7 @@ class HostSims:
             link_serial=None):
         hsim = self._hsim()
         core = hsim.Core(name, role, console_port, link_port, peer_link,
-                         tj45=(target in ("tj45", "txah")),  # 泰芯 AH 协议族
+                         family=dp.family(target),   # 协议族由档案表决定（tah/hc01/native）
                          link_serial=link_serial)
         self.cores.append(core)
 
@@ -388,8 +389,10 @@ class Device:
         time.sleep(0.3)
         self.send("AT+SYSDBG=LMAC,0")
         self.send("AT+SYSDBG=WNB,0")
-        # T-Halow-RJ45 用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）
-        self.send("AT+VERSION" if self.target == "tj45" else "AT+VERSION?")
+        # 泰芯 AH 族/占位族（tah/hc01）用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）；
+        # 本模拟器(native)用 AT+VERSION?
+        self.send("AT+VERSION" if dp.family(self.target) in (dp.FAMILY_TAH, dp.FAMILY_HC01)
+                  else "AT+VERSION?")
         while not STOP.is_set():
             if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询，避免污染 TXDATA 字节
                 time.sleep(0.5)
@@ -528,7 +531,7 @@ def main():
     ap = argparse.ArgumentParser(description="TXW8301 模拟器 Web UI")
     ap.add_argument("--list", action="store_true", help="列出串口")
     ap.add_argument("--a", dest="spec_a",
-                    help="设备A：pc | pc:sim | pc:tj45 | COM3 | COM3:sim | COM3:tj45")
+                    help="设备A：pc | pc:sim | pc:tj45 | pc:txah | pc:hc01 | COM3 | COM3:sim | ...")
     ap.add_argument("--b", dest="spec_b",
                     help="设备B：同上（格式同 --a）")
     ap.add_argument("--a-link", dest="link_a",
@@ -537,8 +540,9 @@ def main():
                     help="设备B的空口串口（B 为 PC 模拟器时连真实板 UART2），如 COM5")
     ap.add_argument("--host-sim", action="store_true",
                     help="等价于 --a pc --b pc（PC 版模拟器，无硬件）")
-    ap.add_argument("--target", default="sim", choices=["sim", "tj45", "txah"],
-                    help="未在设备规格中指定时的默认目标")
+    ap.add_argument("--target", default="sim", choices=dp.ORDER,
+                    help="未在设备规格中指定时的默认目标：" + "/".join(dp.ORDER)
+                        + "（见 host/devprofiles.py）")
     ap.add_argument("--port", type=int, default=HTTP_PORT)
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
