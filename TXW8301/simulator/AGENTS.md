@@ -10,10 +10,12 @@
 - Web UI 启动（不依赖 cwd，`server.py` 用 `os.path.dirname(__file__)` 定位 static/host）：
   - 两台 T-Halow 虚拟机：`python tools/ui/server.py --host-sim --target tj45`
   - 一台真机 + 一台虚拟机：`python tools/ui/server.py --a pc:tj45 --b COM13:tj45`
+  - 一台 TX-AH 真机 + 虚拟机：`python tools/ui/server.py --a pc:tj45 --b COM13:txah`
   - 两台真机（真实 RF）：`python tools/ui/server.py --a COM3:tj45 --b COM4:tj45`
   - 列出串口：`python tools/ui/server.py --list`
-- 设备规格：`pc | pc:sim | pc:tj45 | COM3 | COM3:sim | COM3:tj45`（来源×目标，
-  source=pc/serial，target=sim/tj45）。
+- 设备规格：`pc | pc:sim | pc:tj45 | pc:txah | COM3 | COM3:sim | COM3:tj45 | COM3:txah`
+  （来源×目标；source=pc/serial；target=sim/tj45/txah；txah=泰芯 TX-AH-MODULE，
+  协议与 tj45 同属泰芯 AH 固件，显示名 TX-AH）。
 
 ## 2. 互联域（硬规则）
 

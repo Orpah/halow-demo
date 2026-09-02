@@ -72,20 +72,22 @@ TARGET = "sim"
 
 
 def norm_target(t, default):
-    """把 'sim'/'ch32'/'tj45'/'thalow' 等别名归一为 sim / tj45。"""
+    """把 'sim'/'ch32'/'tj45'/'thalow'/'txah' 等别名归一为 sim / tj45 / txah。"""
     t = (t or "").lower()
     if t in ("sim", "ch32", "ch32v203"):
         return "sim"
     if t in ("tj45", "thalow", "t-halow", "rj45"):
         return "tj45"
+    if t in ("txah", "tx-ah", "tx_ah", "ah", "tx-ah-module"):
+        return "txah"
     return default
 
 
 def parse_device_spec(spec, default_target="sim"):
     """解析单台设备描述 → (source, target, port) 或 None。
-       支持：pc / pc:sim / pc:tj45 / COM3 / COM3:sim / COM3:tj45
+       支持：pc / pc:sim / pc:tj45 / pc:txah / COM3 / COM3:sim / COM3:tj45 / COM3:txah
        source: pc=PC 版模拟器，serial=真机串口
-       target: sim=CH32V203，tj45=T-Halow-RJ45
+       target: sim=CH32V203，tj45=T-Halow-RJ45，txah=TX-AH-MODULE
     """
     spec = (spec or "").strip()
     if not spec:
@@ -108,8 +110,8 @@ def parse_device_spec(spec, default_target="sim"):
 
 
 def device_type(source, target):
-    """设备类型中文标签：CH32V203/T-Halow-RJ45 × 虚拟机/真机。"""
-    hw = "CH32V203" if target == "sim" else "T-Halow-RJ45"
+    """设备类型中文标签：CH32V203/T-Halow-RJ45/TX-AH × 虚拟机/真机。"""
+    hw = "CH32V203" if target == "sim" else ("TX-AH" if target == "txah" else "T-Halow-RJ45")
     loc = "虚拟机" if source == "pc" else "真机"
     return f"{hw} {loc}"
 
@@ -218,7 +220,8 @@ class HostSims:
             link_serial=None):
         hsim = self._hsim()
         core = hsim.Core(name, role, console_port, link_port, peer_link,
-                         tj45=(target == "tj45"), link_serial=link_serial)
+                         tj45=(target in ("tj45", "txah")),  # 泰芯 AH 协议族
+                         link_serial=link_serial)
         self.cores.append(core)
 
         def loop(c):
@@ -533,7 +536,7 @@ def main():
                     help="设备B的空口串口（B 为 PC 模拟器时连真实板 UART2），如 COM5")
     ap.add_argument("--host-sim", action="store_true",
                     help="等价于 --a pc --b pc（PC 版模拟器，无硬件）")
-    ap.add_argument("--target", default="sim", choices=["sim", "tj45"],
+    ap.add_argument("--target", default="sim", choices=["sim", "tj45", "txah"],
                     help="未在设备规格中指定时的默认目标")
     ap.add_argument("--port", type=int, default=HTTP_PORT)
     ap.add_argument("--no-browser", action="store_true")
