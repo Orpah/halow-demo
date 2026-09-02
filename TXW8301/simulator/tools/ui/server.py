@@ -461,7 +461,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
             return
         ctype = {"html": "text/html", "js": "application/javascript",
-                 "css": "text/css"}.get(p.rsplit(".", 1)[-1], "text/plain")
+                 "css": "text/css", "png": "image/png", "svg": "image/svg+xml",
+                 "ico": "image/x-icon"}.get(p.rsplit(".", 1)[-1], "text/plain")
         with open(p, "rb") as f:
             # no-store：静态文件不缓存，改样式/脚本刷新即生效（防浏览器旧缓存）
             self._send(200, f.read(), ctype,
