@@ -88,6 +88,23 @@
     **conn 只在 STA 到 `WPA_COMPLETED`（或 AP 有已认证 STA）才算 CONNECTED**——不用 RSSI 推断
     （KEY 错时 RSSI 非 0 但 4-way 反复失败 → STA 显示 SCANNING、AP 显示 OFFLINE）。
   - 每块 UMAC 开头清空 VIF 快照，避免重启后陈旧状态误报。
+- **真机功能实测事实（2026-09-07，详细实测记录见 docs/usage.md §0.1.0.1）**：
+  - **重配加密链路次序坑（LOADDEF 后尤其）**：`AT+KEY=` 用**当时 SSID** 派生 PSK。改 SSID 后必须重设
+    KEY，且次序固定 = **先 `AT+SSID=` → `AT+ENCRYPT=1` → `AT+KEY=`**；次序颠倒/只改 SSID 不重设
+    KEY → STA **能扫到该 AP（BSSID/RSSI/WPA2-PSK-CCMP 都在 BSS 表里）却一直卡 SCANNING 不去关联**、
+    AP 侧无 STA、RSSI 两边都 0。按序重配 + 双 `AT+RST` 即恢复。
+  - **恢复出厂 `AT+LOADDEF=1`**：自动复位回默认 = `WIFIMODE=sta` + SSID `HALOW_<MAC尾3字节>`（如
+    HALOW_647090），配置**自动保存**。LOADDEF/多次 RST 后若 RF 互听不到：先按上面次序重配双端再 RST，
+    仍不行需**物理断电重插 USB** 清 RF 前端。
+  - **中文 SSID 能连**（UTF-8，两侧字节一致+同 KEY；SSID ≤32 字节≈10 个汉字）。
+    **PAIR 快速配对**：双端 `AT+PAIR=1`（A 侧打 pairing success）→`AT+PAIR=0` → STA 用**从 AP 学到**
+    的 SSID/KEY 自动连（免手填，中文 SSID 也字节一致传递）。常规连接 AP/STA 必须同 SSID，PAIR 是唯一例外。
+  - 隐藏/信道/带宽/功率/自愈/休眠：`AT+APHIDE=1` 只挡通配发现，已知 SSID 定向扫描/已关联仍能连
+    （802.11 标准）；AP `AT+CHANNEL=n`（chan_list 内序号）切主信道，STA 在共享 chan_list 内自动跟随重连
+    （9080↔9240 均跟）；`AT+BSS_BW` 两侧一致同改（8↔4MHz）按新带宽重连；`AT+TXPOWER=1..20` 生效但近距离
+    RSSI 看不出功率差（桌面饱和，需拉远几米）；AP 复位→STA 正确 SCANNING→~15s 自动重连；连接态
+    `AT+DSLEEP=1` 保活休眠（链路保持、AT 可用、AP 端 `AT+WAKEUP=<mac>` 接受）。KEY 明文可被
+    `AT+KEY=?`/`AT+SYSCFG` 读回（防"别人连入"，不防"改配置"）。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 
