@@ -21,15 +21,21 @@ FAMILY_HC01 = "hc01"      # HT-HC01（惠特自动化 ESP32+MM6108，Morse Micro
 
 
 class Profile:
-    """一个设备档案：key（规范名）+ aliases（别名）+ name（中文显示名）+ family（协议族）。"""
+    """一个设备档案：key（规范名）+ aliases（别名）+ name（中文显示名）+ family（协议族）
+    + at（真实板 AT 指令版本：None=默认 T-Halow 风格 / "v2"=泰芯 AH-SDK V2.x）。
 
-    __slots__ = ("key", "aliases", "name", "family")
+    at 只影响「真机串口」的轮询/解析/命令引导；PC 模拟器始终用 family 对应的模拟方言
+    （sim.py 只模拟 T-Halow 风格 tah 方言，不会模拟 WIFIMODE 等 V2 命令）。
+    """
 
-    def __init__(self, key, aliases, name, family):
+    __slots__ = ("key", "aliases", "name", "family", "at")
+
+    def __init__(self, key, aliases, name, family, at=None):
         self.key = key
         self.aliases = aliases
         self.name = name
         self.family = family
+        self.at = at
 
 
 # 规范 key 顺序（同时是 --target 的 choices 展示顺序）
@@ -40,8 +46,11 @@ PROFILES = {
                     "CH32V203", FAMILY_NATIVE),
     "tj45": Profile("tj45", ("tj45", "thalow", "t-halow", "rj45"),
                     "T-Halow-RJ45", FAMILY_TAH),
+    # TX-AH 泰芯原厂模组（TX-AH-Rx00P 系列，AH-SDK V2.x 固件 v2.4.1.x）：
+    # 真机 AT 用 AT+WIFIMODE/AT+ENCRYPT/AT+KEY，查询带 '?'（AT+WIFIMODE=? 等），
+    # 无 AT+MODE/AT+CONN_STATE/AT+RSSI(裸) —— 与 T-Halow(tj45) 方言不同（2026-09-06 实测）。
     "txah": Profile("txah", ("txah", "tx-ah", "tx_ah", "ah", "tx-ah-module"),
-                    "TX-AH", FAMILY_TAH),
+                    "TX-AH", FAMILY_TAH, at="v2"),
     # 占位：HT-HC01 真机/虚拟机已可被识别管理，AT 方言细节待手册
     "hc01": Profile("hc01", ("hc01", "ht-hc01", "ht_hc01", "hthc01", "htc01"),
                     "HT-HC01", FAMILY_HC01),
@@ -77,6 +86,20 @@ def name(key):
     """target key → 中文显示名（如 HT-HC01）。未知 key 原样返回。"""
     k = (key or "").lower()
     return PROFILES[k].name if k in PROFILES else (key or "?")
+
+
+def at_version(key):
+    """target key → 真实板 AT 指令版本：'v2'=泰芯 AH-SDK V2.x（txah），否则 None。
+
+    仅供「真机串口」使用（PC 模拟器不受影响，见 Profile.at 注释）。
+    """
+    k = (key or "").lower()
+    return PROFILES[k].at if k in PROFILES else None
+
+
+def real_at_v2(source, target):
+    """该真机串口设备是否用泰芯 AH-SDK V2.x 方言（source=serial 且档案 at='v2'）。"""
+    return (source or "").strip().lower() == "serial" and at_version(target) == "v2"
 
 
 def tah_style(fam):

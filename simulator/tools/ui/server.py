@@ -16,6 +16,8 @@ server.py — TXW8301 模拟器 Web UI 后端
     pc:hc01       PC 版 HT-HC01 兼容模拟器（占位）
     COM3          CH32V203 真机（串口）
     COM3:tj45     T-Halow-RJ45 真机（串口，自动关调试刷屏）
+    COM3:txah     TX-AH 泰芯真机（串口，AH-SDK V2.x 方言：AT+WIFIMODE / AT+SSID=? /
+                  AT+RSSI=?，无 AT+MODE/AT+CONN_STATE —— 见 host/devprofiles.py at='v2'）
     COM3:hc01     HT-HC01 真机（串口）
 
 零第三方依赖（仅 pyserial，纯 PC 模拟器时也不需要）。启动后自动打开浏览器：
@@ -257,6 +259,14 @@ class Device:
         self.buf = b""
         self.poll_paused_until = 0.0   # 数据模式（AT+TXDATA）期间暂停轮询的时间戳
         self._poll_until = 0.0         # 轮询响应窗口：窗口内到达的状态行不进控制台（避免刷屏）
+        # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
+        self.tahv2 = dp.real_at_v2(source, target)
+        if self.tahv2:
+            self.poll_status = ["AT+RSSI=?", "AT+WIFIMODE=?"]
+            self.poll_slow = ["AT+SSID=?"]
+        else:
+            self.poll_status = POLL_STATUS   # ["AT+CONN_STATE", "AT+RSSI"]
+            self.poll_slow = POLL_SLOW       # ["AT+MODE?", "AT+SSID?"]
 
     def send(self, line):
         try:
@@ -314,9 +324,22 @@ class Device:
                 self.push("frame", dir=d, hex=parts[1])
                 self.push("console", text=line, dir=cdir)
             return
-        # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45）
-        had_plus = line.startswith("+")
-        probe = line[1:] if had_plus else line
+        # 泰芯真机(V2)回显带消息序号前缀，如 "[139427]SSID: HALOW_..."，先剥离
+        tline = line
+        if tline.startswith("["):
+            j = tline.find("]")
+            if 0 < j <= 16 and tline[1:j].isdigit():
+                tline = tline[j + 1:].lstrip()
+        # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45 / 泰芯 V2）
+        had_plus = tline.startswith("+")
+        probe = tline[1:] if had_plus else tline
+        in_poll = time.time() < self._poll_until
+
+        def echo(text):
+            """轮询响应窗口内不把状态行打进控制台（避免 2s 刷屏）。"""
+            if not in_poll:
+                self.push("console", text=text, dir="rx")
+
         if ":" in probe:
             key, _, val = probe.partition(":")
             k = key.strip().upper()
@@ -326,39 +349,43 @@ class Device:
                 self.state["ok"] = True
                 self.state["uptime"] = int(time.time() - self.t0)
                 self.push("status", state=dict(self.state))
-                if time.time() >= self._poll_until:
-                    self.push("console", text=line, dir="rx")
+                echo(line)
                 return
             if k == "RSSI":
                 try:
-                    self.state["rssi"] = int(v)
+                    r = int(v)
+                    self.state["rssi"] = r
+                    # 泰芯真机(V2)无 AT+CONN_STATE：用 RSSI? 推断（关联后为非 0 负值，空闲为 0）
+                    if self.tahv2:
+                        self.state["conn"] = "CONNECTED" if r != 0 else "OFFLINE"
+                        self.state["ok"] = r != 0 or self.state.get("ok")
+                        self.state["uptime"] = int(time.time() - self.t0)
                 except ValueError:
                     pass
                 self.push("status", state=dict(self.state))
-                if time.time() >= self._poll_until:
-                    self.push("console", text=line, dir="rx")
+                echo(line)
                 return
-            if k == "MODE":
-                self.state["mode"] = v
+            if k in ("MODE", "WIFIMODE"):
+                self.state["mode"] = v.upper()
                 self.push("status", state=dict(self.state))
-                if time.time() >= self._poll_until:
-                    self.push("console", text=line, dir="rx")
+                echo(line)
                 return
             if k == "SSID":
                 self.state["ssid"] = v
                 self.push("status", state=dict(self.state))
-                if time.time() >= self._poll_until:
-                    self.push("console", text=line, dir="rx")
+                echo(line)
                 return
             if k == "VERSION":
                 self.state["version"] = v
                 self.push("status", state=dict(self.state))
-                if time.time() >= self._poll_until:
-                    self.push("console", text=line, dir="rx")
+                echo(line)
                 return
         # 事件：+CONNECTED / +PAIR SUCCESS 等（无冒号或非状态键）
         if had_plus:
             self.push("event", text=line, dir="rx")
+            return
+        # 轮询窗口内的裸 OK/ERROR（泰芯真机每条应答都自带 OK）不进控制台，避免刷屏
+        if line in ("OK", "ERROR") and in_poll:
             return
         # 数据模式结束（TXDATA 帧完成）→ 恢复轮询
         if line in ("TX DATA OK", "TX DATA FAIL"):
@@ -389,21 +416,39 @@ class Device:
         time.sleep(0.3)
         self.send("AT+SYSDBG=LMAC,0")
         self.send("AT+SYSDBG=WNB,0")
+        if self.tahv2:
+            self.send("AT+SYSDBG=UMAC,0")   # 泰芯真机还有 UMAC 刷屏
         # 泰芯 AH 族/占位族（tah/hc01）用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）；
         # 本模拟器(native)用 AT+VERSION?
         self.send("AT+VERSION" if dp.family(self.target) in (dp.FAMILY_TAH, dp.FAMILY_HC01)
                   else "AT+VERSION?")
+        if self.tahv2:
+            # 泰芯真机(V2)一次只应答一条查询（背靠背会吞掉后面的应答）：
+            # 逐条错开发送；RSSI? 每轮 1 次，WIFIMODE?/SSID? 交替慢轮
+            seq = [("AT+RSSI=?", 1.3), ("AT+WIFIMODE=?", 1.3),
+                   ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3)]
+            i = 0
+            while not STOP.is_set():
+                if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询
+                    time.sleep(0.5)
+                    continue
+                cmd, gap = seq[i % len(seq)]
+                i += 1
+                self._poll_until = time.time() + 1.2        # 轮询响应窗口（状态行不进控制台）
+                self.send(cmd)
+                time.sleep(gap)
+            return
         while not STOP.is_set():
             if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询，避免污染 TXDATA 字节
                 time.sleep(0.5)
                 continue
             self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
-            for c in POLL_STATUS:
+            for c in self.poll_status:
                 self.send(c)
             now = time.time()
             if now - last_slow > 5:
                 last_slow = now
-                for c in POLL_SLOW:
+                for c in self.poll_slow:
                     self.send(c)
             time.sleep(2)
 
@@ -446,7 +491,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "devices": {
                     n: {"source": d.source, "target": d.target,
                         "type": device_type(d.source, d.target),
-                        "link": d.link_desc}
+                        "link": d.link_desc,
+                        "v2": d.tahv2}          # 前端据此切泰芯 V2.x 命令集/快捷按钮
                     for n, d in DEVICES.items()
                 },
             }).encode())
@@ -593,9 +639,12 @@ def main():
                 dev = Device(name, TcpTransport("127.0.0.1", console_p), link_hint,
                              source="pc", target=target, link_desc=link_hint)
             else:
+                # 真机串口的物理互联介质：native(CH32V203 模拟器板)=UART2 交叉线，
+                # 其余(tah/hc01，T-Halow/TX-AH/HT-HC01)=真实射频 RF
+                air = ("UART2 物理空口" if dp.family(target) == dp.FAMILY_NATIVE
+                       else "RF 物理空口（802.11ah）")
                 dev = Device(name, SerialTransport(port), port,
-                             source="serial", target=target,
-                             link_desc="UART2 物理空口")
+                             source="serial", target=target, link_desc=air)
             DEVICES[name] = dev
         except Exception as e:
             print(f"[{name}] 初始化失败: {e}")

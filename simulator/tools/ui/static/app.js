@@ -46,6 +46,83 @@ const AT_CMDS = [
   { cmd: "AT+TXDATA=", hint: "[长度] 进入数据模式发送数据" },
   { cmd: "AT+RST", hint: "复位模块" },
 ];
+
+/* TX-AH 泰芯真机（AH-SDK V2.x 固件 v2.4.1.x）命令提示库：真机串口(txah)用。
+   与 T-Halow(tj45)/模拟器方言不同：设模式 AT+WIFIMODE=、查询带 '?'、无 AT+MODE/CONN_STATE。 */
+const CMDS_TAHV2 = [
+  { cmd: "AT+WIFIMODE=", hint: "[ap/sta/apsta] 工作模式" },
+  { cmd: "AT+WIFIMODE=?", hint: "查询当前模式" },
+  { cmd: "AT+SSID=", hint: "[ssid] 网络名（≤32字符）" },
+  { cmd: "AT+SSID=?", hint: "查询 SSID" },
+  { cmd: "AT+ENCRYPT=", hint: "[0/1] 加密开关" },
+  { cmd: "AT+KEY=", hint: "[≥8字符] 加密密钥（ASCII）" },
+  { cmd: "AT+PAIR=", hint: "[0/1/2] 快速配对（成功后 AT+PAIR=0 建链）" },
+  { cmd: "AT+CHAN_LIST=", hint: "[freq1,freq2,...] 工作频率（AP/STA 须完全一致）" },
+  { cmd: "AT+CHAN_LIST=?", hint: "查询信道列表" },
+  { cmd: "AT+BSS_BW=", hint: "[1/2/4/8] 带宽 MHz" },
+  { cmd: "AT+BSS_BW=?", hint: "查询带宽" },
+  { cmd: "AT+CHANNEL=", hint: "[序号] AP 端工作信道序号" },
+  { cmd: "AT+SCAN", hint: "扫描周围 AP（结果看 UMAC 打印 AT+SYSDBG=UMAC,1）" },
+  { cmd: "AT+SYSCFG", hint: "查看设备参数" },
+  { cmd: "AT+RSSI=?", hint: "查询信号强度（关联后非 0）" },
+  { cmd: "AT+MAC_ADDR=?", hint: "查询本机 MAC" },
+  { cmd: "AT+TXPOWER=", hint: "[1..20] 发射功率 dBm" },
+  { cmd: "AT+ACK_TO=", hint: "[us] ACK 超时（>1km 通信时）" },
+  { cmd: "AT+UNPAIR=", hint: "[mac] 解除指定 STA 配对" },
+  { cmd: "AT+APHIDE=", hint: "[0/1] 隐藏 AP（1=扫描不到）" },
+  { cmd: "AT+ROAM=", hint: "[0/1] 漫游开关（STA 侧）" },
+  { cmd: "AT+R_SSID=", hint: "[ssid] 中继下级 SSID" },
+  { cmd: "AT+R_KEY=", hint: "[key≥8] 中继下级密钥" },
+  { cmd: "AT+WAKEUP=", hint: "[mac] 唤醒休眠 STA（AP 端）" },
+  { cmd: "AT+DSLEEP=", hint: "[1] 进入休眠" },
+  { cmd: "AT+SYSDBG=", hint: "[LMAC/UMAC/WNB,0/1] 调试打印开关" },
+  { cmd: "AT+LOADDEF=", hint: "[1] 恢复出厂设置" },
+  { cmd: "AT+RST", hint: "复位模块（重启固件）" },
+  { cmd: "AT+VERSION", hint: "查询固件版本" },
+  { cmd: "AT+PING=", hint: "[ip,次数,size] ping（需网络宏）" },
+  { cmd: "AT+TEST_START=", hint: "[0/1] 进入/退出 RF 测试模式" },
+];
+
+// 每台设备当前的命令提示库与泰芯 V2.x 真机方言标记（loadBanner 按 /api/info 填充）
+const devCmd = { A: AT_CMDS, B: AT_CMDS };
+const devV2 = { A: false, B: false };
+
+// 快捷按钮：默认(T-Halow/模拟器方言) vs 泰芯 V2.x 真机方言
+const QUICK_BTNS = {
+  def: [
+    ["MODE?", "AT+MODE?", ""], ["CONN", "AT+CONN_STATE", ""],
+    ["RSSI", "AT+RSSI", ""], ["SSID?", "AT+SSID?", ""],
+    ["PAIR=1", "AT+PAIR=1", ""], ["PAIR=0", "AT+PAIR=0", ""],
+    ["WNBCFG", "AT+WNBCFG", ""],
+    ["LMAC=0", "AT+SYSDBG=LMAC,0", "关闭 LMAC 调试打印"],
+    ["RST", "AT+RST", "复位模块（重启固件）"],
+  ],
+  v2: [
+    ["MODE", "AT+WIFIMODE=?", "查询模式（设模式用 AT+WIFIMODE=ap/sta）"],
+    ["RSSI", "AT+RSSI=?", "查询信号强度（关联后非 0）"],
+    ["SSID?", "AT+SSID=?", "查询 SSID"],
+    ["SCAN", "AT+SCAN", "扫描周围 AP（结果看 UMAC 打印）"],
+    ["PAIR=1", "AT+PAIR=1", "启动快速配对"],
+    ["PAIR=0", "AT+PAIR=0", "停止配对并自动建链"],
+    ["SYSCFG", "AT+SYSCFG", "查看设备参数"],
+    ["LMAC=0", "AT+SYSDBG=LMAC,0", "关闭 LMAC 调试打印"],
+    ["RST", "AT+RST", "复位模块（重启固件）"],
+  ],
+};
+
+function renderQuick(d) {
+  const box = document.querySelector(`.quick[data-dev="${d}"]`);
+  if (!box) return;
+  box.innerHTML = "";
+  (devV2[d] ? QUICK_BTNS.v2 : QUICK_BTNS.def).forEach(([label, cmd, title]) => {
+    const b = document.createElement("button");
+    b.dataset.cmd = cmd;
+    if (title) b.title = title;
+    b.textContent = label;
+    b.addEventListener("click", () => sendCmd(d, cmd));
+    box.appendChild(b);
+  });
+}
 const acState = { A: { list: [], idx: 0 }, B: { list: [], idx: 0 } };
 
 /* ---------------- 基础工具 ---------------- */
@@ -82,12 +159,17 @@ function loadBanner() {
     .then((info) => {
       if (info && info.sub) $("bannerSub").textContent = info.sub;
       if (info && info.devices) {
+        // 物理互联介质标签：优先显示第一条“真实介质”（串口直连 / UART2 交叉 / RF 空口）
         const links = Object.values(info.devices).map((d) => d.link || "");
-        const serial = links.find((l) => l.startsWith("串口"));
-        if (serial) $("linkLabel").textContent = serial;                 // 如 "串口 COM5"
-        else if (links.some((l) => l.startsWith("UART2")))
-          $("linkLabel").textContent = "UART2 物理空口";
-        else $("linkLabel").textContent = "虚拟空口 (TCP)";
+        const real = links.find((l) => l && !l.startsWith("TCP"));
+        $("linkLabel").textContent = real || "虚拟空口 (TCP)";
+        // 每台设备按方言选命令库 + 渲染快捷按钮（泰芯 V2.x 真机 vs 默认）
+        ["A", "B"].forEach((k) => {
+          const d = info.devices[k];
+          devV2[k] = !!(d && d.v2);
+          devCmd[k] = devV2[k] ? CMDS_TAHV2 : AT_CMDS;
+          renderQuick(k);
+        });
       }
     })
     .catch(() => {});
@@ -276,18 +358,31 @@ const hexStr = (b) => b.map(hex).join(" ");
 /* ---------------- 配置面板 ---------------- */
 function applyConfig() {
   const d = $("cfgDevice").value;
+  const isV2 = devV2[d];
   const mode = $("cfgMode").value;
   const ssid = $("cfgSsid").value.trim();
   const key = $("cfgKey").value;
   const psk = $("cfgPsk").value.trim();
   const bw = $("cfgBw").value;
   const chan = $("cfgChan").value.trim();
-  const cmds = [`AT+MODE=${mode}`, `AT+SSID=${ssid}`];
-  if (key === "WPA-PSK") {
-    if (!/^[0-9a-fA-F]{64}$/.test(psk)) { alert("PSK 必须是 64 位 hex"); return; }
-    cmds.push("AT+KEYMGMT=WPA-PSK", `AT+PSK=${psk}`);
+  let cmds;
+  if (isV2) {
+    // 泰芯 V2.x：AT+WIFIMODE（小写）/ AT+ENCRYPT / AT+KEY
+    cmds = [`AT+WIFIMODE=${mode.toLowerCase()}`, `AT+SSID=${ssid}`];
+    if (key === "WPA-PSK") {
+      if (psk.length < 8) { alert("KEY 需 ≥8 个 ASCII 字符"); return; }
+      cmds.push("AT+ENCRYPT=1", `AT+KEY=${psk}`);
+    } else {
+      cmds.push("AT+ENCRYPT=0");
+    }
   } else {
-    cmds.push("AT+KEYMGMT=NONE");
+    cmds = [`AT+MODE=${mode}`, `AT+SSID=${ssid}`];
+    if (key === "WPA-PSK") {
+      if (!/^[0-9a-fA-F]{64}$/.test(psk)) { alert("PSK 必须是 64 位 hex"); return; }
+      cmds.push("AT+KEYMGMT=WPA-PSK", `AT+PSK=${psk}`);
+    } else {
+      cmds.push("AT+KEYMGMT=NONE");
+    }
   }
   cmds.push(`AT+CHAN_LIST=${chan}`, `AT+BSS_BW=${bw}`);
   cmds.forEach((c) => sendCmd(d, c));
@@ -296,9 +391,10 @@ function applyConfig() {
 /* ---------------- AT 命令输入提示 ---------------- */
 function acFilter(d) {
   const v = $(`cmd${d}`).value.trim().toUpperCase();
+  const list = devCmd[d] || AT_CMDS;
   if (!v || $(`hex${d}`).checked) return [];   // HEX 模式不提示 AT 命令
-  if (v === "AT" || v === "AT+") return AT_CMDS;
-  return AT_CMDS.filter((c) => c.cmd.toUpperCase().startsWith(v));
+  if (v === "AT" || v === "AT+") return list;
+  return list.filter((c) => c.cmd.toUpperCase().startsWith(v));
 }
 
 function renderAC(d, list) {

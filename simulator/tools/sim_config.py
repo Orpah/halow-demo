@@ -21,6 +21,11 @@ sim_config.py — 配置 / 调试 TXW8301 模拟器（CH32V203）
   python sim_config.py COM3 status --variant tj45
   python sim_config.py COM3 ap --ssid halowlink --freq 9080 --bw 8 --open --variant tj45
 
+  # TX-AH 泰芯原厂模组（AH-SDK V2.x 方言，--variant txah）：
+  #   AT+WIFIMODE / AT+ENCRYPT / AT+KEY，查询带 '?'；--psk 作 KEY（≥8 个 ASCII 字符）
+  python sim_config.py COM3 status --variant txah
+  python sim_config.py COM3 ap --ssid halowlink --freq 9080 --bw 8 --open --variant txah
+
   # HT-HC01 真实板（占位：命令集待手册，先按泰芯 AH 同款处理并关调试刷屏）
   python sim_config.py COM3 status --variant hc01
 
@@ -91,16 +96,24 @@ class UartTransport:
             self.ser.write(b"\x55" * 1700)
             time.sleep(0.2)
             self.read_for(0.4)
-            r = self.cmd("AT+MODE", 1.0)
-            # 兼容本模拟器(MODE:AP) 与 T-Halow-RJ45(+MODE:AP)
-            if "+MODE" in r or "MODE:" in r:
-                return True
+            # 泰芯真机 TX-AH(txah) 用 V2.x 查询 AT+WIFIMODE=?；其余（模拟器/tj45）用 AT+MODE
+            if getattr(self, "variant", "sim") == "txah":
+                r = self.cmd("AT+WIFIMODE=?", 1.0)
+                if "+WIFIMODE" in r or "WIFIMODE:" in r:
+                    return True
+            else:
+                r = self.cmd("AT+MODE", 1.0)
+                # 兼容本模拟器(MODE:AP) 与 T-Halow-RJ45(+MODE:AP)
+                if "+MODE" in r or "MODE:" in r:
+                    return True
         return False
 
     def quiet(self):
-        """关闭 T-Halow-RJ45 的 LMAC/WNB 周期调试刷屏。"""
+        """关闭 T-Halow-RJ45 / TX-AH 的 LMAC/WNB 周期调试刷屏。"""
         self.cmd("AT+SYSDBG=LMAC,0")
         self.cmd("AT+SYSDBG=WNB,0")
+        if getattr(self, "variant", "sim") == "txah":
+            self.cmd("AT+SYSDBG=UMAC,0")   # 泰芯真机还有 UMAC 刷屏
 
     def close(self):
         self.ser.close()
@@ -219,11 +232,22 @@ def _at(t, line, wait=1.2):
 def configure(t, role, args):
     if isinstance(t, UartTransport) and not t.resync():
         sys.exit("ERROR: 串口无 AT 响应（设备/波特率不对？）")
-    steps = [f"AT+MODE={role}", f"AT+SSID={args.ssid}"]
-    if args.psk:
-        steps += ["AT+KEYMGMT=WPA-PSK", f"AT+PSK={args.psk}"]
+    v2 = getattr(t, "variant", "sim") == "txah"
+    if v2:
+        # 泰芯 V2.x：AT+WIFIMODE（小写） + AT+ENCRYPT/AT+KEY
+        steps = [f"AT+WIFIMODE={role}", f"AT+SSID={args.ssid}"]
+        if args.psk:
+            if len(args.psk) < 8:
+                sys.exit("ERROR: --psk 作为 KEY 需 ≥8 个 ASCII 字符")
+            steps += ["AT+ENCRYPT=1", f"AT+KEY={args.psk}"]
+        else:
+            steps += ["AT+ENCRYPT=0"]
     else:
-        steps += ["AT+KEYMGMT=NONE"]
+        steps = [f"AT+MODE={role}", f"AT+SSID={args.ssid}"]
+        if args.psk:
+            steps += ["AT+KEYMGMT=WPA-PSK", f"AT+PSK={args.psk}"]
+        else:
+            steps += ["AT+KEYMGMT=NONE"]
     steps += [f"AT+CHAN_LIST={args.freq}", f"AT+BSS_BW={args.bw}"]
     for s in steps:
         r = _at(t, s).strip().splitlines()
@@ -235,9 +259,16 @@ def configure(t, role, args):
 def status(t):
     if isinstance(t, UartTransport) and not t.resync():
         sys.exit("ERROR: 串口无 AT 响应")
-    for c in ["AT+VERSION", "AT+MODE", "AT+CONN_STATE", "AT+RSSI"]:
+    v2 = getattr(t, "variant", "sim") == "txah"
+    if v2:
+        qs = ["AT+VERSION", "AT+WIFIMODE=?", "AT+RSSI=?", "AT+SSID=?"]
+        tail = "AT+SYSCFG"
+    else:
+        qs = ["AT+VERSION", "AT+MODE", "AT+CONN_STATE", "AT+RSSI"]
+        tail = "AT+WNBCFG"
+    for c in qs:
         print(f"{c:16s}: {_at(t, c).strip()}")
-    print("\n" + _at(t, "AT+WNBCFG", 2.0).strip())
+    print("\n" + _at(t, tail, 2.0).strip())
 
 
 def do_at(t, line):
@@ -302,12 +333,12 @@ def main():
     ap.add_argument("--freq", default="9080")
     ap.add_argument("--bw", default="8", choices=["1", "2", "4", "8"])
     ap.add_argument("--open", action="store_true", help="无加密（默认）")
-    ap.add_argument("--psk", metavar="HEX64", help="WPA-PSK 64位hex")
+    ap.add_argument("--psk", metavar="KEY/HEX64", help="加密密钥：tj45/模拟器=WPA-PSK 64位hex；txah=KEY≥8个ASCII字符")
     ap.add_argument("--line", default="", help="at 动作要发送的命令")
     ap.add_argument("--pid", type=lambda x: int(x, 0), default=None, help="CH341A PID（SPI）")
-    ap.add_argument("--variant", default="sim", choices=["sim", "tj45", "hc01"],
-                    help="sim=本模拟器；tj45=T-Halow-RJ45 真实板；hc01=HT-HC01 真实板"
-                         "（后两者自动关闭调试刷屏；hc01 为占位）")
+    ap.add_argument("--variant", default="sim", choices=["sim", "tj45", "txah", "hc01"],
+                    help="sim=本模拟器；tj45=T-Halow-RJ45 真实板；txah=TX-AH 泰芯原厂模组（AH-SDK V2.x 方言）；"
+                         "hc01=HT-HC01 真实板（后三者自动关闭调试刷屏；hc01 为占位）")
     args = ap.parse_args()
 
     if args.action == "list":
@@ -325,9 +356,11 @@ def main():
         if not HAS_PYSERIAL:
             sys.exit("需要 pyserial：pip install pyserial")
         t = UartTransport(args.target)
-        if args.variant in ("tj45", "hc01"):
-            print("目标" + ("T-Halow-RJ45" if args.variant == "tj45" else "HT-HC01(占位)")
-                  + "：关闭 LMAC/WNB 调试输出。")
+        t.variant = args.variant
+        if args.variant in ("tj45", "txah", "hc01"):
+            label = {"tj45": "T-Halow-RJ45", "txah": "TX-AH(泰芯原厂,AH-SDK V2.x)",
+                     "hc01": "HT-HC01(占位)"}[args.variant]
+            print(f"目标{label}：关闭 LMAC/WNB 调试输出。")
             t.quiet()
 
     try:

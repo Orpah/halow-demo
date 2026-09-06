@@ -36,6 +36,10 @@
 - 泰芯 AH 族（family=tah：tj45/txah；hc01 占位暂同）状态响应带 `+` 前缀（`+MODE:AP`），
   且**不追加 OK**（避免轮询刷屏）；设置命令仍走 `ok()` 回 OK。
 - 泰芯 AH 族查询用**裸命令**（`AT+MODE` / `AT+VERSION` / `AT+CONN_STATE` / `AT+RSSI`）。
+- **真机 TX-AH(txah) 不是上面的 T-Halow 方言**（2026-09-06 实测，TX-AH-Rx00P 固件 v2.4.1.5）：
+  档案 at='v2'（见 `host/devprofiles.py`）走泰芯 AH-SDK V2.x —— 设模式 `AT+WIFIMODE=ap/sta`、
+  查询带 `?`（`AT+WIFIMODE=?` / `AT+RSSI=?` / `AT+SSID=?`）、加密 `AT+ENCRYPT=0/1`+`AT+KEY`(≥8 ASCII)，
+  **无 `AT+MODE`/`AT+CONN_STATE`**，连接状态用 `AT+RSSI=?`（关联后非 0）推断；时序坑见 §6。
 - `AT+TXDATA` 用**等号**：`AT+TXDATA=<len≥14>`；随后数据模式收 len 字节原始数据。
 
 ## 4. 前端控制台 / UI 约定
@@ -69,6 +73,11 @@
 - **布局**：`.node` 用 `width:280px` 会在窄视口被 flex 压缩 → 设备名断行
   （"T- Halow- RJ45"）。须 `flex:1 1 280px; min-width:280px` 防压缩。
 - `sim.py` Link `connect/accept` 后必须 `c.settimeout(None)`（否则 1s 空闲被 `_reader` 断开）。
+- **真机 TX-AH(txah) 轮询硬坑（2026-09-06）**：真机**一次只应答一条 AT 查询**，背靠背发
+  `AT+RSSI=?`+`AT+WIFIMODE=?` 会吞掉后面那条 → server.py 对 txah 真机（`tahv2`）把
+  RSSI?/WIFIMODE?/SSID? **逐条错开 ≥1s** 发（见 `poll_loop` 的 seq）。另：真机每条应答自带 OK
+  （轮询窗口内已抑制）、回显带 `[ts]` 序号前缀需剥离；真机 RST 重启后会重新打开 LMAC/UMAC 刷屏
+  （需再发 `AT+SYSDBG=LMAC/UMAC/WNB,0`）。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 

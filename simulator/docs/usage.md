@@ -40,6 +40,23 @@ python host/sim.py --name A --role AP --console 9001 --link 9011 --tj45
 python host/sim.py --name B --role STA --console 9002 --link 9012 --peer 127.0.0.1:9011 --tj45
 ```
 
+### 0.1.0 TX-AH 泰芯真机（AH-SDK V2.x 方言，--variant txah）
+
+真实 TX-AH 模组（TX-AH-Rx00P 系列，固件 v2.4.1.x，档案 txah 的 `at='v2'`）**不是** T-Halow 方言：
+设模式用 `AT+WIFIMODE=ap/sta`、查询带 `?`（`AT+WIFIMODE=?`→`+WIFIMODE:ap`、`AT+RSSI=?`、`AT+SSID=?`）、
+加密用 `AT+ENCRYPT=0/1`+`AT+KEY`(≥8 ASCII)，**无 `AT+MODE`/`AT+CONN_STATE`**；连接状态由
+`AT+RSSI=?`（关联后非 0）推断。真机**一次只应答一条查询**，背靠背发会吞后面应答 —— UI 轮询已逐条错发 ≥1s。
+
+```bash
+# 配置两块真实 TX-AH（COM3=AP, COM4=STA；信道 AP/STA 须完全一致含顺序）
+python tools/sim_config.py COM3 ap  --ssid txah_link --freq 9080,9160,9240 --bw 8 --open --variant txah
+python tools/sim_config.py COM4 sta --ssid txah_link --freq 9080,9160,9240 --bw 8 --open --variant txah
+python tools/sim_config.py COM4 status --variant txah
+
+# Web UI：双 TX-AH 真机（真实 RF 互联）
+python tools/ui/server.py --a COM3:txah --b COM4:txah
+```
+
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
 
