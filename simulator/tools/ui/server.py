@@ -380,8 +380,9 @@ class Device:
             self._umacblock = False
             return False
         # AT+SCAN 的 BSS 表行放行（用户想看扫描结果），其余 UMAC 状态内容抑制
+        #（注意：handle_line 剥离 [ts] 时已 lstrip，行首缩进没了 → 正则不加 ^\s+）
         if (tline.startswith("Total ") or "| BSSID" in tline
-                or re.match(r"^\s+[0-9a-f:]{17}\s+\d+\s+-?\d+\s+\d+\s+\S+\s+\S", tline)):
+                or re.match(r"^[0-9a-f:]{17}\s+\d+\s+-?\d+\s+\d+\s+\S+\s+\S", tline)):
             return False
         return True
 
