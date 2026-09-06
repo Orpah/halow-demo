@@ -84,6 +84,12 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   - 信道跟随：AP 用 `AT+CHANNEL=n`（n 为 chan_list 内序号）切主信道，STA 会在共享 chan_list 内
     **自动跟随重连**（实测 9080↔9240 都跟）。
   - 带宽：`AT+BSS_BW` 1/2/4/8MHz，两侧须一致；同改后按新带宽重连（实测 8↔4MHz 正常）。
+- **TXPOWER / 断链自愈 / 休眠（2026-09-07 实测）**：
+  - `AT+TXPOWER=1..20` 生效（`TXPOWER?` 读回），但**近距离 RSSI 看不出功率差**（桌面级信号饱和），
+    验证功率↔距离需拉开几米；`AT+ACK_TO=` 仅 >1km 通信才需要。
+  - 断链自愈：AP 复位期间 STA 正确转 `SCANNING`，~15s 内自动重连（UI 断/连两向状态都准确）。
+  - `AT+DSLEEP=1`（连接态）= 保活休眠：链路保持、AT 仍可用；AP 端 `AT+WAKEUP=<sta_mac>` 远程唤醒
+    命令被接受。深度休眠（非连接态）未测——可能睡到需物理重插 USB。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
