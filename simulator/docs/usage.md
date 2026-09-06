@@ -90,6 +90,15 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   - 断链自愈：AP 复位期间 STA 正确转 `SCANNING`，~15s 内自动重连（UI 断/连两向状态都准确）。
   - `AT+DSLEEP=1`（连接态）= 保活休眠：链路保持、AT 仍可用；AP 端 `AT+WAKEUP=<sta_mac>` 远程唤醒
     命令被接受。深度休眠（非连接态）未测——可能睡到需物理重插 USB。
+- **恢复出厂 `AT+LOADDEF=1`（2026-09-07 实测）**：
+  - 双端 `AT+LOADDEF=1` 后自动复位 → 回**出厂默认**：WIFIMODE 回 `sta`、SSID 回
+    `HALOW_<MAC尾3字节>`（如 `HALOW_647090`）、ENCRYPT/KEY 回默认、配置**自动保存**（再复位仍是默认）。
+  - **重配加密链路的关键次序**（LOADDEF 后尤其重要）：必须 **`AT+SSID=<名>` → `AT+ENCRYPT=1` →
+    `AT+KEY=<pass>`** 依序设置——`KEY` 用**当时的 SSID** 派生 PSK（PBKDF2），若次序颠倒/后改 SSID
+    不重设 KEY，PSK 与 AP 不匹配：表现是 **STA 能扫到该 AP（BSSID/RSSI/WPA2-PSK 都在表里）却一直
+    停在 SCANNING 不去关联**，AP 侧无 STA。按上述次序重配 + 双 `AT+RST` 后即恢复加密基线连接。
+  - 长时多次 RST/LOADDEF 后若 RF 状态异常（互听不到），先按「先 SSID→ENCRYPT→KEY」重配双端再 RST；
+    仍不行需物理断电重插 USB 清 RF 前端。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
