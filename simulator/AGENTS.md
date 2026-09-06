@@ -76,8 +76,13 @@
 - **真机 TX-AH(txah) 轮询硬坑（2026-09-06）**：真机**一次只应答一条 AT 查询**，背靠背发
   `AT+RSSI=?`+`AT+WIFIMODE=?` 会吞掉后面那条 → server.py 对 txah 真机（`tahv2`）把
   RSSI?/WIFIMODE?/SSID? **逐条错开 ≥1s** 发（见 `poll_loop` 的 seq）。另：真机每条应答自带 OK
-  （轮询窗口内已抑制）、回显带 `[ts]` 序号前缀需剥离；真机 RST 重启后会重新打开 LMAC/UMAC 刷屏
-  （需再发 `AT+SYSDBG=LMAC/UMAC/WNB,0`）。
+  （轮询窗口内已抑制）、回显带 `[ts]` 序号前缀需剥离。
+- **真机 TX/RX 真实计数（2026-09-07 加）**：真机 TX-AH 固件（SYSDBG=LMAC,1）周期性打印
+  `LMAC STATUS` 块（~1-6s），含每窗口 `tx : cnt=N`/`rx : cnt=N`（AP/STA 都有、格式一致）。
+  server.py 对 tahv2 启动即发 `AT+SYSDBG=LMAC,1`，用 `_consume_tahv2_lmac()` **整块抑制
+  不进控制台**、仅把 tx:/rx: cnt 累加进卡片 TX/RX（= 真实空口帧计数）；UMAC/WNB 仍关。
+  注意：真机 RST 重启后 SYSDBG 状态会变（LMAC 默认开→流仍在、计数继续），若 UMAC/WNB 刷屏
+  复发需再发 `AT+SYSDBG=UMAC/WNB,0`。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 

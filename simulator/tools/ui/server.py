@@ -39,6 +39,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -259,6 +260,7 @@ class Device:
         self.buf = b""
         self.poll_paused_until = 0.0   # 数据模式（AT+TXDATA）期间暂停轮询的时间戳
         self._poll_until = 0.0         # 轮询响应窗口：窗口内到达的状态行不进控制台（避免刷屏）
+        self._lmacblock = False        # 泰芯真机：是否正处在一帧 LMAC STATUS 块内（整块抑制用）
         # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
         self.tahv2 = dp.real_at_v2(source, target)
         if self.tahv2:
@@ -304,6 +306,38 @@ class Device:
             except queue.Full:
                 pass
 
+    # ---------------- 泰芯真机 LMAC 流（TX/RX 真实计数） ----------------
+    def _consume_tahv2_lmac(self, tline):
+        """消费泰芯真机(V2)周期打印的 LMAC STATUS 块。
+
+        该固件（AH-SDK V2.x，AT+SYSDBG=LMAC,1）周期性打印 LMAC STATUS（~每 1-6s 一块）。
+        `tx : cnt=N` / `rx : cnt=N`（AP/STA 都有，格式一致）是该块窗口内的空口帧计数
+        —— 累加进卡片 TX/RX 作真实流量；块内其余行全部抑制，不进控制台。
+        返回 True = 本行已消费（不再进控制台/其它解析）。
+        """
+        if not self._lmacblock:
+            if tline.endswith("LMAC STATUS:") or tline == "LMAC STATUS":
+                self._lmacblock = True
+                return True            # 块首行也抑制，不进控制台
+            return False
+        # 块内：先累加计数
+        m = re.search(r"\btx\s*:\s*cnt=(\d+)", tline)
+        if m:
+            self.state["tx"] += int(m.group(1))
+            self.push("status", state=dict(self.state))
+        m = re.search(r"\brx\s*:\s*cnt=(\d+)", tline)
+        if m:
+            self.state["rx"] += int(m.group(1))
+            self.push("status", state=dict(self.state))
+        # 块结束判定：遇到非 LMAC 内容的行（分隔线 / AT 应答 / UMAC 状态等）
+        if (tline.startswith("---") or not tline
+                or tline.startswith("IEEE80211") or tline.startswith("Total ")
+                or tline.startswith("WiFi_Mgr") or tline.startswith("+")
+                or tline in ("OK", "ERROR")):
+            self._lmacblock = False
+            return False
+        return True
+
     # ---------------- line handling ----------------
     def handle_line(self, raw):
         line = raw.strip()
@@ -330,6 +364,9 @@ class Device:
             j = tline.find("]")
             if 0 < j <= 16 and tline[1:j].isdigit():
                 tline = tline[j + 1:].lstrip()
+        # 泰芯真机(V2) LMAC STATUS 周期流：整块抑制进控制台，仅把 tx:/rx: cnt 累加给卡片
+        if self.tahv2 and self._consume_tahv2_lmac(tline):
+            return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45 / 泰芯 V2）
         had_plus = tline.startswith("+")
         probe = tline[1:] if had_plus else tline
@@ -414,10 +451,14 @@ class Device:
     def poll_loop(self):
         last_slow = 0
         time.sleep(0.3)
-        self.send("AT+SYSDBG=LMAC,0")
-        self.send("AT+SYSDBG=WNB,0")
         if self.tahv2:
-            self.send("AT+SYSDBG=UMAC,0")   # 泰芯真机还有 UMAC 刷屏
+            # 泰芯真机：开 LMAC 流供 TX/RX 真实计数（整块被抑制，不脏控制台）；关 UMAC/WNB 刷屏
+            self.send("AT+SYSDBG=LMAC,1")
+            self.send("AT+SYSDBG=UMAC,0")
+            self.send("AT+SYSDBG=WNB,0")
+        else:
+            self.send("AT+SYSDBG=LMAC,0")
+            self.send("AT+SYSDBG=WNB,0")
         # 泰芯 AH 族/占位族（tah/hc01）用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）；
         # 本模拟器(native)用 AT+VERSION?
         self.send("AT+VERSION" if dp.family(self.target) in (dp.FAMILY_TAH, dp.FAMILY_HC01)
