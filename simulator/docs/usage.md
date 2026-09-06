@@ -78,6 +78,12 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   `sta … pairing success`）→ 配对停止 `AT+PAIR=0` → STA 用**从 AP 学到的 SSID/KEY** 自动连接，
   全程不用在 STA 手填 AP 的 SSID/KEY（实测中文 SSID 也经 PAIR 字节一致传递）。常规连接 AP/STA 必须
   同 SSID，PAIR 是唯一"STA 不必预填同名 SSID"的例外。
+- **隐藏 AP / 信道跟随 / 带宽（2026-09-07 实测）**：
+  - `AT+APHIDE=1` 能隐藏（`APHIDE?`→1），但**已知 SSID 的定向扫描/已关联设备仍看得到、仍能连**
+    （802.11 标准：隐藏只挡通配/未知发现，挡不住定向询问）；靠隐藏防不了连接，要用加密/白名单。
+  - 信道跟随：AP 用 `AT+CHANNEL=n`（n 为 chan_list 内序号）切主信道，STA 会在共享 chan_list 内
+    **自动跟随重连**（实测 9080↔9240 都跟）。
+  - 带宽：`AT+BSS_BW` 1/2/4/8MHz，两侧须一致；同改后按新带宽重连（实测 8↔4MHz 正常）。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
