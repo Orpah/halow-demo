@@ -71,6 +71,13 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
 - **UI 连接状态**：真机不再用 RSSI 推断，读 UMAC 的 running VIF `WPA_*` 状态 + AP 侧已认证 STA
   （`STA1..`/`stamap`，来自 LMAC）；仅 `WPA_COMPLETED`（STA）/ 有已认证 STA（AP）算 CONNECTED，
   KEY 错时 STA 显示 `SCANNING`、AP 显示 `OFFLINE`（RSSI 非 0 不算）。
+- **中文 SSID**：实测能连。`AT+SSID=<中文>` 接受 UTF-8；AP/STA 两侧**字节一致（都 UTF-8）+ 同 KEY**
+  即可正常关联（B 日志 `by SSID find 测试链路 …` 后 WPA_COMPLETED）。注意 SSID ≤32 字节，中文每字 3
+  字节 → 最多约 10 个汉字。
+- **PAIR 快速配对（免填 SSID/KEY）**：AP 配好 SSID+KEY 后，双端 `AT+PAIR=1`（A 侧打印
+  `sta … pairing success`）→ 配对停止 `AT+PAIR=0` → STA 用**从 AP 学到的 SSID/KEY** 自动连接，
+  全程不用在 STA 手填 AP 的 SSID/KEY（实测中文 SSID 也经 PAIR 字节一致传递）。常规连接 AP/STA 必须
+  同 SSID，PAIR 是唯一"STA 不必预填同名 SSID"的例外。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
