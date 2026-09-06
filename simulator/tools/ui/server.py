@@ -261,6 +261,9 @@ class Device:
         self.poll_paused_until = 0.0   # 数据模式（AT+TXDATA）期间暂停轮询的时间戳
         self._poll_until = 0.0         # 轮询响应窗口：窗口内到达的状态行不进控制台（避免刷屏）
         self._lmacblock = False        # 泰芯真机：是否正处在一帧 LMAC STATUS 块内（整块抑制用）
+        self._umacblock = False        # 泰芯真机：是否正处在一帧 UMAC(IEEE80211 Status) 块内
+        self._vif = {1: None, 2: None}  # UMAC：各接口(Type1=STA 上行 / Type2=AP)当前 WPA 状态
+        self._ap_sta = False           # AP：当前 LMAC 块内是否出现已认证 STA(STA1..)
         # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
         self.tahv2 = dp.real_at_v2(source, target)
         if self.tahv2:
@@ -318,6 +321,7 @@ class Device:
         if not self._lmacblock:
             if tline.endswith("LMAC STATUS:") or tline == "LMAC STATUS":
                 self._lmacblock = True
+                self._ap_sta = False        # 新块：先按无 STA 处理
                 return True            # 块首行也抑制，不进控制台
             return False
         # 块内：先累加计数
@@ -329,6 +333,16 @@ class Device:
         if m:
             self.state["rx"] += int(m.group(1))
             self.push("status", state=dict(self.state))
+        # AP 侧已认证 STA 判定（STA1.. = 已通过安全的客户端；STA0 是 STA 自身的上行 AP）
+        if re.match(r"\s*STA[1-9]:", tline):
+            if not self._ap_sta:
+                self._ap_sta = True
+                self._tahv2_conn()
+        if "stamap=" in tline:
+            sm = re.search(r"stamap=0x([0-9a-f]+)", tline)
+            if sm and int(sm.group(1), 16) == 0 and self._ap_sta:
+                self._ap_sta = False
+                self._tahv2_conn()
         # 块结束判定：遇到非 LMAC 内容的行（分隔线 / AT 应答 / UMAC 状态等）
         if (tline.startswith("---") or not tline
                 or tline.startswith("IEEE80211") or tline.startswith("Total ")
@@ -337,6 +351,63 @@ class Device:
             self._lmacblock = False
             return False
         return True
+
+    # ---------------- 泰芯真机 UMAC 流（WPA 状态 → 真实连接判定） ----------------
+    def _consume_tahv2_umac(self, tline):
+        """消费泰芯真机(V2)周期打印的 UMAC（IEEE80211 Status）块，判定真实连接。
+
+        `IEEE80211 Status` 块（AT+SYSDBG=UMAC,1，~6s 一块）里每个接口一行：
+          VIF1: Type:1(STA 接口)/Type:2(AP 接口), [mac] running/stopped, ..., WPA_状态, ...
+        取 running 接口的 WPA 状态：conn 只在 STA 接口到 WPA_COMPLETED（或 AP 已有 STA1..）
+        才算 CONNECTED —— 修复“KEY 错时 RSSI 非 0 却显示 CONNECTED”的误报。块内容抑制，
+        AT+SCAN 的 BSS 表行放行。返回 True=已消费。
+        """
+        if not self._umacblock:
+            if tline == "IEEE80211 Status" or tline.startswith("IEEE80211 Status"):
+                self._umacblock = True
+                self._vif = {1: None, 2: None}   # 新块是全量快照，先清陈旧 WPA 状态
+                return True
+            return False
+        # 块内：抓 running 接口的 WPA 状态（Type1=STA 上行 / Type2=AP）
+        m = re.search(r"VIF\d+:\s*Type:(\d),\s*\[[^\]]*\]\s+(running|stopped).*?\b(WPA_[A-Z0-9_]+)", tline)
+        if m and m.group(2) == "running":
+            self._vif[int(m.group(1))] = m.group(3)
+            self._tahv2_conn()
+        # 块结束：LOCALIDs 是块尾；AT 应答等也视为块外
+        if (tline.startswith("LOCALIDs") or tline.startswith("+")
+                or tline in ("OK", "ERROR") or tline.startswith("SSID:")
+                or tline.startswith("SYSCFG") or tline.endswith("LMAC STATUS:")):
+            self._umacblock = False
+            return False
+        # AT+SCAN 的 BSS 表行放行（用户想看扫描结果），其余 UMAC 状态内容抑制
+        if (tline.startswith("Total ") or "| BSSID" in tline
+                or re.match(r"^\s+[0-9a-f:]{17}\s+\d+\s+-?\d+\s+\d+\s+\S+\s+\S", tline)):
+            return False
+        return True
+
+    def _tahv2_conn(self):
+        """按真实 WPA/STA 状态刷新 conn（泰芯真机）：仅 WPA_COMPLETED(STA) / AP 有已认证 STA 才算 CONNECTED。"""
+        mode = (self.state.get("mode") or "").upper()
+        if mode == "AP":
+            self.state["conn"] = "CONNECTED" if self._ap_sta else "OFFLINE"
+        elif mode == "STA":
+            w = self._vif.get(1)
+            self.state["conn"] = {"WPA_COMPLETED": "CONNECTED",
+                                  "WPA_SCANNING": "SCANNING",
+                                  "WPA_AUTHENTICATING": "SCANNING",
+                                  "WPA_ASSOCIATING": "ASSOCIATING",
+                                  "WPA_ASSOCIATED": "ASSOCIATING",
+                                  "WPA_4WAY_HANDSHAKE": "ASSOCIATING",
+                                  "WPA_DISCONNECTED": "OFFLINE"}.get(w, "OFFLINE")
+        elif mode == "APSTA":
+            w = self._vif.get(1)
+            self.state["conn"] = ("CONNECTED" if (w == "WPA_COMPLETED" or self._ap_sta)
+                                  else "OFFLINE")
+        else:
+            return                     # 模式未知时暂不判定
+        self.state["ok"] = True
+        self.state["uptime"] = int(time.time() - self.t0)
+        self.push("status", state=dict(self.state))
 
     # ---------------- line handling ----------------
     def handle_line(self, raw):
@@ -367,6 +438,9 @@ class Device:
         # 泰芯真机(V2) LMAC STATUS 周期流：整块抑制进控制台，仅把 tx:/rx: cnt 累加给卡片
         if self.tahv2 and self._consume_tahv2_lmac(tline):
             return
+        # 泰芯真机(V2) UMAC(IEEE80211 Status) 周期流：抓 VIF 的 WPA 状态判定真实连接
+        if self.tahv2 and self._consume_tahv2_umac(tline):
+            return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45 / 泰芯 V2）
         had_plus = tline.startswith("+")
         probe = tline[1:] if had_plus else tline
@@ -390,20 +464,20 @@ class Device:
                 return
             if k == "RSSI":
                 try:
-                    r = int(v)
-                    self.state["rssi"] = r
-                    # 泰芯真机(V2)无 AT+CONN_STATE：用 RSSI? 推断（关联后为非 0 负值，空闲为 0）
-                    if self.tahv2:
-                        self.state["conn"] = "CONNECTED" if r != 0 else "OFFLINE"
-                        self.state["ok"] = r != 0 or self.state.get("ok")
-                        self.state["uptime"] = int(time.time() - self.t0)
+                    self.state["rssi"] = int(v)
                 except ValueError:
                     pass
+                # 泰芯真机(V2)无 AT+CONN_STATE：连接由 UMAC WPA 状态/AP 的 STA 表判定（见 _tahv2_conn），
+                # 不再用 RSSI 推断 —— RSSI 非 0 可能只是“关联中/听到 AP 信号”，KEY 错时也非 0。
+                if not self.tahv2:
+                    self.state["conn"] = "CONNECTED" if self.state["rssi"] != 0 else "OFFLINE"
                 self.push("status", state=dict(self.state))
                 echo(line)
                 return
             if k in ("MODE", "WIFIMODE"):
                 self.state["mode"] = v.upper()
+                if self.tahv2:
+                    self._tahv2_conn()
                 self.push("status", state=dict(self.state))
                 echo(line)
                 return
@@ -452,13 +526,15 @@ class Device:
         last_slow = 0
         time.sleep(0.3)
         if self.tahv2:
-            # 泰芯真机：开 LMAC 流供 TX/RX 真实计数（整块被抑制，不脏控制台）；关 UMAC/WNB 刷屏
-            self.send("AT+SYSDBG=LMAC,1")
-            self.send("AT+SYSDBG=UMAC,0")
-            self.send("AT+SYSDBG=WNB,0")
+            # 泰芯真机：开 LMAC(TX/RX 计数) + UMAC(WPA 状态判定)，关 WNB；
+            # 状态内容由服务端整块抑制（仅 AT+SCAN 的 BSS 表行放行）。
+            # 真机一次只应答一条 → 逐条间隔 ≥1s，否则后面的 SYSDBG 会被吞。
+            cmds = ["AT+SYSDBG=LMAC,1", "AT+SYSDBG=UMAC,1", "AT+SYSDBG=WNB,0"]
         else:
-            self.send("AT+SYSDBG=LMAC,0")
-            self.send("AT+SYSDBG=WNB,0")
+            cmds = ["AT+SYSDBG=LMAC,0", "AT+SYSDBG=WNB,0"]
+        for c in cmds:
+            self.send(c)
+            time.sleep(1.0)
         # 泰芯 AH 族/占位族（tah/hc01）用裸 AT+VERSION 查询（AT+VERSION? 可能不被接受）；
         # 本模拟器(native)用 AT+VERSION?
         self.send("AT+VERSION" if dp.family(self.target) in (dp.FAMILY_TAH, dp.FAMILY_HC01)
@@ -469,10 +545,17 @@ class Device:
             seq = [("AT+RSSI=?", 1.3), ("AT+WIFIMODE=?", 1.3),
                    ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3)]
             i = 0
+            assert_at = time.time() + 20.0   # 周期重断言调试流（板子 RST 会重置 SYSDBG）
             while not STOP.is_set():
                 if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询
                     time.sleep(0.5)
                     continue
+                if time.time() >= assert_at:
+                    for c in ("AT+SYSDBG=LMAC,1", "AT+SYSDBG=UMAC,1",
+                              "AT+SYSDBG=WNB,0"):
+                        self.send(c)
+                        time.sleep(1.0)          # 逐条间隔，防真机吞后面的应答
+                    assert_at = time.time() + 20.0
                 cmd, gap = seq[i % len(seq)]
                 i += 1
                 self._poll_until = time.time() + 1.2        # 轮询响应窗口（状态行不进控制台）

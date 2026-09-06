@@ -77,12 +77,17 @@
   `AT+RSSI=?`+`AT+WIFIMODE=?` 会吞掉后面那条 → server.py 对 txah 真机（`tahv2`）把
   RSSI?/WIFIMODE?/SSID? **逐条错开 ≥1s** 发（见 `poll_loop` 的 seq）。另：真机每条应答自带 OK
   （轮询窗口内已抑制）、回显带 `[ts]` 序号前缀需剥离。
-- **真机 TX/RX 真实计数（2026-09-07 加）**：真机 TX-AH 固件（SYSDBG=LMAC,1）周期性打印
-  `LMAC STATUS` 块（~1-6s），含每窗口 `tx : cnt=N`/`rx : cnt=N`（AP/STA 都有、格式一致）。
-  server.py 对 tahv2 启动即发 `AT+SYSDBG=LMAC,1`，用 `_consume_tahv2_lmac()` **整块抑制
-  不进控制台**、仅把 tx:/rx: cnt 累加进卡片 TX/RX（= 真实空口帧计数）；UMAC/WNB 仍关。
-  注意：真机 RST 重启后 SYSDBG 状态会变（LMAC 默认开→流仍在、计数继续），若 UMAC/WNB 刷屏
-  复发需再发 `AT+SYSDBG=UMAC/WNB,0`。
+- **真机 TX/RX 真实计数 + 真实连接判定（2026-09-07 加）**：真机 TX-AH 固件周期性打印
+  `LMAC STATUS`（SYSDBG=LMAC,1，~1-6s，含每窗口 `tx : cnt=N`/`rx : cnt=N`，AP/STA 都有）
+  和 `IEEE80211 Status`（SYSDBG=UMAC,1，~6s，每接口一行含 `WPA_状态`）。server.py 对 tahv2
+  启动即开 **LMAC,1 + UMAC,1**（逐条间隔 ≥1s 发，且每 ~20s 周期重断言一次，防板子 RST 后
+  SYSDBG 被重置丢流）：
+  - `_consume_tahv2_lmac()`：整块抑制进控制台，把 tx:/rx: cnt 累加进卡片 TX/RX；同时抓 AP 侧
+    `STA1..`/`stamap` 判 AP 有无已认证 STA。
+  - `_consume_tahv2_umac()`：整块抑制（AT+SCAN 的 BSS 表行放行），抓 running VIF 的 WPA 状态；
+    **conn 只在 STA 到 `WPA_COMPLETED`（或 AP 有已认证 STA）才算 CONNECTED**——不用 RSSI 推断
+    （KEY 错时 RSSI 非 0 但 4-way 反复失败 → STA 显示 SCANNING、AP 显示 OFFLINE）。
+  - 每块 UMAC 开头清空 VIF 快照，避免重启后陈旧状态误报。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 
