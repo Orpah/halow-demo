@@ -99,6 +99,14 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
     停在 SCANNING 不去关联**，AP 侧无 STA。按上述次序重配 + 双 `AT+RST` 后即恢复加密基线连接。
   - 长时多次 RST/LOADDEF 后若 RF 状态异常（互听不到），先按「先 SSID→ENCRYPT→KEY」重配双端再 RST；
     仍不行需物理断电重插 USB 清 RF 前端。
+- **断电检测 + 串口自动重连（2026-09-07 加，server.py）**：
+  - 之前真机 conn/rssi/uptime 只在“收到一行应答”才更新，**板子断电/休眠后 UI 永远冻结在旧
+    CONNECTED**（实测断电后发 `AT+WIFIMODE=?` 3s 无任何应答，状态纹丝不动）。
+  - 现加**看门狗**：真实串口超过 `LIVENESS_TIMEOUT=15s` 收不到任何字节（LMAC~1-6s/UMAC~6s 正常
+    都在打）→ 自动 conn→`OFFLINE`、rssi→0、清陈旧 WPA/STA 快照，只在跳变时推一次。
+  - **串口断开自愈**：读异常/句柄失效（休眠唤醒、COM 重枚举）→ 每 `RECONNECT_INTERVAL=2s` 自动重开
+    串口并**提前重断言 SYSDBG**（`_assert_at=now+1s`），重新上电后 ~几秒自动恢复，无需重启服务器。
+  - 实测：关 B → 一会 B 转 `OFFLINE`；重新上电 → B `OFFLINE→SCANNING→CONNECTED`，全程没重启服务器。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。

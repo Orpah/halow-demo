@@ -79,6 +79,13 @@ STOP = threading.Event()
 POLL_STATUS = ["AT+CONN_STATE", "AT+RSSI"]
 POLL_SLOW = ["AT+MODE?", "AT+SSID?"]
 
+# 真实串口设备的实时性判定 / 断开自愈（2026-09-07 加）：
+#   板子断电/死机/休眠丢流后不再回任何字节 → 状态冻结在旧 CONNECTED（无超时）。
+#   LIVENESS_TIMEOUT：超过此秒数收不到任何字节即判离线（正常时 LMAC~1-6s/UMAC~6s 都在打）。
+#   RECONNECT_INTERVAL：串口句柄失效（休眠唤醒/拔插后 COM 重枚举）→ 自动重开并重断言调试流。
+LIVENESS_TIMEOUT = 15.0
+RECONNECT_INTERVAL = 2.0
+
 # 默认目标（未在设备规格中指定时）：sim=本模拟器，tj45=T-Halow-RJ45 兼容/真实板
 TARGET = "sim"
 
@@ -264,6 +271,9 @@ class Device:
         self._umacblock = False        # 泰芯真机：是否正处在一帧 UMAC(IEEE80211 Status) 块内
         self._vif = {1: None, 2: None}  # UMAC：各接口(Type1=STA 上行 / Type2=AP)当前 WPA 状态
         self._ap_sta = False           # AP：当前 LMAC 块内是否出现已认证 STA(STA1..)
+        self._last_rx = time.monotonic()   # 最近一次收到设备字节的时间（实时性判定）
+        self._assert_at = 0.0              # 下次周期重断言 SYSDBG 流的时间（重连后提前触发）
+        self._io_lock = threading.Lock()   # 串口句柄换新/收发的互斥（防重连时读写旧句柄）
         # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
         self.tahv2 = dp.real_at_v2(source, target)
         if self.tahv2:
@@ -308,6 +318,67 @@ class Device:
                 EVENTS.put_nowait(kw)
             except queue.Full:
                 pass
+
+    # ---------------- 实时性判定 / 串口断开自愈（2026-09-07 加） ----------------
+    def _is_serial(self):
+        """仅真实串口设备启用“收不到字节→离线 / 断开→重连”；PC 模拟器(TCP)恒活不判。"""
+        return isinstance(self.transport, SerialTransport)
+
+    def _check_liveness(self):
+        """真实串口若超过 LIVENESS_TIMEOUT 收不到任何字节 → 判离线（断电/死机/休眠丢流）。
+
+        原来 conn/rssi/uptime 只在“收到一行应答”时才更新，板子断电后永远停在旧的
+        CONNECTED。这里在轮询线程里做看门狗：超时无数据就把 conn 打回 OFFLINE、
+        rssi 归零，并清掉陈旧的 WPA/STA 快照（防重新上电后误报 CONNECTED）。
+        只在状态发生“CONNECTED/…→OFFLINE”跳变时推一次，不刷屏。
+        """
+        if not self._is_serial():
+            return
+        if time.time() < self.poll_paused_until:
+            return                       # 数据模式（TXDATA）中模块未必回显，不判
+        if time.monotonic() - self._last_rx <= LIVENESS_TIMEOUT:
+            return
+        if self.state["conn"] == "OFFLINE":
+            return                       # 已在离线，不重复推
+        self._vif = {1: None, 2: None}   # 清陈旧 WPA 快照
+        self._ap_sta = False
+        self.state["rssi"] = 0
+        self.state["conn"] = "OFFLINE"
+        self.state["ok"] = False
+        self.push("status", state=dict(self.state))
+        self.push("log",
+                  text=f"[{self.name}] 超过 {LIVENESS_TIMEOUT:.0f}s 未收到设备数据，判离线"
+                       f"（若已重新上电请稍候自动重连）")
+
+    def _close_transport(self):
+        """关闭当前传输句柄（幂等，重连前调用）。"""
+        with self._io_lock:
+            try:
+                self.transport.close()
+            except Exception:
+                pass
+
+    def _reconnect_serial(self):
+        """尝试重开串口（休眠唤醒/拔插后 COM 句柄失效，需重建）。
+
+        成功则换新句柄、清行缓冲与块状态机、把 _last_rx 归零并让轮询线程尽快
+        重断言 SYSDBG 调试流（板子重新上电=重启，流需重新打开）。返回是否成功。
+        """
+        try:
+            t = SerialTransport(self.port)
+        except Exception:
+            return False
+        with self._io_lock:
+            self.transport = t
+        self.buf = b""
+        self._lmacblock = False
+        self._umacblock = False
+        self._vif = {1: None, 2: None}
+        self._ap_sta = False
+        self._last_rx = time.monotonic()     # 模块开机头几秒不打印，别立刻判离线
+        self._assert_at = time.monotonic() + 1.0   # 尽快重断言 SYSDBG
+        self.push("log", text=f"[{self.name}] 串口 {self.port} 已重连，等待设备应答")
+        return True
 
     # ---------------- 泰芯真机 LMAC 流（TX/RX 真实计数） ----------------
     def _consume_tahv2_lmac(self, tline):
@@ -507,13 +578,26 @@ class Device:
 
     # ---------------- threads ----------------
     def reader_loop(self):
+        serial = self._is_serial()       # 真实串口才做断开自动重连（TCP/进程内断开即退）
         while not STOP.is_set():
-            data = self.transport.read(4096)
+            try:
+                data = self.transport.read(4096)
+            except Exception:
+                data = None              # 句柄失效/串口被拔/休眠唤醒后读异常
             if data is None:
-                break                     # 传输断开
+                if not serial:
+                    break                # 非串口断开即退出（维持原行为）
+                # 串口断开：关旧句柄并退避重连，直到成功或停止
+                self._close_transport()
+                while not STOP.is_set():
+                    if self._reconnect_serial():
+                        break
+                    time.sleep(RECONNECT_INTERVAL)
+                continue                 # 重连成功继续读；STOP 已设则由外层条件退出
             if not data:
                 time.sleep(0.01)
                 continue
+            self._last_rx = time.monotonic()   # 收到任何字节 = 设备活着
             self.buf += data
             # 防无换行数据无限累积（二进制 flood）：超阈值只留尾部，给下一条换行机会
             if len(self.buf) > 65536:
@@ -546,17 +630,18 @@ class Device:
             seq = [("AT+RSSI=?", 1.3), ("AT+WIFIMODE=?", 1.3),
                    ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3)]
             i = 0
-            assert_at = time.time() + 20.0   # 周期重断言调试流（板子 RST 会重置 SYSDBG）
+            self._assert_at = time.time() + 20.0  # 周期重断言调试流（板子 RST 会重置 SYSDBG）
             while not STOP.is_set():
                 if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询
                     time.sleep(0.5)
                     continue
-                if time.time() >= assert_at:
+                self._check_liveness()     # 看门狗：串口超时无字节 → 判离线
+                if time.time() >= self._assert_at:
                     for c in ("AT+SYSDBG=LMAC,1", "AT+SYSDBG=UMAC,1",
                               "AT+SYSDBG=WNB,0"):
                         self.send(c)
                         time.sleep(1.0)          # 逐条间隔，防真机吞后面的应答
-                    assert_at = time.time() + 20.0
+                    self._assert_at = time.time() + 20.0
                 cmd, gap = seq[i % len(seq)]
                 i += 1
                 self._poll_until = time.time() + 1.2        # 轮询响应窗口（状态行不进控制台）
@@ -567,6 +652,7 @@ class Device:
             if time.time() < self.poll_paused_until:   # 数据模式中暂停轮询，避免污染 TXDATA 字节
                 time.sleep(0.5)
                 continue
+            self._check_liveness()     # 看门狗：串口超时无字节 → 判离线
             self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
             for c in self.poll_status:
                 self.send(c)

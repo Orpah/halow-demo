@@ -105,6 +105,16 @@
     RSSI 看不出功率差（桌面饱和，需拉远几米）；AP 复位→STA 正确 SCANNING→~15s 自动重连；连接态
     `AT+DSLEEP=1` 保活休眠（链路保持、AT 可用、AP 端 `AT+WAKEUP=<mac>` 接受）。KEY 明文可被
     `AT+KEY=?`/`AT+SYSCFG` 读回（防"别人连入"，不防"改配置"）。
+- **串口断电/休眠 → UI 冻结旧 CONNECTED（2026-09-07 加，server.py 修复）**：真机状态只在"收到一行
+  应答"才更新，板子断电/休眠后无应答 → conn/rssi/uptime 全冻结在旧 CONNECTED（无超时）。修复 =
+  Device 加看门狗 + 断开自愈（仅真实串口 `SerialTransport`，TCP/PC 模拟器不启用）：
+  - `_check_liveness()`：`poll_loop` 每轮调用，`time.monotonic()-self._last_rx > LIVENESS_TIMEOUT(15s)`
+    且非数据模式、非已 OFFLINE → conn=OFFLINE、rssi=0、清 `_vif`/`_ap_sta`，跳变才 push。
+    `_last_rx` 在 `reader_loop` 收到任何字节时更新（LMAC~1-6s/UMAC~6s 正常一直在打，15s 不会误判）。
+  - `reader_loop` 包 try/except：读异常/断开（休眠唤醒 COM 句柄失效）→ `_close_transport()` →
+    每 `RECONNECT_INTERVAL(2s)` `_reconnect_serial()` 重开串口（换句柄、清 buf/块状态、`_last_rx` 归零、
+    `_assert_at=now+1` 提前重断言 SYSDBG）→ 继续读；重上电后 ~几秒自动 CONNECTED，不用重启服务器。
+  - 实测：关 B → B 转 OFFLINE；重上电 → OFFLINE→SCANNING→CONNECTED。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 
