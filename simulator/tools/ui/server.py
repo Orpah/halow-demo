@@ -278,9 +278,18 @@ class Device:
         self._io_lock = threading.Lock()   # 串口句柄换新/收发的互斥（防重连时读写旧句柄）
         # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
         self.tahv2 = dp.real_at_v2(source, target)
+        # 泰芯 AH 族真机一次只应答一条查询（背靠背会吞后面的应答，2026-09-07 实测 TX-AH 与 TH-RJ45
+        # 都是）。TX-AH(v2) 走下面 tahv2 专用逐条轮询；TH-RJ45(tj45, 非 v2) 在此标记，通用轮询也逐条错开。
+        self._spaced_real = (not self.tahv2 and source == "serial"
+                             and dp.family(target) == dp.FAMILY_TAH)
         if self.tahv2:
             self.poll_status = ["AT+RSSI=?", "AT+WIFIMODE=?"]
             self.poll_slow = ["AT+SSID=?"]
+        elif self._spaced_real:
+            # TH-RJ45 真机：连接用 RSSI 判（非 0=已连上），故只轮询 RSSI；不轮询 AT+CONN_STATE
+            # （其应答 +CONNECTED/+DISCONNECT 是“事件”，会刷屏/误当事件推送）。
+            self.poll_status = ["AT+RSSI"]
+            self.poll_slow = ["AT+MODE", "AT+SSID"]
         else:
             self.poll_status = POLL_STATUS   # ["AT+CONN_STATE", "AT+RSSI"]
             self.poll_slow = POLL_SLOW       # ["AT+MODE?", "AT+SSID?"]
@@ -671,15 +680,30 @@ class Device:
                 time.sleep(0.5)
                 continue
             self._check_liveness()     # 看门狗：串口超时无字节 → 判离线
-            self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
-            for c in self.poll_status:
-                self.send(c)
-            now = time.time()
-            if now - last_slow > 5:
-                last_slow = now
-                for c in self.poll_slow:
+            if self._spaced_real:
+                # TH-RJ45 真机：一次只应答一条 → 逐条错开 ≥1.3s（与 TX-AH 同坑，2026-09-07 实测）
+                for c in self.poll_status:
+                    self._poll_until = time.time() + 1.3   # 轮询响应窗口（状态行不进控制台）
                     self.send(c)
-            time.sleep(2)
+                    time.sleep(1.3)
+                now = time.time()
+                if now - last_slow > 6:
+                    last_slow = now
+                    for c in self.poll_slow:
+                        self._poll_until = time.time() + 1.3
+                        self.send(c)
+                        time.sleep(1.3)
+                time.sleep(0.4)
+            else:
+                self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
+                for c in self.poll_status:
+                    self.send(c)
+                now = time.time()
+                if now - last_slow > 5:
+                    last_slow = now
+                    for c in self.poll_slow:
+                        self.send(c)
+                time.sleep(2)
 
     def start(self):
         threading.Thread(target=self.reader_loop, daemon=True).start()

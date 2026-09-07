@@ -136,6 +136,22 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
 
+#### 0.1.0.2 TH-RJ45 真机（T-Halow-RJ45，target=tj45，2026-09-07 实测）
+
+- **UI 显示名 = `TH-RJ45`**（devprofiles 档案 name，内部 key 仍 tj45；别名 `rj45`/`thalow`/`t-halow` 映射）。
+  实测板：A AP MAC `d6:a2:2a:82:67:c0`、B STA MAC `d6:a2:2a:6f:92:c0`，固件 `v1.6.4.3-38054`。
+- **方言（与 TX-AH v2 不同）**：设 `AT+MODE=ap/sta`；查询裸命令即可（`AT+MODE`/`AT+SSID`/`AT+RSSI`/
+  `AT+VERSION`，带 `?` 也认）；加密 `AT+KEYMGMT=NONE|WPA-PSK`+`AT+PSK=<64hex>`；
+  `AT+CHAN_LIST=`/`AT+BSS_BW=`；`AT+CONN_STATE`→`+CONNECTED/+DISCONNECT`（事件式）；**RSSI 连上为小整数
+  （如 8/7），断开=0**——tj45 真机连接判定用 RSSI≠0。
+- **AT+MODE 角色不跨 RST 保存**（重启回 sta、即时生效）→ 改角色后别 RST；AP 设起来会 ACS 自动选信道
+  （常选 924MHz），`AT+CHAN_LIST=9080` 可压回 9080（伴随无害 `lmac error!!!chan idx=2`）。
+- **一次只应答一条查询（与 TX-AH 同坑）**：server.py 对 tj45 真机（source=serial 且 family=tah）启用
+  `_spaced_real` 逐条错开 ≥1.3s 轮询——只轮 `AT+RSSI`（判连接）+ MODE/SSID 慢轮；**不轮 CONN_STATE**
+  （其 `+CONNECTED` 应答是“事件”，会刷屏/误推送）。重启后状态自动刷新。
+- 实测：A=ap / B=sta 开放 `halowlink@9080 bw8` 互联成功（+CONNECTED、RSSI 8）；UI 双机已连接。
+- 板上每条命令后常打 `valid cmds:`（固件噪音，未折叠）。数据通路=RJ45 网口（USB-C 只供电+AT 配置）。
+
 ### 0.1.1 多模组（设备档案见 `host/devprofiles.py`）
 
 目标 key：`sim`（CH32V203）/ `tj45`（T-Halow-RJ45）/ `txah`（TX-AH，泰芯原厂，同族）/ `hc01`

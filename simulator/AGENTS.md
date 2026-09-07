@@ -130,6 +130,15 @@
 - **角色互换（2026-09-07 实测）**：两块板仅 `AT+WIFIMODE=ap/sta` 对调（SSID/KEY/信道一致不变）+ 双 RST 即可
   互换 AP/STA → 双机 CONNECTED 稳定（B 当接入点、A 当客户端都正常）→ **两块板都能当 AP（角色对称）**；
   换回基线（A=AP/B=STA）亦正常。
+- **TH-RJ45 真机（tj45，2026-09-07 实测；显示名改 TH-RJ45 + `_spaced_real` 逐条轮询）**：
+  - UI 显示名 = TH-RJ45（devprofiles tj45 档案 name；key 仍 tj45，别名 rj45/thalow）。
+  - 方言：设 `AT+MODE=`；查询裸命令（AT+MODE/SSID/RSSI/VERSION，带 ? 也认）；`AT+KEYMGMT`+`AT+PSK=64hex`；
+    `AT+CONN_STATE`→`+CONNECTED/+DISCONNECT`（事件式）；RSSI 连上=小整数(8/7)、断开=0。
+  - **AT+MODE 角色不跨 RST 保存**（重启回 sta，即时生效）→ 改角色别 RST；AP 起时会 ACS 自动选信道，
+    `AT+CHAN_LIST=9080` 可压回 9080（无害 `lmac error!!!chan idx=2`）。
+  - **一次只应答一条（与 TX-AH 同坑）**：server.py tj45 真机走 `_spaced_real` 逐条 ≥1.3s 轮询——只轮
+    RSSI（判连接）+ MODE/SSID 慢轮；不轮 CONN_STATE（+CONNECTED 是事件会刷屏）。实测重启后状态自动刷新。
+  - 板上每条命令后常打 `valid cmds:`（固件噪音）。数据通路=RJ45 网口（USB-C 只供电+AT 配置）。
 - **控制台自动滚动坑（2026-09-07 修）**：真正可滚动的是外层 `.console` div（`overflow:auto;height:220px`），
   `renderConsole` 原来设 `pre.scrollTop=scrollHeight` 无效（`pre` 不滚，父 div 才滚）→ 贴底时新行来了视野
   "向上跑"。修：`const box=pre.parentElement`；渲染前测 `box.scrollHeight-box.scrollTop-box.clientHeight<24`

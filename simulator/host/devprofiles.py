@@ -45,7 +45,7 @@ PROFILES = {
     "sim":  Profile("sim",  ("sim", "ch32", "ch32v203"),
                     "CH32V203", FAMILY_NATIVE),
     "tj45": Profile("tj45", ("tj45", "thalow", "t-halow", "rj45"),
-                    "T-Halow-RJ45", FAMILY_TAH),
+                    "TH-RJ45", FAMILY_TAH),
     # TX-AH 泰芯原厂模组（TX-AH-Rx00P 系列，AH-SDK V2.x 固件 v2.4.1.x）：
     # 真机 AT 用 AT+WIFIMODE/AT+ENCRYPT/AT+KEY，查询带 '?'（AT+WIFIMODE=? 等），
     # 无 AT+MODE/AT+CONN_STATE/AT+RSSI(裸) —— 与 T-Halow(tj45) 方言不同（2026-09-06 实测）。
