@@ -3,9 +3,9 @@
 
 const state = {
   A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on" },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
   B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on" },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
 };
 const consoles = { A: [], B: [] };
 let frames = [];
@@ -227,6 +227,11 @@ function updateStatus(d) {
   $(`type${d}`).textContent = s.type || "--";
   $(`port${d}`).textContent = s.port || "--";
   $(`ssid${d}`).textContent = s.ssid || "-";
+  // 频点/带宽：后端 chan 为 ×10 频点列表（如 9160），÷10 显示为 MHz
+  const cf = String(s.chan || "").split(",").map((x) => x.trim()).filter(Boolean)
+    .map((x) => Math.round(Number(x)) / 10).join("/");
+  $(`chan${d}`).textContent = cf ? cf + " MHz" : "-";
+  $(`bw${d}`).textContent = s.bw ? s.bw + " MHz" : "-";
   $(`tx${d}`).textContent = s.tx ?? 0;
   $(`rx${d}`).textContent = s.rx ?? 0;
   $(`up${d}`).textContent = (s.uptime ?? 0) + "s";

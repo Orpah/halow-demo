@@ -77,7 +77,7 @@ STOP = threading.Event()
 
 # 状态轮询命令
 POLL_STATUS = ["AT+CONN_STATE", "AT+RSSI"]
-POLL_SLOW = ["AT+MODE?", "AT+SSID?"]
+POLL_SLOW = ["AT+MODE?", "AT+SSID?", "AT+CHAN_LIST?", "AT+BSS_BW?"]
 
 # 真实串口设备的实时性判定 / 断开自愈（2026-09-07 加）：
 #   板子断电/死机/休眠丢流后不再回任何字节 → 状态冻结在旧 CONNECTED（无超时）。
@@ -261,6 +261,7 @@ class Device:
             "name": name, "port": port, "type": device_type(source, target),
             "ok": False, "conn": "OFFLINE",
             "mode": "", "ssid": "", "rssi": 0,
+            "chan": "", "bw": 0,        # 工作频点列表(×10 单位) / 带宽 MHz（CHAN_LIST/BSS_BW 轮询）
             "power": "off" if source == "serial" else "on",   # 开机/关机（真机首次收到字节前显示关机）
             "version": "", "tx": 0, "rx": 0, "uptime": 0,
         }
@@ -289,7 +290,7 @@ class Device:
             # TH-RJ45 真机：连接用 RSSI 判（非 0=已连上），故只轮询 RSSI；不轮询 AT+CONN_STATE
             # （其应答 +CONNECTED/+DISCONNECT 是“事件”，会刷屏/误当事件推送）。
             self.poll_status = ["AT+RSSI"]
-            self.poll_slow = ["AT+MODE", "AT+SSID"]
+            self.poll_slow = ["AT+MODE", "AT+SSID", "AT+CHAN_LIST?", "AT+BSS_BW?"]
         else:
             self.poll_status = POLL_STATUS   # ["AT+CONN_STATE", "AT+RSSI"]
             self.poll_slow = POLL_SLOW       # ["AT+MODE?", "AT+SSID?"]
@@ -534,6 +535,10 @@ class Device:
         if self.tahv2 and self._consume_tahv2_umac(tline):
             return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45 / 泰芯 V2）
+        # 泰芯真机(T-Halow 等)：应答常把 "OK" 与 "+KEY:val" 合并成一行（如 OK+RSSI:0、OK+BSS_BW:8MHz）
+        # → 剥掉前导 "OK" 再按 +KEY:val 解析
+        if tline.startswith("OK+"):
+            tline = tline[2:]
         had_plus = tline.startswith("+")
         probe = tline[1:] if had_plus else tline
         in_poll = time.time() < self._poll_until
@@ -581,6 +586,23 @@ class Device:
                 return
             if k == "SSID":
                 self.state["ssid"] = v
+                self.push("status", state=dict(self.state))
+                echo(line)
+                return
+            if k == "CHAN_LIST":
+                # 频点列表：SYSCFG dump 行可能是 "9160, chan_cnt:1"，只取纯数字频点段
+                toks = [x.strip() for x in v.split(",")
+                        if x.strip() and x.strip()[0].isdigit()]
+                if toks:
+                    v = ",".join(toks)
+                self.state["chan"] = v
+                self.push("status", state=dict(self.state))
+                echo(line)
+                return
+            if k == "BSS_BW":
+                # 实机应答带单位后缀（如 "+BSS_BW:8MHz"）→ 只取数字
+                m = re.search(r"(\d+)", v)
+                self.state["bw"] = int(m.group(1)) if m else self.state.get("bw", 0)
                 self.push("status", state=dict(self.state))
                 echo(line)
                 return
@@ -655,7 +677,9 @@ class Device:
             # 泰芯真机(V2)一次只应答一条查询（背靠背会吞掉后面的应答）：
             # 逐条错开发送；RSSI? 每轮 1 次，WIFIMODE?/SSID? 交替慢轮
             seq = [("AT+RSSI=?", 1.3), ("AT+WIFIMODE=?", 1.3),
-                   ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3)]
+                   ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3),
+                   ("AT+RSSI=?", 1.3), ("AT+CHAN_LIST=?", 1.3),
+                   ("AT+RSSI=?", 1.3), ("AT+BSS_BW=?", 1.3)]
             i = 0
             self._assert_at = time.time() + 20.0  # 周期重断言调试流（板子 RST 会重置 SYSDBG）
             while not STOP.is_set():
@@ -687,7 +711,7 @@ class Device:
                     self.send(c)
                     time.sleep(1.3)
                 now = time.time()
-                if now - last_slow > 6:
+                if now - last_slow > 10:
                     last_slow = now
                     for c in self.poll_slow:
                         self._poll_until = time.time() + 1.3

@@ -158,6 +158,14 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   （非信道/方向 artifact，已排除信道：双方都确认在 9080）。
 - **混接 UI（A=TH-RJ45 + B=TX-AH 同页）**：命令提示/快捷按钮**按每台设备方言自动切换**（T-Halow 风格 vs
   AH-SDK V2 风格），`/api/info` 的 `v2` 标记逐设备，验证 OK。
+- **UI 频率/带宽行（2026-09-07 加，server.py + app.js/index.html）**：设备卡新增
+  「频率 x MHz · 带宽 y MHz」；server 慢轮询 `AT+CHAN_LIST?`（tj45）/ `AT+CHAN_LIST=?`（txah）→
+  `+CHAN_LIST:9160`，`AT+BSS_BW?`（应答 `+BSS_BW:8MHz` 带单位 → 解析取数字）；前端 `chan`÷10 显
+  示 MHz、`bw` 直显。**TH-RJ45 常把 `OK` 与 `+KEY:val` 合并成一行**（`OK+RSSI:0` / `OK+BSS_BW:8MHz`）
+  → server 剥前导 `OK` 再按 `+KEY:val` 解析（也顺带修正 tj45 的 RSSI 等合并行）。
+- **跨固件再证非频段（2026-09-07 实测）**：此刻双端 `chan_list` 均读回 **9160**（非早前测试的 9080；
+  SYSCFG/WNBCFG + CHAN_LIST 查询一致）→ 双卡同显 **916 MHz · 8 MHz**，跨族 STA 仍 `at channel 0` +
+  `assoc_timeout` → 现已有 **9080 与 9160 两个单频点同样失败**，与频点/频段/带宽无关。
 
 ### 0.1.1 多模组（设备档案见 `host/devprofiles.py`）
 
