@@ -107,6 +107,17 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   - **串口断开自愈**：读异常/句柄失效（休眠唤醒、COM 重枚举）→ 每 `RECONNECT_INTERVAL=2s` 自动重开
     串口并**提前重断言 SYSDBG**（`_assert_at=now+1s`），重新上电后 ~几秒自动恢复，无需重启服务器。
   - 实测：关 B → 一会 B 转 `OFFLINE`；重新上电 → B `OFFLINE→SCANNING→CONNECTED`，全程没重启服务器。
+- **开机/关机（power）徽标 + 离线信号条归零 + 状态中文显示（2026-09-07 加）**：
+  - 以前真机 UI 只有 conn，容易把「开机但无客户端」与「断电」混淆。现 server.py 新增 `state.power`：
+    收到任何字节=开机；超过 `LIVENESS_TIMEOUT` 无字节或自(重)连后从未收到=关机。**power 与 conn 解耦**
+    ——AP 开着但无客户端 → power=开机、conn=OFFLINE（不误当关机）。界面标题栏加「开机/关机」徽标（绿/灰）。
+  - **RSSI 归零**：`_tahv2_conn` 判 OFFLINE 时 rssi=0；且 tahv2 的 `AT+RSSI=?` 应答在 conn=OFFLINE 时
+    强制置 0——否则 AP 掉线后固件回陈旧缓存（残留如 -70）会把信号条又点亮（实测抓到并修掉）。信号条只反映
+    有链路时的真实信号。
+  - **前端把 conn/mode 显示成中文**（仅展示层映射；机器值仍英文，逻辑/测试/API 不受影响）：
+    `CONNECTED=已连接`、`SCANNING=扫描中`、`ASSOCIATING=关联中`、`PAIRING=配对中`、`OFFLINE=离线`；
+    `AP=热点`、`STA=终端`、`APSTA=双模`、`GROUP=组网`。
+  - 实测：B 断电→关机徽标+离线；B 上电→绿色开机→扫描中→已连接；A 断电→关机徽标。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。

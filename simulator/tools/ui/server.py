@@ -261,6 +261,7 @@ class Device:
             "name": name, "port": port, "type": device_type(source, target),
             "ok": False, "conn": "OFFLINE",
             "mode": "", "ssid": "", "rssi": 0,
+            "power": "off" if source == "serial" else "on",   # 开机/关机（真机首次收到字节前显示关机）
             "version": "", "tx": 0, "rx": 0, "uptime": 0,
         }
         self.t0 = time.time()
@@ -272,6 +273,7 @@ class Device:
         self._vif = {1: None, 2: None}  # UMAC：各接口(Type1=STA 上行 / Type2=AP)当前 WPA 状态
         self._ap_sta = False           # AP：当前 LMAC 块内是否出现已认证 STA(STA1..)
         self._last_rx = time.monotonic()   # 最近一次收到设备字节的时间（实时性判定）
+        self._ever_rx = False              # 自(重)连后是否收到过字节（开机/关机据此判定）
         self._assert_at = 0.0              # 下次周期重断言 SYSDBG 流的时间（重连后提前触发）
         self._io_lock = threading.Lock()   # 串口句柄换新/收发的互斥（防重连时读写旧句柄）
         # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
@@ -325,30 +327,36 @@ class Device:
         return isinstance(self.transport, SerialTransport)
 
     def _check_liveness(self):
-        """真实串口若超过 LIVENESS_TIMEOUT 收不到任何字节 → 判离线（断电/死机/休眠丢流）。
+        """看门狗（真实串口）：据“是否收到设备字节”判定电源状态 power 与 conn。
 
-        原来 conn/rssi/uptime 只在“收到一行应答”时才更新，板子断电后永远停在旧的
-        CONNECTED。这里在轮询线程里做看门狗：超时无数据就把 conn 打回 OFFLINE、
-        rssi 归零，并清掉陈旧的 WPA/STA 快照（防重新上电后误报 CONNECTED）。
-        只在状态发生“CONNECTED/…→OFFLINE”跳变时推一次，不刷屏。
+        收到任何字节 = 开机且活着；超过 LIVENESS_TIMEOUT 无字节（或自(重)连后从未收到）
+        = 关机/失联。关机时：conn→OFFLINE、rssi→0、清陈旧 WPA/STA 快照。
+        power 与 conn 解耦：AP 开着但无客户端时 conn=OFFLINE 而 power=开机，两者不冲突
+        （这正是不再把“离线”误当“关机”的关键）。仅在状态跳变时推一次，不刷屏。
         """
         if not self._is_serial():
             return
         if time.time() < self.poll_paused_until:
             return                       # 数据模式（TXDATA）中模块未必回显，不判
-        if time.monotonic() - self._last_rx <= LIVENESS_TIMEOUT:
-            return
-        if self.state["conn"] == "OFFLINE":
-            return                       # 已在离线，不重复推
-        self._vif = {1: None, 2: None}   # 清陈旧 WPA 快照
-        self._ap_sta = False
-        self.state["rssi"] = 0
-        self.state["conn"] = "OFFLINE"
-        self.state["ok"] = False
+        alive = (self._ever_rx and
+                 time.monotonic() - self._last_rx <= LIVENESS_TIMEOUT)
+        p = "on" if alive else "off"
+        if self.state.get("power") == p:
+            return                       # 电源状态未变：不动（避免反复推/反复清状态）
+        self.state["power"] = p
+        if not alive:
+            self.state["rssi"] = 0
+            if self.state["conn"] != "OFFLINE":
+                self._vif = {1: None, 2: None}   # 清陈旧 WPA 快照
+                self._ap_sta = False
+                self.state["conn"] = "OFFLINE"
+                self.state["ok"] = False
+                self.push("log",
+                          text=f"[{self.name}] 超过 {LIVENESS_TIMEOUT:.0f}s 未收到设备数据，"
+                               f"判关机（若已重新上电请稍候自动重连）")
+        else:
+            self.push("log", text=f"[{self.name}] 设备开始应答（开机）")
         self.push("status", state=dict(self.state))
-        self.push("log",
-                  text=f"[{self.name}] 超过 {LIVENESS_TIMEOUT:.0f}s 未收到设备数据，判离线"
-                       f"（若已重新上电请稍候自动重连）")
 
     def _close_transport(self):
         """关闭当前传输句柄（幂等，重连前调用）。"""
@@ -376,6 +384,7 @@ class Device:
         self._vif = {1: None, 2: None}
         self._ap_sta = False
         self._last_rx = time.monotonic()     # 模块开机头几秒不打印，别立刻判离线
+        self._ever_rx = False                # 新句柄 = 尚未收到字节，power 回关机等首包
         self._assert_at = time.monotonic() + 1.0   # 尽快重断言 SYSDBG
         self.push("log", text=f"[{self.name}] 串口 {self.port} 已重连，等待设备应答")
         return True
@@ -477,6 +486,8 @@ class Device:
                                   else "OFFLINE")
         else:
             return                     # 模式未知时暂不判定
+        if self.state["conn"] == "OFFLINE":
+            self.state["rssi"] = 0    # 无链路时信号条归零（防残留旧 dBm 还亮格）
         self.state["ok"] = True
         self.state["uptime"] = int(time.time() - self.t0)
         self.push("status", state=dict(self.state))
@@ -536,9 +547,15 @@ class Device:
                 return
             if k == "RSSI":
                 try:
-                    self.state["rssi"] = int(v)
+                    val = int(v)
                 except ValueError:
-                    pass
+                    val = self.state["rssi"]
+                # 泰芯真机(V2)：RSSI 只在有链路(conn!=OFFLINE)时有意义；AP 无客户端 /
+                # STA 断开时固件会回陈旧缓存值（如 B 掉线后仍 -70）→ 无链路则强制 0，
+                # 避免“离线却还亮着信号条”（rssi 判定连接早已不用，只影响信号条显示）。
+                if self.tahv2 and self.state.get("conn") == "OFFLINE":
+                    val = 0
+                self.state["rssi"] = val
                 # 泰芯真机(V2)无 AT+CONN_STATE：连接由 UMAC WPA 状态/AP 的 STA 表判定（见 _tahv2_conn），
                 # 不再用 RSSI 推断 —— RSSI 非 0 可能只是“关联中/听到 AP 信号”，KEY 错时也非 0。
                 if not self.tahv2:
@@ -598,6 +615,7 @@ class Device:
                 time.sleep(0.01)
                 continue
             self._last_rx = time.monotonic()   # 收到任何字节 = 设备活着
+            self._ever_rx = True               # 曾收到过字节（开机状态据此判定）
             self.buf += data
             # 防无换行数据无限累积（二进制 flood）：超阈值只留尾部，给下一条换行机会
             if len(self.buf) > 65536:

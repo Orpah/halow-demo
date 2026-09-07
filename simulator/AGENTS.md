@@ -115,6 +115,13 @@
     每 `RECONNECT_INTERVAL(2s)` `_reconnect_serial()` 重开串口（换句柄、清 buf/块状态、`_last_rx` 归零、
     `_assert_at=now+1` 提前重断言 SYSDBG）→ 继续读；重上电后 ~几秒自动 CONNECTED，不用重启服务器。
   - 实测：关 B → B 转 OFFLINE；重上电 → OFFLINE→SCANNING→CONNECTED。
+- **开机/关机(power)徽标 + RSSI 归零 + 状态中文显示（2026-09-07 加）**：power 与 conn **解耦**——真机
+  收到任何字节=power=on；超 `LIVENESS_TIMEOUT` 无字节或自(重)连后从未收到=off（`_ever_rx` 标志）；AP 开着
+  无客户端 = on + OFFLINE（不误当关机）。UI 标题栏加「开机/关机」徽标（绿/灰）。RSSI：tahv2 判 OFFLINE 时
+  归零，且 `AT+RSSI=?` 应答在 conn=OFFLINE 时强制置 0（固件掉线后回陈旧缓存如 -70，会把信号条点亮——
+  实测抓到）。前端 conn/mode 显示中文映射（仅展示层；机器值保持英文，逻辑/测试/API 不受影响）：
+  CONNECTED=已连接/SCANNING=扫描中/ASSOCIATING=关联中/PAIRING=配对中/OFFLINE=离线；
+  AP=热点/STA=终端/APSTA=双模/GROUP=组网。改显示只动 app.js 的 CONN_ZH/MODE_ZH，勿改后端 state 字符串。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 

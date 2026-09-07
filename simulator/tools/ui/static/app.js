@@ -3,9 +3,9 @@
 
 const state = {
   A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on" },
   B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0 },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on" },
 };
 const consoles = { A: [], B: [] };
 let frames = [];
@@ -211,11 +211,19 @@ function onEvent(m) {
 /* ---------------- 状态 ---------------- */
 function updateStatus(d) {
   const s = state[d];
+  // 显示用中文映射：仅前端展示文案；机器值仍是英文（CONNECTED/AP…），
+  // 后端逻辑、/api/status、测试等都不受影响（拓扑判定读的是 s.conn 机器值）。
+  const CONN_ZH = { CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
+                    PAIRING: "配对中", OFFLINE: "离线" };
+  const MODE_ZH = { AP: "热点", STA: "终端", APSTA: "双模", GROUP: "组网" };
   const connCls = { CONNECTED: "ok", SCANNING: "scan", ASSOCIATING: "scan",
                     PAIRING: "pair" }[s.conn] || "";
-  $(`conn${d}`).textContent = s.conn || "OFFLINE";
+  $(`conn${d}`).textContent = CONN_ZH[s.conn] || s.conn || "离线";
   $(`conn${d}`).className = "conn " + connCls;
-  $(`mode${d}`).textContent = s.mode || "--";
+  const powTxt = { on: "开机", off: "关机" }[s.power];
+  $(`pow${d}`).textContent = powTxt || "--";
+  $(`pow${d}`).className = "chip pow " + (s.power === "on" ? "ok" : "off");
+  $(`mode${d}`).textContent = MODE_ZH[s.mode] || s.mode || "--";
   $(`type${d}`).textContent = s.type || "--";
   $(`port${d}`).textContent = s.port || "--";
   $(`ssid${d}`).textContent = s.ssid || "-";

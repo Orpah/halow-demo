@@ -83,6 +83,8 @@ h3 { margin: 0 0 10px; font-size: 14px; color: var(--acc); display: flex; align-
 .chip {
   background: #22304a; border-radius: 8px; padding: 1px 8px; font-size: 11px; color: var(--acc);
 }
+.chip.pow.ok { color: var(--ok); }
+.chip.pow.off { color: var(--dim); }
 .conn { color: var(--dim); }
 .conn.ok { color: var(--ok); }
 .conn.scan { color: var(--warn); }
