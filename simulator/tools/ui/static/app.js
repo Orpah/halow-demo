@@ -215,7 +215,7 @@ function updateStatus(d) {
   // 后端逻辑、/api/status、测试等都不受影响（拓扑判定读的是 s.conn 机器值）。
   const CONN_ZH = { CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
                     PAIRING: "配对中", OFFLINE: "离线" };
-  const MODE_ZH = { AP: "热点", STA: "终端", APSTA: "双模", GROUP: "组网" };
+  const MODE_ZH = { AP: "接入点", STA: "客户端", APSTA: "双模", GROUP: "组网" };
   const connCls = { CONNECTED: "ok", SCANNING: "scan", ASSOCIATING: "scan",
                     PAIRING: "pair" }[s.conn] || "";
   $(`conn${d}`).textContent = CONN_ZH[s.conn] || s.conn || "离线";

@@ -121,7 +121,7 @@
   归零，且 `AT+RSSI=?` 应答在 conn=OFFLINE 时强制置 0（固件掉线后回陈旧缓存如 -70，会把信号条点亮——
   实测抓到）。前端 conn/mode 显示中文映射（仅展示层；机器值保持英文，逻辑/测试/API 不受影响）：
   CONNECTED=已连接/SCANNING=扫描中/ASSOCIATING=关联中/PAIRING=配对中/OFFLINE=离线；
-  AP=热点/STA=终端/APSTA=双模/GROUP=组网。改显示只动 app.js 的 CONN_ZH/MODE_ZH，勿改后端 state 字符串。
+  AP=接入点/STA=客户端/APSTA=双模/GROUP=组网。改显示只动 app.js 的 CONN_ZH/MODE_ZH，勿改后端 state 字符串。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 

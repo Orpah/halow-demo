@@ -116,7 +116,7 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
     有链路时的真实信号。
   - **前端把 conn/mode 显示成中文**（仅展示层映射；机器值仍英文，逻辑/测试/API 不受影响）：
     `CONNECTED=已连接`、`SCANNING=扫描中`、`ASSOCIATING=关联中`、`PAIRING=配对中`、`OFFLINE=离线`；
-    `AP=热点`、`STA=终端`、`APSTA=双模`、`GROUP=组网`。
+    `AP=接入点`、`STA=客户端`、`APSTA=双模`、`GROUP=组网`。
   - 实测：B 断电→关机徽标+离线；B 上电→绿色开机→扫描中→已连接；A 断电→关机徽标。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
