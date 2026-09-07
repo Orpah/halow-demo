@@ -130,6 +130,8 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
     SCANNING 连不上；恢复一致后自动重连。`AT+BSS_BW` 生效且**跨 RST 保存**（boot 日志 `bss_bw=4`）；
     设完立刻 RST 偶发不保存（时序），等 ~2-3s 再 RST 即可。
   - 两种不匹配下 AP 侧会因“固件关联表滞后”短暂显示已连接（见上），STA 恒 SCANNING——失败模式清晰。
+- **角色互换（2026-09-07 实测，两块板都可当 AP）**：仅 `AT+WIFIMODE=ap/sta` 对调（SSID/KEY/信道一致不变）+
+  双 RST → B 当接入点、A 当客户端，双机 CONNECTED 稳定（对称性 OK）；换回基线（A=AP/B=STA）亦正常。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。

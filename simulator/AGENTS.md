@@ -127,6 +127,9 @@
   SDIO/SPI(MACBUS) 或换网络版固件。② 负向：AP/STA 信道列表不含对端主信道 → STA 扫不到、SCANNING 连不上；
   AP bw8 vs STA bw4 → STA 解不出 8MHz AP、连不上；恢复一致自动重连。`AT+BSS_BW` 生效且跨 RST 保存
   （设完立刻 RST 偶发不存，等 2-3s 再 RST）。不匹配时 AP 侧关联表滞后会短暂“已连接”，STA 恒 SCANNING。
+- **角色互换（2026-09-07 实测）**：两块板仅 `AT+WIFIMODE=ap/sta` 对调（SSID/KEY/信道一致不变）+ 双 RST 即可
+  互换 AP/STA → 双机 CONNECTED 稳定（B 当接入点、A 当客户端都正常）→ **两块板都能当 AP（角色对称）**；
+  换回基线（A=AP/B=STA）亦正常。
 - **控制台自动滚动坑（2026-09-07 修）**：真正可滚动的是外层 `.console` div（`overflow:auto;height:220px`），
   `renderConsole` 原来设 `pre.scrollTop=scrollHeight` 无效（`pre` 不滚，父 div 才滚）→ 贴底时新行来了视野
   "向上跑"。修：`const box=pre.parentElement`；渲染前测 `box.scrollHeight-box.scrollTop-box.clientHeight<24`
