@@ -118,6 +118,18 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
     `CONNECTED=已连接`、`SCANNING=扫描中`、`ASSOCIATING=关联中`、`PAIRING=配对中`、`OFFLINE=离线`；
     `AP=接入点`、`STA=客户端`、`APSTA=双模`、`GROUP=组网`。
   - 实测：B 断电→关机徽标+离线；B 上电→绿色开机→扫描中→已连接；A 断电→关机徽标。
+- **数据面架构（fmac 固件 AT=控制面，无用户数据通道）+ 负向不匹配测试（2026-09-07 实测）**：
+  - **数据面**：TX-AH-Rx00P 这块是 **fmac 固件**（v2.4.1.5-…，版本第 4 位 5）：AT 只有控制面，**没有
+    AT 级用户数据命令**。AT 手册命令全集无“发数据”项；`AT+PING`/`AT+IPERF2` 需 `SYS_NETWORK_SUPPORT`
+    +`LWIP_RAW` 宏（网络版固件才有）。实测 `AT+PING=…` 只回 OK、无结果（无 IP 栈）。真机
+    `AT+SYSDBG=WNB,1` 的帧打印不进 UI 帧监视表（该表只认模拟器 `FRAME:TX/RX` 行）。**要传 payload：
+    主机接 SDIO/SPI(MACBUS) 走数据面，或换网络版固件**；AT 口能验证的“联通”= 关联/WPA/空口计数/信号。
+  - **信道列表不匹配（负向，应连不上）**：AP `CHAN_LIST=9080,9240`(主 9080) vs STA `9160,9240`（不含
+    9080）→ STA 扫描表**无该 AP**、一直 SCANNING（rssi 0）连不上；恢复一致后自动重连。
+  - **带宽不匹配（负向，应连不上）**：AP `BSS_BW=8` vs STA `4` → STA 解不出/听不到 8MHz 的 AP、
+    SCANNING 连不上；恢复一致后自动重连。`AT+BSS_BW` 生效且**跨 RST 保存**（boot 日志 `bss_bw=4`）；
+    设完立刻 RST 偶发不保存（时序），等 ~2-3s 再 RST 即可。
+  - 两种不匹配下 AP 侧会因“固件关联表滞后”短暂显示已连接（见上），STA 恒 SCANNING——失败模式清晰。
 
 关键点：T-Halow-RJ45 状态/事件带 `+` 前缀（`+MODE:AP`、`+CONNECTED`），且用**裸命令**
 查询（`AT+MODE`、`AT+VERSION`）；PC 模拟器泰芯 AH 族（family=tah）完全对齐这两点。
