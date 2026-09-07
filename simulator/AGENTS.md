@@ -147,6 +147,10 @@
   `renderConsole` 原来设 `pre.scrollTop=scrollHeight` 无效（`pre` 不滚，父 div 才滚）→ 贴底时新行来了视野
   "向上跑"。修：`const box=pre.parentElement`；渲染前测 `box.scrollHeight-box.scrollTop-box.clientHeight<24`
   （是否在底部附近），渲染后仅在"在底部"时 `box.scrollTop=box.scrollHeight`；用户向上翻历史时不强拉回。
+- **RSSI 信号条显示（2026-09-07）**：4 格**直角满高矩形**（`.rssi-bar i{flex:1;align-self:stretch}` 无圆角）+
+  旁显数值（`rssiTxtA/B`）；**有信号(已关联)至少 1 格**（`s.rssi&&v<1 → v=1`，弱链路 -80 以下不再显"无信号"）；
+  单位按方言：v2=TX-AH 加 `dBm`，tj45 真机 RSSI 是小整数非 dBm 只显数字（防误导）。**坑**：flex 容器加
+  `align-items:center` 会让空 `<i>` 塌成 0 高（格消失）——须给子项显式高度或 `align-self:stretch`。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 

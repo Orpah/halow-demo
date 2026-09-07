@@ -230,10 +230,13 @@ function updateStatus(d) {
   $(`tx${d}`).textContent = s.tx ?? 0;
   $(`rx${d}`).textContent = s.rx ?? 0;
   $(`up${d}`).textContent = (s.uptime ?? 0) + "s";
-  // RSSI 条（4 格）
-  const v = Math.max(0, Math.min(4, s.rssi ? rssiBars(s.rssi) : 0));
-  [...$(`rssi${d}`).children].forEach((el, i) =>
+  // RSSI 条（4 格）+ dBm 数值（v2=TX-AH 是 dBm；其它只显数字，不硬加单位防误导）
+  let v = Math.max(0, Math.min(4, s.rssi ? rssiBars(s.rssi) : 0));
+  if (s.rssi && v < 1) v = 1;   // 有信号(已关联)至少 1 格：弱链路(-80 以下)也别显示成“无信号”
+  [...$(`rssi${d}`).querySelectorAll("i")].forEach((el, i) =>
     el.classList.toggle("on", i < v));
+  const rt = $(`rssiTxt${d}`);
+  if (rt) rt.textContent = s.rssi ? (s.rssi + (devV2[d] ? " dBm" : "")) : "";
 }
 
 function rssiBars(rssi) {
