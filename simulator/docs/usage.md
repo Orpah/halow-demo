@@ -151,6 +151,13 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   （其 `+CONNECTED` 应答是“事件”，会刷屏/误推送）。重启后状态自动刷新。
 - 实测：A=ap / B=sta 开放 `halowlink@9080 bw8` 互联成功（+CONNECTED、RSSI 8）；UI 双机已连接。
 - 板上每条命令后常打 `valid cmds:`（固件噪音，未折叠）。数据通路=RJ45 网口（USB-C 只供电+AT 配置）。
+- **跨固件互连 TH-RJ45 ↔ TX-AH（2026-09-07 实测，双向不互通）**：同族内（TH-RJ45↔TH-RJ45、TX-AH↔TX-AH）
+  都正常；**跨族 TH-RJ45(T-Halow v1.6.4.3) ↔ TX-AH(AH-SDK V2 v2.4.1.5) 连不上**——open/9080/bw8 双向都能
+  听到对方 SSID/BSSID（TX-AH STA 报 `by SSID find …` + `assoc_timeout` 循环；TH-RJ45 STA 报
+  `find suitable ap … freq:9080` 后也不连），但 802.11 关联完成不了 → 判定**两套固件关联握手不兼容**
+  （非信道/方向 artifact，已排除信道：双方都确认在 9080）。
+- **混接 UI（A=TH-RJ45 + B=TX-AH 同页）**：命令提示/快捷按钮**按每台设备方言自动切换**（T-Halow 风格 vs
+  AH-SDK V2 风格），`/api/info` 的 `v2` 标记逐设备，验证 OK。
 
 ### 0.1.1 多模组（设备档案见 `host/devprofiles.py`）
 

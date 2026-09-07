@@ -139,6 +139,10 @@
   - **一次只应答一条（与 TX-AH 同坑）**：server.py tj45 真机走 `_spaced_real` 逐条 ≥1.3s 轮询——只轮
     RSSI（判连接）+ MODE/SSID 慢轮；不轮 CONN_STATE（+CONNECTED 是事件会刷屏）。实测重启后状态自动刷新。
   - 板上每条命令后常打 `valid cmds:`（固件噪音）。数据通路=RJ45 网口（USB-C 只供电+AT 配置）。
+- **跨固件互连 TH-RJ45 ↔ TX-AH（2026-09-07 实测，双向不互通）**：同族内都正常；跨族 TH-RJ45(T-Halow
+  v1.6.4.3) ↔ TX-AH(AH-SDK V2 v2.4.1.5) open/9080/bw8 **双向可发现不可关联**（TX-AH STA `assoc_timeout`
+  循环；TH-RJ45 STA `find suitable ap` 后不连）→ 两套固件关联握手不兼容（已排除信道/方向）。
+  混接 UI：A=TH-RJ45 + B=TX-AH 同页，命令提示/快捷按钮按每台设备方言切换（/api/info v2 标记），验证 OK。
 - **控制台自动滚动坑（2026-09-07 修）**：真正可滚动的是外层 `.console` div（`overflow:auto;height:220px`），
   `renderConsole` 原来设 `pre.scrollTop=scrollHeight` 无效（`pre` 不滚，父 div 才滚）→ 贴底时新行来了视野
   "向上跑"。修：`const box=pre.parentElement`；渲染前测 `box.scrollHeight-box.scrollTop-box.clientHeight<24`
