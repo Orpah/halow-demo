@@ -272,6 +272,9 @@ function isSpam(t) {
 
 function renderConsole(d) {
   const pre = $(`console${d}`);
+  const box = pre.parentElement;          // .console = 真正滚动容器（overflow:auto）
+  // 之前是否在底部附近：是则内容更新后跟随到底；用户向上翻历史时不强拉回
+  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
   pre.innerHTML = consoles[d].map((l) => {
     if (l.kind === "spam") {
       const body = l.open
@@ -282,7 +285,7 @@ function renderConsole(d) {
     const mark = tx ? "→ " : "← ";
     return `<span class="c-${tx ? "tx" : "rx"}">${esc(mark + l.text)}</span>`;
   }).join("\n");
-  pre.scrollTop = pre.scrollHeight;
+  if (stick) box.scrollTop = box.scrollHeight;   // 之前 pre.scrollTop 无效：滚动容器是父 .console
   pre.querySelectorAll(".ac-spam").forEach((el) => {
     el.addEventListener("click", () => {
       const item = consoles[d].find((x) => x.kind === "spam" && x.id === Number(el.dataset.id));

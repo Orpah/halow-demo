@@ -122,12 +122,15 @@
   实测抓到）。前端 conn/mode 显示中文映射（仅展示层；机器值保持英文，逻辑/测试/API 不受影响）：
   CONNECTED=已连接/SCANNING=扫描中/ASSOCIATING=关联中/PAIRING=配对中/OFFLINE=离线；
   AP=接入点/STA=客户端/APSTA=双模/GROUP=组网。改显示只动 app.js 的 CONN_ZH/MODE_ZH，勿改后端 state 字符串。
-- **数据面 / 负向测试（2026-09-07 实测）**：① TX-AH-Rx00P = **fmac 固件**（版本第 4 位 5）：AT 只有控制面，
-  **无 AT 级用户数据命令**（手册全集无“发数据”；`AT+PING`/`AT+IPERF2` 需网络宏/LWIP，本固件无）。实测
+- **数据面 / 负向测试（2026-09-07 实测）**：① TX-AH-Rx00P = **fmac 固件**（版本第 4 位 5）：AT 只有控制面，  **无 AT 级用户数据命令**（手册全集无“发数据”；`AT+PING`/`AT+IPERF2` 需网络宏/LWIP，本固件无）。实测
   PING 只回 OK 无结果；WNB,1 帧打印不进帧监视表（表只认模拟器 `FRAME:` 行）。payload 需走主机
   SDIO/SPI(MACBUS) 或换网络版固件。② 负向：AP/STA 信道列表不含对端主信道 → STA 扫不到、SCANNING 连不上；
   AP bw8 vs STA bw4 → STA 解不出 8MHz AP、连不上；恢复一致自动重连。`AT+BSS_BW` 生效且跨 RST 保存
   （设完立刻 RST 偶发不存，等 2-3s 再 RST）。不匹配时 AP 侧关联表滞后会短暂“已连接”，STA 恒 SCANNING。
+- **控制台自动滚动坑（2026-09-07 修）**：真正可滚动的是外层 `.console` div（`overflow:auto;height:220px`），
+  `renderConsole` 原来设 `pre.scrollTop=scrollHeight` 无效（`pre` 不滚，父 div 才滚）→ 贴底时新行来了视野
+  "向上跑"。修：`const box=pre.parentElement`；渲染前测 `box.scrollHeight-box.scrollTop-box.clientHeight<24`
+  （是否在底部附近），渲染后仅在"在底部"时 `box.scrollTop=box.scrollHeight`；用户向上翻历史时不强拉回。
 - 终端 flaky：长驻服务器用 async 终端，命令被加 `^U` 前缀报错时重新 `send_to_terminal`；
   一次性命令若卡住改用 `create_and_run_task`（tasks.json）。
 
