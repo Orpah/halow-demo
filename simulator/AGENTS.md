@@ -19,6 +19,9 @@
   （`orpah/host_bus.py` 独立实现同帧格式，将来换真实 SPI 只替换底层收发）。
 - **UI：`python orpah/ui_server.py`（浏览器 http://127.0.0.1:8901/，VS Code 任务
   `orpah-ui`）**——内嵌整条链路自动周期上报，页面三层拓扑 + ORPAH-REPORT 实时报文流。
+  两 UI 启动任务（`orpah-ui` / `sim-server-host-sim|tj45|hc01`）已带 **`${input}` 端口
+  输入**：运行任务时弹框选端口（回车=默认 8901 / 8899），改端口可同时开多实例不冲突
+  （后端本就支持 `--port`，2026-09-09 起任务暴露该选项）。
 
 ## 0b. 编码约定（2026-09-09）：仓库文本一律 UTF-8
 
