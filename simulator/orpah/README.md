@@ -78,8 +78,12 @@ Router 主动拉表已在 **L3b** 落地（见下）。
 - **解决**：新增报文 **`ORPAH-LOST-TABLE-REQ`**（R→S，Router 主动拉取）。
   `router.py` 的 `sync(timeout)`：发 REQ + 等 Server 回 LOST-TABLE（`_lost_event`），
   触发时机：**① Router.start() 启动即拉一次**（重启追平，Server 未就绪则超时忽略）；
-  **② REQ-CONNECT 缓存未命中时同步拉取**（首问即用权威值回答，不再等 Server 变更/首报
-  推送）。Server 收到 REQ：把该 Router 记入“见过集”（此后变更也推给它）+ 回当前全量表。
+  **② 尚未同步时（重启后 / 启动拉表失败）的首个 REQ-CONNECT 再拉一次**（此后每次变更
+  Server 都会推全量表，无需每条 REQ 都拉——避免空表下重复拉取洪泛）。Server 收到 REQ：
+  把该 Router 记入“见过集”（此后变更也推给它）+ 回当前全量表。
+- **UI（2026-09-10）**：「走失表」卡片加**「服务器发布记录」**——走失数据是服务器主动下发
+  的（mark/untrack 发 LOST-TABLE），每次发布记一条（时间/表项数/目标路由器/内容
+  `sn=走失|未走失`）；逐条 TRACKING-STATUS 回执属响应，不计数不展示。
 - **验收**：`demo_l4.py`（4 项检查全 PASS：mark 后启动 Router 即拉表追平、首次 REQ 答
   tracked=True、清缓存后 REQ 同步拉取首问即权威、变更推送仍生效且 REQ 不重复拉取）。
 
