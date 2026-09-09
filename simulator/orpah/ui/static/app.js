@@ -196,6 +196,8 @@ async function refresh() {
       T("lbl_sent").replace("{n}", `<b class="cnt">${s.client_sent}</b>`);
     $("rowRouterCnt").innerHTML =
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
+    $("rowRouterLost").innerHTML =
+      T("lbl_lost_recv").replace("{n}", `<b class="cnt">${s.router_lost_recv || 0}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
     $("rowServerPub").innerHTML =

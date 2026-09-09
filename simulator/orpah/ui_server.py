@@ -258,6 +258,7 @@ class OrpahApp:
             "tx_ap": tx_ap, "rx_ap": rx_ap,
             "conn_a": conn_a, "conn_b": conn_b,
             "sn": self.client.sn if self.client else "-",
+            "router_lost_recv": self.router.lost_push_recv if self.router else 0,
             "every": self.every, "paused": self.paused,
             "reports": list(reversed(rows)),
             "flow": list(self.flow),

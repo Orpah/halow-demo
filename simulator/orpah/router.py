@@ -75,6 +75,10 @@ class RouterBridge:
         self._lost_event = threading.Event()
         # 是否已成功同步过走失表（此后依赖 Server 推送即可；重启后复位为未同步）
         self._synced = False
+        # 拉表应答 vs 推送区分：_pull_pending=True 期间收到的 LOST-TABLE = 本机拉表的应答
+        self._pull_pending = False
+        # 收到的 Server 主动推送的走失表次数（下发计数，供 UI Router 卡片展示）
+        self.lost_push_recv = 0
 
     def start(self):
         if not self.ap.connect():
@@ -174,6 +178,11 @@ class RouterBridge:
                 "note": e.get("note", ""),
             }
         log(f"LOST-TABLE 更新（{len(entries)} 项）")
+        # 计数：Server 主动推送才算“收到走失表下发”；本机拉表应答不算
+        if self._pull_pending:
+            self._pull_pending = False
+        else:
+            self.lost_push_recv += 1
         self._lost_event.set()          # 通知等待中的 sync()
 
     def sync(self, timeout=2.0):
@@ -186,16 +195,20 @@ class RouterBridge:
         self._lost_event.clear()
         if not self.udp:
             return False
+        self._lost_event.clear()
+        self._pull_pending = True          # 标记“正在等拉表应答”
         try:
             self.udp.sendto(encode_msg(build_lost_table_req()),
                             self.server_addr)
         except OSError as e:
+            self._pull_pending = False
             log(f"拉表请求发送失败: {e}")
             return False
         ok = self._lost_event.wait(timeout)
         if ok:
             self._synced = True          # 已拿到权威全量表，此后依赖推送即可
         else:
+            self._pull_pending = False
             log("拉表等待 Server 回包超时（下次 REQ-CONNECT 会再试）")
         return ok
 
