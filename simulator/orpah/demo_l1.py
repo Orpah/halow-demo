@@ -103,7 +103,7 @@ def main():
     print(f"Client 注入: {sent} 条")
     print(f"Server 收到: {srv.count} 条  (sn 一致: "
           f"{all(r.get('sn') == args.sn for r in srv.reports)})")
-    print("结果:", "PASS ✅" if ok and sent > 0 else "FAIL ❌")
+    print("结果:", "[PASS]" if ok and sent > 0 else "[FAIL]")
 
     stop.set()
     client.close()

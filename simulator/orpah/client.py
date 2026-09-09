@@ -35,11 +35,12 @@ class ClientHost:
     """ORPAH Client host：向 STA 模块注入 ORPAH-REPORT。"""
 
     def __init__(self, sta_port, sn="ORPAH-0001", rssi=-55, mac=None,
-                 sta_host="127.0.0.1"):
+                 sta_host="127.0.0.1", on_sent=None):
         self.sta = HostBus(host=sta_host, port=sta_port, name="client")
         self.sn = sn
         self.rssi = rssi
         self.seq = 0
+        self.on_sent = on_sent              # callable(msg_dict, eth_len) or None
         # 缺省本机 MAC（4A:06:59:00:00:01），6 字节
         self.mac = mac if mac is not None else bytes([0x4A, 0x06, 0x59, 0, 0, 1])
 
@@ -61,6 +62,8 @@ class ClientHost:
             return -1
         log(f"[{self.seq}] 注入 ORPAH-REPORT sn={self.sn} "
             f"rssi={self.rssi} ({len(eth)}B 以太网帧)")
+        if self.on_sent:
+            self.on_sent(msg, len(eth))
         return len(eth)
 
 

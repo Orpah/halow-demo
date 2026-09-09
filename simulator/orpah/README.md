@@ -34,6 +34,20 @@
 
 ## 快速开始（零硬件）
 
+### 方式 1：Web UI（推荐，看得见的 demo）
+
+```bash
+cd simulator/orpah
+python ui_server.py                  # 自动开浏览器 http://127.0.0.1:8901/
+# 或：python ui_server.py --every 1.5 --sn ORPAH-0001
+```
+- 内嵌 AP+STA 模拟器 + Router 桥 + Server，Client **自动周期上报**。
+- 页面：三层拓扑（Client→STA→空口→AP→Router→Server）+ ORPAH-REPORT 实时
+  报文流（Client注入/Router上行/Server收到 三阶段 ✓）+ 三端计数 + 暂停/改 sn/改间隔。
+- 页面数据链路：SSE 事件（点亮动画）+ `/api/status` 全量（计数/连接/表格真相）。
+
+### 方式 2：命令行验收
+
 ```bash
 cd simulator/orpah
 python demo_l1.py --n 3        # 进程内建 AP+STA 模拟器 + Server/Router/Client，验收 3 条上行
@@ -79,7 +93,9 @@ simulator/
     ├── client.py         # Client host：注入 ORPAH-REPORT
     ├── router.py         # Router 桥：AP host 口收帧 → UDP 转发 Server
     ├── server.py         # Server：UDP 收 ORPAH-REPORT
-    └── demo_l1.py        # 端到端演示 + 验收（内嵌 2 模拟器）
+    ├── ui_server.py      # Web UI：内嵌整条链路 + HTTP/SSE（方式 1）
+    ├── ui/static/        # 前端 index.html / style.css / app.js
+    └── demo_l1.py        # 端到端演示 + 验收（内嵌 2 模拟器，命令行）
 ```
 
 ### sim.py host 数据口（本次给模拟器加的最小扩展）

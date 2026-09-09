@@ -33,10 +33,11 @@ class RouterBridge:
     """L1 路由器桥：AP host 口收帧 → 拆 ORPAH JSON → UDP 转发 Server。"""
 
     def __init__(self, ap_port, server_port=ORPAH_UDP_PORT,
-                 ap_host="127.0.0.1", server_host="127.0.0.1"):
+                 ap_host="127.0.0.1", server_host="127.0.0.1", on_up=None):
         self.ap = HostBus(host=ap_host, port=ap_port, name="router")
         self.server_addr = (server_host, server_port)
         self.up_count = 0
+        self.on_up = on_up                  # callable(msg_dict) or None
         self._stop = threading.Event()
 
     def start(self):
@@ -70,6 +71,8 @@ class RouterBridge:
                 continue
             log(f"[{self.up_count}] 上行 ORPAH-REPORT sn={msg.get('sn')} "
                 f"seq={msg.get('seq')} -> {self.server_addr[0]}:{self.server_addr[1]}")
+            if self.on_up:
+                self.on_up(msg)
         try:
             udp.close()
         except OSError:

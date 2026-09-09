@@ -97,6 +97,31 @@
 			],
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "orpah-ui",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\orpah\\ui_server.py",
+				"--every",
+				"1.5"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "orpah-demo-cli",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l1.py",
+				"--n",
+				"2"
+			],
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }
