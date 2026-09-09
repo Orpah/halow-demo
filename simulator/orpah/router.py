@@ -73,6 +73,8 @@ class RouterBridge:
         self._stop = threading.Event()
         # 主动拉表同步用：收到 Server 的 LOST-TABLE（_apply_lost_table）时置位
         self._lost_event = threading.Event()
+        # 是否已成功同步过走失表（此后依赖 Server 推送即可；重启后复位为未同步）
+        self._synced = False
 
     def start(self):
         if not self.ap.connect():
@@ -110,9 +112,9 @@ class RouterBridge:
         sn = msg.get("sn")
         if mtype == MSG_REQ_CONNECT:
             # 查本地走失缓存 → ACCESS-INFO 回 Client（含 server_ok）。
-            # 缓存未命中（重启 / 新 Router 没见过该 sn）→ 先主动向 Server 拉一次，
-            # 保证这一问就用权威值回答（真机前续 / F-03）。
-            if str(sn) not in self.lost_cache:
+            # 若尚未与 Server 同步过走失表（启动拉表超时/重启后），先主动拉一次；
+            # 同步成功后 Server 每次变更都会推来全量表，无需每条 REQ 都拉。
+            if not self._synced:
                 self.sync(timeout=1.5)
             tracked = bool(self.lost_cache.get(str(sn), {}).get("tracked"))
             status = ST_NOT_TRACKED if not tracked else "TRACKED"
@@ -191,8 +193,10 @@ class RouterBridge:
             log(f"拉表请求发送失败: {e}")
             return False
         ok = self._lost_event.wait(timeout)
-        if not ok:
-            log("拉表等待 Server 回包超时")
+        if ok:
+            self._synced = True          # 已拿到权威全量表，此后依赖推送即可
+        else:
+            log("拉表等待 Server 回包超时（下次 REQ-CONNECT 会再试）")
         return ok
 
     def _down(self, msg):

@@ -52,11 +52,12 @@ class OrpahServer:
     """UDP 服务器：收 ORPAH 报文 + 权威走失库 + 应答/LOST-TABLE 下发。"""
 
     def __init__(self, port=ORPAH_UDP_PORT, on_report=None, on_down=None,
-                 on_lost=None):
+                 on_lost=None, on_push=None):
         self.port = port
         self.on_report = on_report          # callable(msg) or None（收到 REPORT）
         self.on_down = on_down              # callable(msg, router_addr) 下行应答
         self.on_lost = on_lost              # callable(lost_table_dict) 走失表变更
+        self.on_push = on_push              # callable(entries, target_n) 发布走失表
         self.reports = []                   # 收到的 REPORT（内存缓冲，演示用）
         self.count = 0
         self.down_count = 0                 # 已下发的应答数
@@ -83,6 +84,7 @@ class OrpahServer:
         log(f"走失库：标记 {sn} 为走失（正在跟踪）")
         if push:
             self._push_lost()
+            self._fire_publish()          # 服务器主动发布走失数据（供 UI 记录）
         if self.on_lost:
             self.on_lost(self.snapshot())
         return True
@@ -95,6 +97,7 @@ class OrpahServer:
         log(f"走失库：取消 {sn} 走失")
         if push:
             self._push_lost()
+            self._fire_publish()
         if self.on_lost:
             self.on_lost(self.snapshot())
         return True
@@ -102,6 +105,21 @@ class OrpahServer:
     def snapshot(self):
         with self._lock:
             return dict(self.lost)
+
+    def _fire_publish(self):
+        """走失表变更且确有 Router 在下发目标时，触发发布记录回调（on_push）。
+
+        只统计**服务器主动发布**（mark/untrack 的下发）；Router 主动拉表
+        （LOST-TABLE-REQ）的应答不算“发布”，不在此列。
+        """
+        with self._lock:
+            if not self.routers:
+                return
+            entries = [{"sn": k, "tracked": bool(v["tracked"]),
+                        "note": v.get("note", "")} for k, v in self.lost.items()]
+            n = len(self.routers)
+        if self.on_push:
+            self.on_push(entries, n)
 
     # ---------------- 网络 ----------------
     def start(self):

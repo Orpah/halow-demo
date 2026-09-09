@@ -154,6 +154,38 @@ function renderLost(lost) {
   state.className = "hint" + (tracked ? " lost-yes" : "");
 }
 
+/* 服务器发布走失表记录（走失数据是服务器主动“下发”的，单独列出） */
+const MAX_PUB = 10;
+
+function renderPublishes(publishes) {
+  const ul = $("publishList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  const list = publishes || [];
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "pub-empty";
+    li.textContent = T("pub_empty");
+    ul.appendChild(li);
+    return;
+  }
+  list.slice(0, MAX_PUB).forEach(p => {
+    const li = document.createElement("li");
+    const action = T("pub_action")
+      .replace("{n}", p.n).replace("{k}", p.targets);
+    li.innerHTML =
+      `<div class="pub-meta"><span class="tm">${esc(p.t)}</span> ` +
+      `<span class="pub-act">${esc(action)}</span></div>` +
+      `<ul class="pub-ents">` +
+      p.entries.map(en =>
+        `<li>${esc(en.sn)} = ` +
+        `<b class="${en.tracked ? "lost-yes" : ""}">` +
+        `${esc(en.tracked ? T("lost_yes") : T("lost_no"))}</b></li>`
+      ).join("") + `</ul>`;
+    ul.appendChild(li);
+  });
+}
+
 async function refresh() {
   try {
     const r = await fetch("/api/status");
@@ -186,9 +218,10 @@ async function refresh() {
       ...x, tm: new Date((x.ts || 0) * 1000).toTimeString().slice(0, 8),
     }));
     renderRows(rows);
-    // L2：消息流面板 + 走失表状态
+    // L2：消息流面板 + 走失表状态 + 服务器发布记录
     renderFlow(s.flow || []);
     renderLost(s.lost || {});
+    renderPublishes(s.publishes || []);
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;

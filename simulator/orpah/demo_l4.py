@@ -11,9 +11,9 @@ demo_l4.py — Router 主动拉取 LOST-TABLE 验收（F-03 补充，纯 PC，�
   ① 启动拉取：Server 先 mark（此时无任何 Router 联系过 → Server 不会推）。
      Router.start() 启动即发 ORPAH-LOST-TABLE-REQ → Server 回当前全量 →
      缓存即刻含 sn 且 tracked=True（纯主动拉取，不依赖变更推送 / client REPORT）。
-  ② 缓存未命中首问即权威：人为清空 Router 缓存（模拟重启丢缓存）→ Client
-     REQ-CONNECT → Router 缓存未命中 → 同步向 Server 拉表 → **本次**就回
-     ACCESS-INFO.tracked=True（此前 L3 需等 Server 变更/首报推送，首问可能误答）。
+  ② 重启后首问即权威：人为清空 Router 缓存并复位“未同步”标志（模拟重启丢缓存）→
+     Client REQ-CONNECT → Router 发现未同步 → 向 Server 拉取全量表 → **本次**就回
+     ACCESS-INFO.tracked=True（重启后首问即拉取，不再等 Server 变更/首报推送）。
   ③ 推-拉协同：Server 之后 untrack → 变更推送（该 Router 已在“见过集”）→ 缓存
      tracked=False；再 REQ-CONNECT（sn 已在缓存，不触发拉取）→ 答 NOT-TRACKED。
 
@@ -130,14 +130,15 @@ def main():
     print(f"② 首次 REQ：ACCESS-INFO.tracked={last_access(access)}"
           f"（启动拉表已让缓存就绪）")
 
-    # ---- 5) 缓存未命中首问即权威：清缓存模拟重启 → REQ 触发同步拉取 ----
-    print(f"\n--- 模拟 Router 重启（清空本地缓存）---")
-    router.lost_cache.clear()
+    # ---- 5) 重启后首问即权威：清缓存 + 复位未同步 → REQ 触发同步拉取 ----
+    print(f"\n--- 模拟 Router 重启（清空本地缓存 + 未同步）---")
+    router.lost_cache.clear()          # 模拟重启丢缓存
+    router._synced = False             # + 标记未同步（重启后需重新拉取）
     pulls_before = srv.pull_count
     client.send_req_connect()
     ok_miss = wait_new(access, lambda m: m.get("tracked") is True, secs=5)
     pulled_now = srv.pull_count > pulls_before     # 这次 REQ 真的触发了一次拉表
-    print(f"③ 清缓存后 REQ：ACCESS-INFO.tracked={last_access(access)} · "
+    print(f"③ 重启后 REQ：ACCESS-INFO.tracked={last_access(access)} · "
           f"pull_count {pulls_before}→{srv.pull_count} · 触发拉取={pulled_now}")
 
     # ---- 6) untrack → 变更推送（Router 已在见过集）→ 缓存 tracked=False ----
@@ -157,7 +158,7 @@ def main():
     checks = {
         "① mark 后启动 Router 即主动拉表追平（不依赖推送）": startup_pulled,
         "② 首次 REQ 答 tracked=True（启动拉表就绪）": ok_first,
-        "③ 缓存未命中 REQ 同步拉表、首问即权威": ok_miss and pulled_now,
+        "③ 重启后 REQ 同步拉表、首问即权威": ok_miss and pulled_now,
         "④ 变更推送仍生效且 REQ 不再多拉": pushed and ok_untrack and no_extra_pull,
     }
     for name, passed in checks.items():

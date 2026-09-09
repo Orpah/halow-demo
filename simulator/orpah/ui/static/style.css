@@ -101,3 +101,16 @@ tr.new { animation: rowin .4s; }
   border-radius: 6px; padding: 4px 8px;
 }
 .lost-yes { color: var(--red); font-weight: 600; }
+
+/* ---- 服务器发布记录（走失表下发） ---- */
+.publog { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--bd); }
+.pub-head { font-size: 12px; color: var(--mut); margin-bottom: 6px; }
+#publishList { list-style: none; margin: 0; padding: 0; }
+#publishList li { margin: 4px 0; }
+.pub-empty { color: var(--mut); font-size: 12px; }
+.pub-meta { font-size: 12px; color: var(--txt); }
+.pub-meta .tm { color: var(--mut); margin-right: 6px; font-variant-numeric: tabular-nums; }
+.pub-act { color: var(--acc); }
+.pub-ents { list-style: none; margin: 2px 0 2px 12px; padding: 0; }
+.pub-ents li { font-size: 12px; color: var(--txt); }
+

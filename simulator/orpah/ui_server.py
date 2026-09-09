@@ -73,6 +73,8 @@ class OrpahApp:
         self.flow = []
         # Server 权威走失表快照（前端展示 + mark/untrack 控制）
         self.lost = {}
+        # 服务器发布走失表记录（每次下发 LOST-TABLE 记一条，最新在前）
+        self.publishes = []
         # 组件
         self.cores = []
         self.srv = None
@@ -146,6 +148,14 @@ class OrpahApp:
         """Server 走失表变更 → 存快照（前端展示）。"""
         self.lost = snap
 
+    def _on_publish(self, entries, targets):
+        """Server 发布/更新 LOST-TABLE（下发给 Router）→ 记发布记录（供前端展示）。"""
+        rec = {"t": time.strftime("%H:%M:%S"), "n": len(entries),
+               "targets": targets, "entries": list(entries)}
+        self.publishes.insert(0, rec)
+        del self.publishes[20:]
+        self._emit("publish", {"n": len(entries), "targets": targets})
+
     def _remember(self, msg, stage):
         seq = msg.get("seq")
         if seq is None:
@@ -173,7 +183,7 @@ class OrpahApp:
 
         # 2) Server（真实 UDP，权威走失库）
         self.srv = OrpahServer(port=UDP_SRV, on_report=self._on_report,
-                               on_lost=self._on_lost)
+                               on_lost=self._on_lost, on_push=self._on_publish)
         self.srv.start()
 
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
@@ -250,6 +260,7 @@ class OrpahApp:
             "reports": list(reversed(rows)),
             "flow": list(self.flow),
             "lost": self.lost,
+            "publishes": list(self.publishes),
         }
 
     def cmd(self, action, sn=None, every=None, note=""):
