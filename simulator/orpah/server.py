@@ -7,11 +7,14 @@ server.py — ORPAH 奥帕服务器（L1 + L2）
 「一个 payload(JSON) 从 Client(STA) 上行到 Server」。
 
 L2 扩展（SPEC §7/§5）：Server 是**走失表权威**：
-  - 收 REPORT → 校验(格式/解码) → 查走失库 → 回 TRACKING-STATUS 给该 Router
-    （命中=TRACKED+LOG-OK / 未命中=NOT-TRACKED / 校验失败=*ERR）
+  - 收 REPORT → 校验(格式/解码 + SN 字符集，F-01) → 查走失库 → 回 TRACKING-STATUS
+    给该 Router（命中=TRACKED+LOG-OK / 未命中=NOT-TRACKED / 校验失败=*ERR）
+  - 去重/最新位置（F-04/F-07）：同 (sn,seq) 重复（重传/多 Router 转发同一帧）丢弃
+    不重复计数；每次接受新 REPORT 才把该 sn 的「当前 Router」切到上报来源（漫游时
+    下行只回最新 Router）；首次见到的 Router 立即推当前走失表（新 Router 追平）。
   - 维护走失库（内存表）：mark_tracked(sn) / untrack(sn) / snapshot()
-  - 走失库变更 → 向相关 Router 下发 LOST-TABLE（Router 据此在 REQ-CONNECT
-    阶段直接告知 ACCESS-INFO 的 tracked 标志）
+  - 走失库变更 → 向所有见过（上报过）的 Router 下发 LOST-TABLE（Router 据此在
+    REQ-CONNECT 阶段直接告知 ACCESS-INFO 的 tracked 标志）
 
 可独立运行，也可被 demo/ui 内嵌（复用 OrpahServer 类）：
     python orpah/server.py --port 19447
@@ -34,7 +37,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
-                         ERR_FORMAT, ERR_LOG)
+                         ERR_FORMAT, ERR_LOG, sn_err)
 
 LOG = True
 
@@ -60,8 +63,13 @@ class OrpahServer:
         self.sock = None
         # 权威走失库：sn -> {"tracked": bool, "note": str, "since": ts}
         self.lost = {}
-        # 该 sn 的报文来自哪个 Router（UDP addr），应答/下发回这里
+        # 该 sn 的报文来自哪个 Router（UDP addr），应答/下发回这里（最新位置）
         self.router_for = {}
+        # 所有见过（上报过）的 Router（LOST-TABLE 全量下发的目标）
+        self.routers = set()
+        # 去重（F-04）：sn -> {"last_seq": int|None, "seqs": set} 已接受的 seq
+        self.seen = {}
+        self.dup_dropped = 0             # 因重复被丢弃的 REPORT 数
         self._lock = threading.Lock()
 
     # ---------------- 走失库操作（权威，供 UI/脚本控制） ----------------
@@ -120,28 +128,54 @@ class OrpahServer:
     def _handle(self, msg, addr):
         mtype = msg.get("type")
         sn = msg.get("sn")
-        # 记住该 sn 的上行 Router（应答/下发回这里）
-        if sn:
-            with self._lock:
-                self.router_for[str(sn)] = addr
+        # 非 REPORT 的带 sn 报文也记住 Router（如误达 Server 的 REQ-CONNECT，仅记录）
         if mtype == MSG_REPORT:
             self._on_report(msg, addr)
         elif mtype == MSG_REQ_CONNECT:
             # REQ-CONNECT 只应到 Router；若误达 Server，忽略（由 Router 处理）
-            pass
+            if sn:
+                with self._lock:
+                    self.router_for[str(sn)] = addr
         else:
             log(f"收到未处理类型 {mtype}（来自 {addr}），忽略")
 
     def _on_report(self, msg, addr):
         sn = msg.get("sn")
-        # 校验：格式（缺 sn / 类型错）→ FORMAT-ERR
-        if not sn:
-            self._reply(addr, build_error(ERR_FORMAT, msg_text="missing sn"))
+        # 校验 1：SN 字符集（F-01，中/英/数字，见 orpah_proto.sn_err）→ FORMAT-ERR
+        reason = sn_err(sn)
+        if reason:
+            log(f"SN 校验失败 sn={sn!r} ({reason}) -> FORMAT-ERR")
+            self._reply(addr, build_error(ERR_FORMAT, sn=sn,
+                                          msg_text=f"bad-sn:{reason}"))
             return
+        seq = msg.get("seq")
+        # 校验 2 + 去重（F-04）：同 (sn,seq) 重复（重传/多 Router 转发同一帧）→ 丢弃，
+        # 不重复计数、不更新“当前 Router”（防漫游时下行被旧 Router 的迟到重传拽回）。
+        with self._lock:
+            st = self.seen.setdefault(str(sn), {"last_seq": None, "seqs": set()})
+            if seq is not None and seq in st["seqs"]:
+                self.dup_dropped += 1
+                log(f"重复上报丢弃 sn={sn} seq={seq} "
+                    f"(共去重 {self.dup_dropped})")
+                return
+            if seq is not None:
+                st["seqs"].add(seq)
+                st["last_seq"] = (max(st["last_seq"], seq)
+                                   if st["last_seq"] is not None else seq)
+                # 窗口上限：防无界增长；超限清空（容忍序号重启/回绕的简化策略）
+                if len(st["seqs"]) > 256:
+                    st["seqs"].clear()
+                    st["seqs"].add(seq)
+        # 接受（新 REPORT）：计数 + 记当前 Router = 上报来源（最新位置优先，F-07）
         self.count += 1
         self.reports.append(msg)
+        with self._lock:
+            self.router_for[str(sn)] = addr
         log(f"[{self.count}] ORPAH-REPORT <- {addr}: sn={sn} "
-            f"ts={msg.get('ts')} rssi={msg.get('rssi', '-')} seq={msg.get('seq')}")
+            f"ts={msg.get('ts')} rssi={msg.get('rssi', '-')} seq={seq}")
+        # 首次见到的 Router → 立即把当前走失表推给它（新 Router 追平；
+        # 否则它 REQ-CONNECT 时本地缓存为空会误答 NOT-TRACKED）
+        self._note_router(addr)
         # 查走失库 → 回 TRACKING-STATUS（命中=TRACKED+LOG-OK；未命中=NOT-TRACKED）
         rec = self.lost.get(str(sn))
         if rec and rec.get("tracked"):
@@ -157,12 +191,24 @@ class OrpahServer:
         if self.on_report:
             self.on_report(msg)
 
-    def _push_lost(self):
-        """把当前走失表下发给所有已见过的 Router（LOST-TABLE）。"""
+    def _note_router(self, addr):
+        """记录一台 Router 地址；首次见到 → 若已有走失表立即推全量（新 Router 追平）。"""
+        new = False
+        with self._lock:
+            if addr not in self.routers:
+                self.routers.add(addr)
+                new = True
+        if new:
+            log(f"新 Router {addr[0]}:{addr[1]} 出现")
+            if self.lost:                      # 已有走失记录 → 立即补发全量表
+                self._push_lost(to=[addr])
+
+    def _push_lost(self, to=None):
+        """把当前走失表下发（默认给所有见过/上报过的 Router；to 指定单台）。"""
         entries = [{"sn": k, "tracked": bool(v["tracked"]), "note": v.get("note", "")}
                    for k, v in self.lost.items()]
         with self._lock:
-            addrs = set(self.router_for.values())
+            addrs = sorted(self.routers) if to is None else list(to)
         table = build_lost_table(entries)
         for a in addrs:
             self._reply(a, table)

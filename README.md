@@ -61,12 +61,15 @@ python tools/ui/server.py --host-sim    # 浏览器开 http://127.0.0.1:8899/
 
 ## ORPAH-over-HaLow demo（simulator/orpah/）
 
-基于模拟器的 ORPAH L1 数据通路原型（Client 终端上行 → 奥帕 Server）。纯 PC、零硬件：
+基于模拟器的 ORPAH-over-HaLow 原型（Client 终端上行 → 奥帕 Server；L2 起含双向下行、
+走失表与跟踪状态；L3 含多 Router 漫游/去重 + SN 中英数字校验）。纯 PC、零硬件：
 
 ```bash
 cd simulator/orpah
 python ui_server.py        # Web UI：自动开浏览器 http://127.0.0.1:8901/
-python demo_l1.py --n 3    # 命令行验收（Server 收到 3 条 = PASS）
+python demo_l1.py --n 3    # L1 命令行验收（Server 收到 3 条 = PASS）
+python demo_l2.py          # L2 全消息流 + 走失表两分支验收 = PASS
+python demo_l3.py          # L3 双 Router 漫游/去重 + SN 校验验收 = PASS
 ```
 
 详见 [`simulator/orpah/README.md`](simulator/orpah/README.md)（分层、报文、验收标准）。

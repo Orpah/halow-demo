@@ -22,6 +22,7 @@ L2 = 全消息流（SPEC §9）：REQ-CONNECT / ACCESS-INFO / REPORT /
 载荷与 Client→STA 的以太网帧 payload 是同一 JSON bytes（桥/网透传不改写）。
 """
 import json
+import re
 import time
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,34 @@ ERR_FORMAT = "FORMAT-ERR"
 ERR_DECODE = "DECODE-ERR"
 ERR_LOG = "LOG-ERR"
 ERR_SERVER = "SERVER-ERR"
+
+
+# ---------------------------------------------------------------------------
+# SN（被追踪设备标识）规则（F-01 定稿 2026-09-10）
+# ---------------------------------------------------------------------------
+# 不用真实 IMEI15/Luhn（用户定：不引入 IMEI 结构）。身份 = 自定义 SN，字符集：
+# 中文汉字 + 英文(大小写) + 数字；另保留 '-' 作分隔符，兼容既有示范值
+# （如 ORPAH-0001）。用于 Server 端格式校验（非法 → ERROR code=FORMAT-ERR）。
+SN_MIN_LEN = 1
+SN_MAX_LEN = 32
+_SN_RE = re.compile(r"^[0-9A-Za-z\u4e00-\u9fff-]+$")
+
+
+def sn_ok(sn):
+    """SN 是否合法：非空、≤{SN_MAX_LEN} 字符、仅含中/英/数字（与 '-'）。"""
+    return (isinstance(sn, str) and SN_MIN_LEN <= len(sn) <= SN_MAX_LEN
+            and bool(_SN_RE.match(sn)))
+
+
+def sn_err(sn):
+    """SN 校验失败原因；合法返回 None。原因：empty / too-long / bad-charset。"""
+    if not isinstance(sn, str) or not sn:
+        return "empty"
+    if len(sn) > SN_MAX_LEN:
+        return "too-long"
+    if not _SN_RE.match(sn):
+        return "bad-charset"
+    return None
 
 
 # ---------------------------------------------------------------------------

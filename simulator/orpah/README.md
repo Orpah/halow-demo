@@ -2,7 +2,8 @@
 
 > 在 halow-demo 内、基于 PC 模拟器（`host/sim.py`）实现的 ORPAH-over-HaLow 原型。
 > L1 = 数据通路最小骨架（SPEC §9 L1）；L2 = 全消息流 + 走失表 + 跟踪状态（§9 L2，
-> 已含双向 Server→Client 下行）。成熟后再抽离独立 `orpah-demo` 仓库。
+> 已含双向 Server→Client 下行）；L3 = 多 Router 漫游/去重 + SN 中英数字校验
+> （SPEC F-04/F-07/F-01）。成熟后再抽离独立 `orpah-demo` 仓库。
 
 ## 一图流（L1 数据通路）
 
@@ -46,8 +47,28 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 - **验收**：`demo_l2.py`（两分支都 PASS：未命中 NOT-TRACKED / mark 后 TRACKED）。
 - UI 已加「L2 协议消息流」面板 + 走失表标记/取消按钮。
 
-**L2 不做（留后续）**：多 Router 选路/去重、IMEI 15 位校验、Router 主动从 Server
-拉取 LOST-TABLE（当前 Server 主动推）、免电池真硬件。
+**L2 不做（留后续）**：Router 主动从 Server 拉取 LOST-TABLE（当前 Server 主动推 +
+新 Router 首报即追平）、免电池真硬件。多 Router 选路/去重与 SN 校验已在 **L3** 落地。
+
+## L3 做什么（2026-09-10 已实现）
+
+- **F-07 漫游/选路**：同一 Client（同 sn）先后出现在 R1、R2 两网（`demo_l3.py` 用
+  2×AP + 2×Router 模拟移动）——Server 以**上报来源**为该 sn 的**当前 Router**
+  （最新位置优先），REQ/REPORT 的回执（ACCESS-INFO / TRACKING-STATUS）只回当前
+  Router，旧 Router 不再收到该 sn 的下行。
+- **F-04 去重**：Server 按 **(sn,seq)** 丢弃重复上报（同一 Router 重发、或另一
+  Router 迟到转发同一帧）：不重复计数、不再回 TRACKING-STATUS、且**不把“当前
+  Router”切回旧 Router**（防漫游时被迟到重传拽回）。`server.py` 维护 seen 窗口
+  （每 sn 最近 256 个 seq，容忍序号重启/回绕）。
+- **F-01 SN 字符集（用户定：不用 IMEI15/Luhn）**：身份 = 自定义 SN，允许**中文
+  汉字 + 英文 + 数字**（另保留 `-` 分隔兼容既有示例）；`orpah_proto.sn_err()`
+  校验（空/超长/非法字符），Server 收 REPORT 时校验，非法 → ERROR
+  `FORMAT-ERR`（msg_text `bad-sn:<原因>`），不计数。demo 默认 `--sn 小明2024`
+  直接演示中文 SN 端到端可达。
+- **F-03 补充：新 Router 首报追平**：Server 首次见到一台 Router 上报 → 立即把当前
+  走失表全量推给它，避免它在 REQ-CONNECT 时因本地缓存为空误答 NOT-TRACKED。
+- **验收**：`demo_l3.py`（7 项检查全 PASS：两阶段漫游回执归属、双 Router 缓存一致、
+  tracked 分支、同/跨 Router 去重不回执、去重不切回旧 Router、非法 SN → FORMAT-ERR）。
 
 ## 快速开始（零硬件）
 
@@ -116,7 +137,8 @@ simulator/
     ├── ui_server.py      # Web UI：内嵌整条链路 + HTTP/SSE（方式 1）
     ├── ui/static/        # 前端 index.html / style.css / app.js
     ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）
-    └── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
+    ├── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
+    └── demo_l3.py        # L3 多 Router 漫游/去重 + SN 校验验收（2×Router）
 ```
 
 ### sim.py host 数据口（本次给模拟器加的最小扩展）
@@ -140,8 +162,9 @@ L1 上行示例：
 L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,tracked,server_ok,status?}、
 `ORPAH-TRACKING-STATUS`{sn,status:TRACKED|NOT-TRACKED|...}、`ORPAH-ERROR`{code}、
 `ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}。
-- `sn`：被追踪设备序列号（F-01 待定：将来可换 15 位 IMEI）。
-- `seq`：Client 侧递增序号（去重用）。
+- `sn`：被追踪设备标识（F-01 定稿：**不用 IMEI15**，自定义 SN 允许中文/英文/数字，
+  可含 `-`；Server 校验非法 → ERROR `FORMAT-ERR`，见 `orpah_proto.sn_err`）。
+- `seq`：Client 侧递增序号（去重用：Server 按 (sn,seq) 丢弃重复上报）。
 
 ## 验收标准
 
@@ -149,9 +172,13 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
 2. L1：`demo_l1.py --n 3` → Server 收到 3 条、sn 一致 → PASS。
 3. L2：`demo_l2.py` → 双向打通（Client 收到 ACCESS-INFO + TRACKING-STATUS）且两分支
    正确（未 mark → NOT-TRACKED；mark 后 → ACCESS-INFO.tracked=True + TRACKED）→ PASS。
+4. L3：`demo_l3.py` → 漫游（同 sn 先后经 R1/R2，回执只经当前 Router）、(sn,seq) 去重
+   （同/跨 Router 重发不计数不回执、不切回旧 Router）、SN 校验（非法 → FORMAT-ERR）→ PASS。
 
-## 下一步（L3+）
+## 下一步（L2.5/L4+）
 
-- 多 Router 选路/去重、IMEI 15 位校验、Router 主动拉取 LOST-TABLE、F-03..F-08 细化。
-- 跨固件最终形态（TH-RJ45 V2.4-WNB Router ↔ TX-AH V2.4-FMAC Client）真机数据面
-  迁移（host 数据口语义已对齐 SPI MACBUS，可平滑替换底层）。
+- **L2.5 真机最终形态**（TH-RJ45 V2.4-WNB Router ↔ TX-AH V2.4-FMAC Client）数据面
+  迁移（host 数据口语义已对齐 SPI MACBUS，可平滑替换底层；烧录由用户执行）。
+- Router 主动从 Server 拉取 LOST-TABLE（当前 Server 主动推 + 新 Router 首报追平）。
+- F-03 走失表子集下发/过期、F-05 防伪造/限频、F-06 隐私、F-08 RSSI 粗定位。
+- 免电池客户端（TX-AH + CH32V203）低功耗策略。
