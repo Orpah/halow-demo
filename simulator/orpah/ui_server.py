@@ -283,6 +283,7 @@ class OrpahApp:
             "publish_total": self.publish_total,
             "founds": list(self.founds),
             "found_total": self.router.found_count if self.router else 0,
+            "found_recv": self.srv.found_count if self.srv else 0,
         }
 
     def cmd(self, action, sn=None, every=None, note=""):
