@@ -41,6 +41,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MAC_BCAST, MSG_REQ_CONNECT,
                          MSG_REPORT, MSG_TRACKING_STATUS, MSG_LOST_TABLE,
                          MSG_ERROR, parse_eth_frame, decode_msg, encode_msg,
                          build_access_info, build_eth_frame,
+                         build_lost_table_req,
                          ST_NOT_TRACKED)
 
 LOG = True
@@ -70,6 +71,8 @@ class RouterBridge:
             bytes([0x4A, 0x06, 0x59, 0x80, 0, 1])
         self.udp = None
         self._stop = threading.Event()
+        # 主动拉表同步用：收到 Server 的 LOST-TABLE（_apply_lost_table）时置位
+        self._lost_event = threading.Event()
 
     def start(self):
         if not self.ap.connect():
@@ -81,6 +84,9 @@ class RouterBridge:
             f"{self.server_addr[0]}:{self.server_addr[1]}")
         threading.Thread(target=self._air_loop, daemon=True).start()
         threading.Thread(target=self._udp_loop, daemon=True).start()
+        # 启动即主动拉一次走失表（重启/新 Router 追平；Server 未就绪则超时忽略）
+        if self.sync(timeout=1.5):
+            log(f"启动拉表成功（走失缓存 {len(self.lost_cache)} 项）")
         return True
 
     # ---------------- 上行：AP 空口收帧 ----------------
@@ -103,7 +109,11 @@ class RouterBridge:
         mtype = msg.get("type")
         sn = msg.get("sn")
         if mtype == MSG_REQ_CONNECT:
-            # 查本地走失缓存 → ACCESS-INFO 回 Client（含 server_ok）
+            # 查本地走失缓存 → ACCESS-INFO 回 Client（含 server_ok）。
+            # 缓存未命中（重启 / 新 Router 没见过该 sn）→ 先主动向 Server 拉一次，
+            # 保证这一问就用权威值回答（真机前续 / F-03）。
+            if str(sn) not in self.lost_cache:
+                self.sync(timeout=1.5)
             tracked = bool(self.lost_cache.get(str(sn), {}).get("tracked"))
             status = ST_NOT_TRACKED if not tracked else "TRACKED"
             info = build_access_info(sn, tracked=tracked, server_ok=True,
@@ -162,6 +172,28 @@ class RouterBridge:
                 "note": e.get("note", ""),
             }
         log(f"LOST-TABLE 更新（{len(entries)} 项）")
+        self._lost_event.set()          # 通知等待中的 sync()
+
+    def sync(self, timeout=2.0):
+        """主动向 Server 拉取当前走失表并等回包（同步）。
+
+        发 ORPAH-LOST-TABLE-REQ；Server 回 LOST-TABLE 由 _udp_loop →
+        _apply_lost_table 处理并置 _lost_event。发送失败/超时返回 False
+        （缓存保持原样，下次 REQ-CONNECT 缓存未命中会再触发）。
+        """
+        self._lost_event.clear()
+        if not self.udp:
+            return False
+        try:
+            self.udp.sendto(encode_msg(build_lost_table_req()),
+                            self.server_addr)
+        except OSError as e:
+            log(f"拉表请求发送失败: {e}")
+            return False
+        ok = self._lost_event.wait(timeout)
+        if not ok:
+            log("拉表等待 Server 回包超时")
+        return ok
 
     def _down(self, msg):
         """把一条报文注入 AP 空口，回给（广播，STA 侧必收）Client。"""

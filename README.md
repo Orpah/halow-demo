@@ -70,6 +70,7 @@ python ui_server.py        # Web UI：自动开浏览器 http://127.0.0.1:8901/
 python demo_l1.py --n 3    # L1 命令行验收（Server 收到 3 条 = PASS）
 python demo_l2.py          # L2 全消息流 + 走失表两分支验收 = PASS
 python demo_l3.py          # L3 双 Router 漫游/去重 + SN 校验验收 = PASS
+python demo_l4.py          # L3b Router 主动拉表验收 = PASS
 ```
 
 详见 [`simulator/orpah/README.md`](simulator/orpah/README.md)（分层、报文、验收标准）。

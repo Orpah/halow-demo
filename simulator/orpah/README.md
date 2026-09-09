@@ -47,8 +47,8 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 - **验收**：`demo_l2.py`（两分支都 PASS：未命中 NOT-TRACKED / mark 后 TRACKED）。
 - UI 已加「L2 协议消息流」面板 + 走失表标记/取消按钮。
 
-**L2 不做（留后续）**：Router 主动从 Server 拉取 LOST-TABLE（当前 Server 主动推 +
-新 Router 首报即追平）、免电池真硬件。多 Router 选路/去重与 SN 校验已在 **L3** 落地。
+**L2 不做（留后续）**：免电池真硬件。多 Router 选路/去重与 SN 校验已在 **L3** 落地，
+Router 主动拉表已在 **L3b** 落地（见下）。
 
 ## L3 做什么（2026-09-10 已实现）
 
@@ -69,6 +69,19 @@ AP 空口 → STA 模块收 → host 口推给 Client。
   走失表全量推给它，避免它在 REQ-CONNECT 时因本地缓存为空误答 NOT-TRACKED。
 - **验收**：`demo_l3.py`（7 项检查全 PASS：两阶段漫游回执归属、双 Router 缓存一致、
   tracked 分支、同/跨 Router 去重不回执、去重不切回旧 Router、非法 SN → FORMAT-ERR）。
+
+## L3b（2026-09-10 已实现）Router 主动拉取走失表
+
+- **背景缺口**：Server 只在「走失表变更」或「新 Router 首报」时主动推。若 Router
+  重启（缓存清空）或此前从未接触 Server，且期间无变更事件 → 对已 mark 的 sn 会误答
+  NOT-TRACKED。
+- **解决**：新增报文 **`ORPAH-LOST-TABLE-REQ`**（R→S，Router 主动拉取）。
+  `router.py` 的 `sync(timeout)`：发 REQ + 等 Server 回 LOST-TABLE（`_lost_event`），
+  触发时机：**① Router.start() 启动即拉一次**（重启追平，Server 未就绪则超时忽略）；
+  **② REQ-CONNECT 缓存未命中时同步拉取**（首问即用权威值回答，不再等 Server 变更/首报
+  推送）。Server 收到 REQ：把该 Router 记入“见过集”（此后变更也推给它）+ 回当前全量表。
+- **验收**：`demo_l4.py`（4 项检查全 PASS：mark 后启动 Router 即拉表追平、首次 REQ 答
+  tracked=True、清缓存后 REQ 同步拉取首问即权威、变更推送仍生效且 REQ 不重复拉取）。
 
 ## 快速开始（零硬件）
 
@@ -138,7 +151,8 @@ simulator/
     ├── ui/static/        # 前端 index.html / style.css / app.js
     ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）
     ├── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
-    └── demo_l3.py        # L3 多 Router 漫游/去重 + SN 校验验收（2×Router）
+    ├── demo_l3.py        # L3 多 Router 漫游/去重 + SN 校验验收（2×Router）
+    └── demo_l4.py        # L3b Router 主动拉表验收（启动/缓存未命中拉取）
 ```
 
 ### sim.py host 数据口（本次给模拟器加的最小扩展）
@@ -161,7 +175,8 @@ L1 上行示例：
 ```
 L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,tracked,server_ok,status?}、
 `ORPAH-TRACKING-STATUS`{sn,status:TRACKED|NOT-TRACKED|...}、`ORPAH-ERROR`{code}、
-`ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}。
+`ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}、`ORPAH-LOST-TABLE-REQ`（R→S，Router
+主动拉表，Server 回当前全量 LOST-TABLE）。
 - `sn`：被追踪设备标识（F-01 定稿：**不用 IMEI15**，自定义 SN 允许中文/英文/数字，
   可含 `-`；Server 校验非法 → ERROR `FORMAT-ERR`，见 `orpah_proto.sn_err`）。
 - `seq`：Client 侧递增序号（去重用：Server 按 (sn,seq) 丢弃重复上报）。
@@ -174,11 +189,12 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
    正确（未 mark → NOT-TRACKED；mark 后 → ACCESS-INFO.tracked=True + TRACKED）→ PASS。
 4. L3：`demo_l3.py` → 漫游（同 sn 先后经 R1/R2，回执只经当前 Router）、(sn,seq) 去重
    （同/跨 Router 重发不计数不回执、不切回旧 Router）、SN 校验（非法 → FORMAT-ERR）→ PASS。
+5. L3b：`demo_l4.py` → mark 后启动 Router 主动拉表追平、清缓存后 REQ 同步拉取首问即
+   权威、变更推送仍生效且不重复拉取 → PASS。
 
 ## 下一步（L2.5/L4+）
 
 - **L2.5 真机最终形态**（TH-RJ45 V2.4-WNB Router ↔ TX-AH V2.4-FMAC Client）数据面
   迁移（host 数据口语义已对齐 SPI MACBUS，可平滑替换底层；烧录由用户执行）。
-- Router 主动从 Server 拉取 LOST-TABLE（当前 Server 主动推 + 新 Router 首报追平）。
 - F-03 走失表子集下发/过期、F-05 防伪造/限频、F-06 隐私、F-08 RSSI 粗定位。
 - 免电池客户端（TX-AH + CH32V203）低功耗策略。

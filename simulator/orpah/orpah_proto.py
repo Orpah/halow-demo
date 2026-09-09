@@ -45,9 +45,11 @@ MSG_REPORT = "ORPAH-REPORT"                # C→R/S IMEI/序列号上报
 MSG_TRACKING_STATUS = "ORPAH-TRACKING-STATUS"  # R→C / S→R 跟踪状态回执
 MSG_ERROR = "ORPAH-ERROR"                  # 任→任 错误
 MSG_LOST_TABLE = "ORPAH-LOST-TABLE"        # S→R 走失表下发/更新
+MSG_LOST_TABLE_REQ = "ORPAH-LOST-TABLE-REQ"   # R→S 请求当前走失表（Router 主动拉取）
 
 MSG_TYPES = {MSG_REQ_CONNECT, MSG_ACCESS_INFO, MSG_REPORT,
-             MSG_TRACKING_STATUS, MSG_ERROR, MSG_LOST_TABLE}
+             MSG_TRACKING_STATUS, MSG_ERROR, MSG_LOST_TABLE,
+             MSG_LOST_TABLE_REQ}
 
 # 跟踪状态码（TRACKING-STATUS 的 status 字段；ERROR 的 code 复用部分）
 ST_NOT_TRACKED = "NOT-TRACKED"      # 走失库中无该 sn（未在跟踪）
@@ -193,6 +195,16 @@ def build_lost_table(entries, version=None, ts=None):
     if version is not None:
         m["version"] = int(version)
     return m
+
+
+def build_lost_table_req(ts=None):
+    """R→S ORPAH-LOST-TABLE-REQ：Router 请求 Server 下发当前走失表全量。
+
+    用途（真机前续 / F-03）：Router 重启后本地缓存为空、或 REQ-CONNECT 时
+    缓存未命中——即使 Server 近期无走失表变更（不会主动推），Router 也能主动
+    拉取追平。Server 收到后回 build_lost_table(当前表)。
+    """
+    return _base(MSG_LOST_TABLE_REQ, None, ts)
 
 
 # ---------------------------------------------------------------------------

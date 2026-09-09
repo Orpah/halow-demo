@@ -34,6 +34,7 @@ for _s in (sys.stdout, sys.stderr):
 
 from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          MSG_TRACKING_STATUS, MSG_LOST_TABLE,
+                         MSG_LOST_TABLE_REQ,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
@@ -67,6 +68,7 @@ class OrpahServer:
         self.router_for = {}
         # 所有见过（上报过）的 Router（LOST-TABLE 全量下发的目标）
         self.routers = set()
+        self.pull_count = 0               # Router 主动拉表（LOST-TABLE-REQ）次数
         # 去重（F-04）：sn -> {"last_seq": int|None, "seqs": set} 已接受的 seq
         self.seen = {}
         self.dup_dropped = 0             # 因重复被丢弃的 REPORT 数
@@ -136,6 +138,17 @@ class OrpahServer:
             if sn:
                 with self._lock:
                     self.router_for[str(sn)] = addr
+        elif mtype == MSG_LOST_TABLE_REQ:
+            # R→S 主动拉表：把当前走失表全量回给这台 Router，并记入“见过集”
+            # （此后走失表变更也会推给它）。重启/新 Router 即使无变更事件也能追平。
+            with self._lock:
+                is_new = addr not in self.routers
+                self.routers.add(addr)
+            self.pull_count += 1
+            log(f"收到 LOST-TABLE-REQ <- {addr[0]}:{addr[1]} "
+                f"({'新 Router' if is_new else '已有 Router'})"
+                f" -> 回当前走失表（{len(self.lost)} 项）")
+            self._push_lost(to=[addr])
         else:
             log(f"收到未处理类型 {mtype}（来自 {addr}），忽略")
 

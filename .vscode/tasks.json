@@ -154,6 +154,19 @@
 			},
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "orpah-demo-l4",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l4.py"
+			],
+			"options": {
+				"env": { "PYTHONIOENCODING": "utf-8" }
+			},
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }
