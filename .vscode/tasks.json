@@ -1,19 +1,5 @@
 {
 	"version": "2.0.0",
-	"inputs": [
-		{
-			"id": "simUiPort",
-			"type": "promptString",
-			"description": "模拟器 Web UI (tools/ui) 端口：回车用默认 8899，或输入其它端口（同时开多实例时避免冲突）",
-			"default": "8899"
-		},
-		{
-			"id": "orpahUiPort",
-			"type": "promptString",
-			"description": "ORPAH demo Web UI 端口：回车用默认 8901，或输入其它端口（同时开多实例时避免冲突）",
-			"default": "8901"
-		}
-	],
 	"tasks": [
 		{
 			"label": "sim-git-status",
@@ -81,9 +67,7 @@
 			"command": "C:\\Python313\\python.exe",
 			"args": [
 				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
-				"--host-sim",
-				"--port",
-				"${input:simUiPort}"
+				"--host-sim"
 			],
 			"problemMatcher": [],
 			"group": "build"
@@ -96,9 +80,7 @@
 				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
 				"--host-sim",
 				"--target",
-				"tj45",
-				"--port",
-				"${input:simUiPort}"
+				"tj45"
 			],
 			"problemMatcher": [],
 			"group": "build"
@@ -111,9 +93,7 @@
 				"f:\\git\\halow-demo\\simulator\\tools\\ui\\server.py",
 				"--host-sim",
 				"--target",
-				"hc01",
-				"--port",
-				"${input:simUiPort}"
+				"hc01"
 			],
 			"problemMatcher": [],
 			"group": "build"
@@ -124,8 +104,6 @@
 			"command": "C:\\Python313\\python.exe",
 			"args": [
 				"f:\\git\\halow-demo\\simulator\\orpah\\ui_server.py",
-				"--port",
-				"${input:orpahUiPort}",
 				"--every",
 				"1.5"
 			],
