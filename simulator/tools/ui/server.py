@@ -287,6 +287,10 @@ class Device:
         self._fw_probed = False          # 是否已完成固件代次探测（仅真机 tah/hc01 族需要）
         self._apply_dialect(dp.real_at_v2(source, target))
         self.state["v2"] = self.tahv2    # 前端据此切 V2 命令库/快捷按钮（探测后推状态刷新）
+        # LMAC 计数：真机 tah 族（V1.6/V2.4 都行）开 AT+SYSDBG=LMAC,1，周期 LMAC STATUS 块的
+        # tx:/rx: cnt 累加进卡片 TX/RX。V2.4 另开 UMAC 判连接；V1.6 连接仍走 RSSI≠0。
+        self._lmac_counts = (source == "serial"
+                             and dp.family(target) == dp.FAMILY_TAH)
 
     def _apply_dialect(self, v2):
         """按固件代次方言（v2=泰芯 AH-SDK V2.x）设定轮询命令集/节奏，并同步 tahv2 标志。
@@ -366,6 +370,13 @@ class Device:
             return False
 
     def push(self, etype, **kw):
+        # 运行时长统一刷新：只要推 status 就带上最新 uptime。V1.6 真机走 _spaced_real
+        #（只轮 RSSI/MODE，无 CONN_STATE、无 _tahv2_conn 触发），若不在此刷新会恒 0s。
+        # 同时写回 self.state，保证 /api/status（页面刷新时拉取）与 SSE 事件一致。
+        if etype == "status":
+            self.state["uptime"] = int(time.time() - self.t0)
+            if kw.get("state") is not None:
+                kw["state"]["uptime"] = self.state["uptime"]
         kw.update(type=etype, device=self.name)
         # 有界入队：满时丢弃最旧事件（界面永远显示最新，防内存爆）
         try:
@@ -450,17 +461,20 @@ class Device:
 
     # ---------------- 泰芯真机 LMAC 流（TX/RX 真实计数） ----------------
     def _consume_tahv2_lmac(self, tline):
-        """消费泰芯真机(V2)周期打印的 LMAC STATUS 块。
+        """消费泰芯真机周期打印的 LMAC STATUS 块（V1.6 与 V2.4 格式一致）。
 
-        该固件（AH-SDK V2.x，AT+SYSDBG=LMAC,1）周期性打印 LMAC STATUS（~每 1-6s 一块）。
+        固件（AT+SYSDBG=LMAC,1）周期性打印 LMAC STATUS（~每 1-6s 一块）。
         `tx : cnt=N` / `rx : cnt=N`（AP/STA 都有，格式一致）是该块窗口内的空口帧计数
         —— 累加进卡片 TX/RX 作真实流量；块内其余行全部抑制，不进控制台。
+        AP 侧 STA 判定（STA1..）与连接刷新是 V2.4 UMAC/WPA 判定体系的一部分，仅 tahv2
+        生效；V1.6 真机的连接由 RSSI≠0 判定，这里只做计数与抑制（2026-09-09）。
         返回 True = 本行已消费（不再进控制台/其它解析）。
         """
         if not self._lmacblock:
             if tline.endswith("LMAC STATUS:") or tline == "LMAC STATUS":
                 self._lmacblock = True
-                self._ap_sta = False        # 新块：先按无 STA 处理
+                if self.tahv2:
+                    self._ap_sta = False        # 新块：先按无 STA 处理
                 return True            # 块首行也抑制，不进控制台
             return False
         # 块内：先累加计数
@@ -473,15 +487,17 @@ class Device:
             self.state["rx"] += int(m.group(1))
             self.push("status", state=dict(self.state))
         # AP 侧已认证 STA 判定（STA1.. = 已通过安全的客户端；STA0 是 STA 自身的上行 AP）
-        if re.match(r"\s*STA[1-9]:", tline):
-            if not self._ap_sta:
-                self._ap_sta = True
-                self._tahv2_conn()
-        if "stamap=" in tline:
-            sm = re.search(r"stamap=0x([0-9a-f]+)", tline)
-            if sm and int(sm.group(1), 16) == 0 and self._ap_sta:
-                self._ap_sta = False
-                self._tahv2_conn()
+        # —— V2.4 连接判定用；V1.6 不做（其连接走 RSSI≠0）
+        if self.tahv2:
+            if re.match(r"\s*STA[1-9]:", tline):
+                if not self._ap_sta:
+                    self._ap_sta = True
+                    self._tahv2_conn()
+            if "stamap=" in tline:
+                sm = re.search(r"stamap=0x([0-9a-f]+)", tline)
+                if sm and int(sm.group(1), 16) == 0 and self._ap_sta:
+                    self._ap_sta = False
+                    self._tahv2_conn()
         # 块结束判定：遇到非 LMAC 内容的行（分隔线 / AT 应答 / UMAC 状态等）
         if (tline.startswith("---") or not tline
                 or tline.startswith("IEEE80211") or tline.startswith("Total ")
@@ -577,10 +593,12 @@ class Device:
             j = tline.find("]")
             if 0 < j <= 16 and tline[1:j].isdigit():
                 tline = tline[j + 1:].lstrip()
-        # 泰芯真机(V2) LMAC STATUS 周期流：整块抑制进控制台，仅把 tx:/rx: cnt 累加给卡片
-        if self.tahv2 and self._consume_tahv2_lmac(tline):
+        # 泰芯真机 LMAC STATUS 周期流：整块抑制进控制台，仅把 tx:/rx: cnt 累加给卡片
+        #（V1.6 与 V2.4 都开，见 _lmac_counts / poll_loop 的 SYSDBG 设置）
+        if self._lmac_counts and self._consume_tahv2_lmac(tline):
             return
         # 泰芯真机(V2) UMAC(IEEE80211 Status) 周期流：抓 VIF 的 WPA 状态判定真实连接
+        #（仅 V2.4=tahv2 有 UMAC 概念；V1.6 无此流）
         if self.tahv2 and self._consume_tahv2_umac(tline):
             return
         # 状态：兼容 "KEY:value"（本模拟器）与 "+KEY:value"（T-Halow-RJ45 / 泰芯 V2）
@@ -716,10 +734,15 @@ class Device:
                 and not self._fw_probed):
             self._probe_dialect()
         if self.tahv2:
-            # 泰芯真机：开 LMAC(TX/RX 计数) + UMAC(WPA 状态判定)，关 WNB；
+            # 泰芯真机(V2.4)：开 LMAC(TX/RX 计数) + UMAC(WPA 状态判定)，关 WNB；
             # 状态内容由服务端整块抑制（仅 AT+SCAN 的 BSS 表行放行）。
             # 真机一次只应答一条 → 逐条间隔 ≥1s，否则后面的 SYSDBG 会被吞。
             cmds = ["AT+SYSDBG=LMAC,1", "AT+SYSDBG=UMAC,1", "AT+SYSDBG=WNB,0"]
+        elif self._lmac_counts:
+            # 泰芯真机(V1.6，非 tahv2)：同样开 LMAC,1 让卡片 TX/RX 有真实空口计数
+            #（LMAC STATUS 块格式与 V2.4 一致，_consume_tahv2_lmac 只计数不判连接）；
+            # 无 UMAC 概念；关 WNB 防刷屏。连接仍由 RSSI≠0 判定。
+            cmds = ["AT+SYSDBG=LMAC,1", "AT+SYSDBG=WNB,0"]
         else:
             cmds = ["AT+SYSDBG=LMAC,0", "AT+SYSDBG=WNB,0"]
         for c in cmds:
