@@ -58,8 +58,8 @@ function onReport(d) {
     n.classList.add(cls);
     setTimeout(() => n.classList.remove(cls), 900);
   }
-  // 链路流动动画
-  const linkFlow = document.querySelectorAll(".flow");
+  // 链路流动动画（方向箭头高亮：上行 client→router→server）
+  const linkFlow = document.querySelectorAll(".link-flow");
   linkFlow.forEach(f => {
     f.classList.add("active");
     setTimeout(() => f.classList.remove("active"), 600);
@@ -139,12 +139,10 @@ async function refresh() {
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
-    // 客户端侧空口收发（原 STA：单向上行 → 发送增长、接收 0 属真实）
-    $("txSTA").textContent = s.tx_sta;
-    $("rxSTA").textContent = s.rx_sta;
-    // 路由器侧空口收发（原 AP：单向上行 → 接收增长、发送 0 属真实）
-    $("txAP").textContent = s.tx_ap;
-    $("rxAP").textContent = s.rx_ap;
+    // 链路段帧数（方向箭头旁）：空口段 = 客户端发出的空口帧(tx_sta)；
+    // UDP 段 = 路由器上行转发帧(router_up)。单向上行 → 数值与上报一致。
+    $("airFrames").textContent = s.tx_sta;
+    $("udpFrames").textContent = s.router_up;
     // 连接 / 徽标（展示层按字典中文化）
     const setConn = (elId, val) => {
       const el = $(elId);

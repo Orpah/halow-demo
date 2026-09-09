@@ -72,13 +72,17 @@ header {
 .node-row .conn { color: var(--mut); }
 .conn.ok { color: var(--grn); }
 .cnt { color: var(--acc); }
-.link { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 70px; }
-.flow { display: flex; align-items: center; gap: 3px; height: 10px; }
-.flow span { width: 6px; height: 6px; border-radius: 50%; background: #30363d; }
-.flow.active span { background: var(--acc); animation: pulse 1s infinite; }
-.flow.center span:nth-child(2) { background: var(--org); }
-@keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
-.link-label { font-size: 10px; color: var(--mut); margin-top: 4px; white-space: nowrap; }
+.link { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 96px; gap: 4px; }
+.link-flow {
+  display: flex; align-items: center; gap: 4px; color: var(--acc);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.link-flow .arr { font-size: 16px; line-height: 1; color: var(--grn); }
+.link-flow .link-frames { color: var(--acc); }
+.link-flow .link-unit { color: var(--mut); font-weight: 400; font-size: 11px; }
+.link-flow.active .arr { animation: arrpulse 1s infinite; }
+@keyframes arrpulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
+.link-label { font-size: 10px; color: var(--mut); white-space: nowrap; }
 
 /* ---- 报文流表 ---- */
 table { width: 100%; border-collapse: collapse; }
