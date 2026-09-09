@@ -17,6 +17,20 @@
   `AA 55 TYPE LEN CRC payload`。不加参数完全不影响原有行为（24 项回归仍过）。
 - 涉及本 demo 的公共改动只有 `sim.py` 的 HostPort（可选）；orpah 各进程不 import sim
   （`orpah/host_bus.py` 独立实现同帧格式，将来换真实 SPI 只替换底层收发）。
+- **UI：`python orpah/ui_server.py`（浏览器 http://127.0.0.1:8901/，VS Code 任务
+  `orpah-ui`）**——内嵌整条链路自动周期上报，页面三层拓扑 + ORPAH-REPORT 实时报文流。
+
+## 0b. 编码约定（2026-09-09）：仓库文本一律 UTF-8
+
+- **文件**：git 跟踪文本文件一律 UTF-8（已扫描确认 79 个全合法 UTF-8，无 GBK 文件）。
+  新写文件不加 BOM、写 `# -*- coding: utf-8 -*-` 声明。
+- **运行时输出**：Windows 控制台默认代码页 GBK/cp936 会把 UTF-8 输出显示成乱码，
+  对 emoji（如 ✅）还抛 `UnicodeEncodeError: 'gbk' codec...`。因此**可执行脚本**（打印
+  中文/emoji 的）在 import 后必须强制：`for _s in (sys.stdout, sys.stderr):
+  _s.reconfigure(encoding="utf-8", errors="replace")`（orpah 各脚本已加；仿照即可）。
+- VS Code task（`orpah-ui`/`orpah-demo-cli`）已设 `PYTHONIOENCODING=utf-8` 双保险。
+- 检测某文件是否 GBK：python `open(p,'rb').read().decode('utf-8')` 抛错而 `.decode('gbk')`
+  成功 → GBK。注意**不要**只读文件前 N 字节判断（会因截断多字节字符误报，2026-09-09 教训）。
 
 ## 1. 定位与启动
 

@@ -11,8 +11,16 @@ server.py — ORPAH 奥帕服务器（L1）
 """
 import argparse
 import socket
+import sys
 import threading
 import time
+
+# Windows 控制台默认代码页 GBK/cp936：强制 stdout/stderr 用 UTF-8 编码
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from orpah_proto import ORPAH_UDP_PORT, decode_report_json
 

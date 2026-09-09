@@ -108,6 +108,9 @@
 				"1.5"
 			],
 			"isBackground": true,
+			"options": {
+				"env": { "PYTHONIOENCODING": "utf-8" }
+			},
 			"problemMatcher": [],
 			"group": "build"
 		},
@@ -120,6 +123,9 @@
 				"--n",
 				"2"
 			],
+			"options": {
+				"env": { "PYTHONIOENCODING": "utf-8" }
+			},
 			"problemMatcher": [],
 			"group": "build"
 		}
