@@ -46,10 +46,11 @@ MSG_TRACKING_STATUS = "ORPAH-TRACKING-STATUS"  # R→C / S→R 跟踪状态回�
 MSG_ERROR = "ORPAH-ERROR"                  # 任→任 错误
 MSG_LOST_TABLE = "ORPAH-LOST-TABLE"        # S→R 走失表下发/更新
 MSG_LOST_TABLE_REQ = "ORPAH-LOST-TABLE-REQ"   # R→S 请求当前走失表（Router 主动拉取）
+MSG_FOUND = "ORPAH-FOUND"                  # R→S 发现走失（业务告警：命中走失表）
 
 MSG_TYPES = {MSG_REQ_CONNECT, MSG_ACCESS_INFO, MSG_REPORT,
              MSG_TRACKING_STATUS, MSG_ERROR, MSG_LOST_TABLE,
-             MSG_LOST_TABLE_REQ}
+             MSG_LOST_TABLE_REQ, MSG_FOUND}
 
 # 跟踪状态码（TRACKING-STATUS 的 status 字段；ERROR 的 code 复用部分）
 ST_NOT_TRACKED = "NOT-TRACKED"      # 走失库中无该 sn（未在跟踪）
@@ -205,6 +206,15 @@ def build_lost_table_req(ts=None):
     拉取追平。Server 收到后回 build_lost_table(当前表)。
     """
     return _base(MSG_LOST_TABLE_REQ, None, ts)
+
+
+def build_found(sn, ts=None):
+    """R→S ORPAH-FOUND：Router 发现走失设备（业务告警）。
+
+    sn：被发现的走失 sn。Router 在 REQ-CONNECT 命中本地走失缓存（tracked）时
+    上报（每次命中都发，供业务端记录/告警）。Server 记录并可用于 UI「发现记录」。
+    """
+    return _base(MSG_FOUND, sn, ts)
 
 
 # ---------------------------------------------------------------------------

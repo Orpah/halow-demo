@@ -76,6 +76,8 @@ class OrpahApp:
         # 服务器发布走失表记录（每次下发 LOST-TABLE 记一条，最新在前）
         self.publishes = []
         self.publish_total = 0             # 服务器发布走失表总次数（单调累加）
+        # 发现记录（Router 命中走失表 → ORPAH-FOUND，最新在前）
+        self.founds = []
         # 组件
         self.cores = []
         self.srv = None
@@ -158,6 +160,18 @@ class OrpahApp:
         del self.publishes[20:]
         self._emit("publish", {"n": len(entries), "targets": targets})
 
+    def _on_found_router(self, msg):
+        """Router 发送 ORPAH-FOUND（发现走失）→ 消息流记 Router 段。"""
+        self._push_flow("up", msg, "router")
+
+    def _on_found_server(self, msg, addr):
+        """Server 收到 ORPAH-FOUND → 消息流记 Server 段 + 发现记录列表。"""
+        self._push_flow("up", msg, "server")
+        rec = {"t": time.strftime("%H:%M:%S"), "sn": msg.get("sn", "-")}
+        self.founds.insert(0, rec)
+        del self.founds[20:]
+        self._emit("found", rec)
+
     def _remember(self, msg, stage):
         seq = msg.get("seq")
         if seq is None:
@@ -185,12 +199,14 @@ class OrpahApp:
 
         # 2) Server（真实 UDP，权威走失库）
         self.srv = OrpahServer(port=UDP_SRV, on_report=self._on_report,
-                               on_lost=self._on_lost, on_push=self._on_publish)
+                               on_lost=self._on_lost, on_push=self._on_publish,
+                               on_found=self._on_found_server)
         self.srv.start()
 
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
         self.router = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV,
-                                   on_up=self._on_up, on_down=self._on_down)
+                                   on_up=self._on_up, on_down=self._on_down,
+                                   on_found=self._on_found_router)
         if not self.router.start():
             print("[ui] Router 连不上 AP host 口，退出")
             return False
@@ -265,6 +281,8 @@ class OrpahApp:
             "lost": self.lost,
             "publishes": list(self.publishes),
             "publish_total": self.publish_total,
+            "founds": list(self.founds),
+            "found_total": self.router.found_count if self.router else 0,
         }
 
     def cmd(self, action, sn=None, every=None, note=""):

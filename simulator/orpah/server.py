@@ -34,7 +34,7 @@ for _s in (sys.stdout, sys.stderr):
 
 from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          MSG_TRACKING_STATUS, MSG_LOST_TABLE,
-                         MSG_LOST_TABLE_REQ,
+                         MSG_LOST_TABLE_REQ, MSG_FOUND,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
@@ -52,15 +52,18 @@ class OrpahServer:
     """UDP 服务器：收 ORPAH 报文 + 权威走失库 + 应答/LOST-TABLE 下发。"""
 
     def __init__(self, port=ORPAH_UDP_PORT, on_report=None, on_down=None,
-                 on_lost=None, on_push=None):
+                 on_lost=None, on_push=None, on_found=None):
         self.port = port
         self.on_report = on_report          # callable(msg) or None（收到 REPORT）
         self.on_down = on_down              # callable(msg, router_addr) 下行应答
         self.on_lost = on_lost              # callable(lost_table_dict) 走失表变更
         self.on_push = on_push              # callable(entries, target_n) 发布走失表
+        self.on_found = on_found            # callable(msg, router_addr) 发现走失上报
         self.reports = []                   # 收到的 REPORT（内存缓冲，演示用）
         self.count = 0
         self.down_count = 0                 # 已下发的应答数
+        self.found_count = 0                # 收到 Router 发现走失上报（ORPAH-FOUND）次数
+        self.founds = []                    # 最近 FOUND（内存缓冲）
         self._stop = threading.Event()
         self.sock = None
         # 权威走失库：sn -> {"tracked": bool, "note": str, "since": ts}
@@ -167,6 +170,15 @@ class OrpahServer:
                 f"({'新 Router' if is_new else '已有 Router'})"
                 f" -> 回当前走失表（{len(self.lost)} 项）")
             self._push_lost(to=[addr])
+        elif mtype == MSG_FOUND:
+            # R→S 业务告警：某 Router 发现走失 sn（每次命中都上报）
+            self._note_router(addr)
+            self.found_count += 1
+            self.founds.append(msg)
+            log(f"[发现 {self.found_count}] Router {addr[0]}:{addr[1]} "
+                f"上报发现走失 sn={sn}")
+            if self.on_found:
+                self.on_found(msg, addr)
         else:
             log(f"收到未处理类型 {mtype}（来自 {addr}），忽略")
 

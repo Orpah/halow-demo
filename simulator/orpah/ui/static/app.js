@@ -157,6 +157,30 @@ function renderLost(lost) {
 /* 服务器发布走失表记录（走失数据是服务器主动“下发”的，单独列出） */
 const MAX_PUB = 10;
 
+function renderFounds(founds) {
+  const ul = $("foundList");
+  if (!ul) return;
+  ul.innerHTML = "";
+  const list = founds || [];
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "pub-empty";
+    li.textContent = T("found_empty");
+    ul.appendChild(li);
+    return;
+  }
+  const parts = T("found_line").split("{sn}");   // [前, 后]
+  list.slice(0, MAX_PUB).forEach(f => {
+    const li = document.createElement("li");
+    li.className = "pub-meta";
+    li.innerHTML =
+      `<span class="tm">${esc(f.t)}</span> ` +
+      `<span class="pub-act">${esc(parts[0])}` +
+      `<b class="lost-yes">${esc(f.sn || "-")}</b>${esc(parts[1] || "")}</span>`;
+    ul.appendChild(li);
+  });
+}
+
 function renderPublishes(publishes) {
   const ul = $("publishList");
   if (!ul) return;
@@ -198,6 +222,8 @@ async function refresh() {
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
     $("rowRouterLost").innerHTML =
       T("lbl_lost_recv").replace("{n}", `<b class="cnt">${s.router_lost_recv || 0}</b>`);
+    $("rowRouterFound").innerHTML =
+      T("lbl_found").replace("{n}", `<b class="cnt">${s.found_total || 0}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
     $("rowServerPub").innerHTML =
@@ -222,10 +248,11 @@ async function refresh() {
       ...x, tm: new Date((x.ts || 0) * 1000).toTimeString().slice(0, 8),
     }));
     renderRows(rows);
-    // L2：消息流面板 + 走失表状态 + 服务器发布记录
+    // L2：消息流面板 + 走失表状态 + 服务器发布记录 + 发现记录
     renderFlow(s.flow || []);
     renderLost(s.lost || {});
     renderPublishes(s.publishes || []);
+    renderFounds(s.founds || []);
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;

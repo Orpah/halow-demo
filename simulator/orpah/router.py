@@ -41,7 +41,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MAC_BCAST, MSG_REQ_CONNECT,
                          MSG_REPORT, MSG_TRACKING_STATUS, MSG_LOST_TABLE,
                          MSG_ERROR, parse_eth_frame, decode_msg, encode_msg,
                          build_access_info, build_eth_frame,
-                         build_lost_table_req,
+                         build_lost_table_req, build_found,
                          ST_NOT_TRACKED)
 
 LOG = True
@@ -57,13 +57,15 @@ class RouterBridge:
 
     def __init__(self, ap_port, server_port=ORPAH_UDP_PORT,
                  ap_host="127.0.0.1", server_host="127.0.0.1",
-                 self_mac=None, on_up=None, on_down=None):
+                 self_mac=None, on_up=None, on_down=None, on_found=None):
         self.ap = HostBus(host=ap_host, port=ap_port, name="router")
         self.server_addr = (server_host, server_port)
         self.up_count = 0
         self.down_count = 0
+        self.found_count = 0               # 发现走失（ORPAH-FOUND 上报）次数
         self.on_up = on_up                  # callable(msg) 上行转发（REPORT）
         self.on_down = on_down              # callable(msg) 下行注入（回 Client）
+        self.on_found = on_found            # callable(msg) 发现走失上报
         # 本地走失缓存（Server LOST-TABLE 下发）：sn -> tracked(bool)
         self.lost_cache = {}
         # 本 Router 的 MAC（下行帧 src；缺省给个演示值）
@@ -126,6 +128,9 @@ class RouterBridge:
                                      status=status)
             self._down(info)
             log(f"REQ-CONNECT sn={sn} tracked={tracked} -> 回 ACCESS-INFO")
+            # 命中走失表 → 上报“发现”业务告警（每次命中都发）
+            if tracked:
+                self._announce_found(sn)
             return
         if mtype == MSG_REPORT:
             self.up_count += 1
@@ -142,6 +147,23 @@ class RouterBridge:
             return
         # 其它类型（一般不会经 Router 上行）——记录
         log(f"收到上行类型 {mtype} sn={sn}，忽略")
+
+    def _announce_found(self, sn):
+        """本 Router 检测到走失 sn（REQ-CONNECT 命中本地缓存）→ 上报 ORPAH-FOUND。
+
+        业务告警：每次命中都发（供 Server 记录 / UI「发现记录」）。
+        """
+        msg = build_found(sn)
+        try:
+            self.udp.sendto(encode_msg(msg), self.server_addr)
+        except OSError as e:
+            log(f"发现上报失败: {e}")
+            return
+        self.found_count += 1
+        log(f"[found {self.found_count}] 发现走失 sn={sn} -> "
+            f"{self.server_addr[0]}:{self.server_addr[1]}")
+        if self.on_found:
+            self.on_found(msg)
 
     # ---------------- 下行：Server UDP 应答 → 注入 Client ----------------
     def _udp_loop(self):
