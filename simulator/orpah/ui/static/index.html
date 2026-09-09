@@ -16,36 +16,24 @@
   </div>
 </header>
 
-<!-- ============ 拓扑 ============ -->
+<!-- ============ 拓扑（3 节点：客户端 / 路由器 / 服务器） ============ -->
 <section id="topology" class="card">
   <div class="topo">
     <div class="node" id="nodeClient">
       <div class="node-title"><span data-i18n="node_client">客户端</span><span class="chip" id="chipClient">--</span></div>
-      <div class="node-row small" data-i18n="sub_client">host · 组 ORPAH-REPORT</div>
+      <div class="node-row small" data-i18n="sub_client">主机 · 组 ORPAH-REPORT</div>
       <div class="node-row"><span data-i18n="lbl_sn">序列号</span> <b id="snClient">-</b></div>
       <div class="node-row" id="rowClientCnt"></div>
+      <div class="node-row small"><span data-i18n="lbl_air">空口</span> <span data-i18n="lbl_tx">发送</span> <span id="txSTA">0</span> · <span data-i18n="lbl_rx">接收</span> <span id="rxSTA">0</span></div>
     </div>
-    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_inject">注入(host口)</div></div>
-    <div class="node" id="nodeSTA">
-      <div class="node-title"><span data-i18n="node_sta">STA 模块</span><span class="chip" id="chipSTA">--</span></div>
-      <div class="node-row small" data-i18n="sub_sta">客户端侧 HaLow</div>
-      <div class="node-row"><span data-i18n="lbl_conn">连接</span> <b class="conn" id="connSTA">离线</b></div>
-      <div class="node-row small"><span data-i18n="lbl_tx">发送</span> <span id="txSTA">0</span> · <span data-i18n="lbl_rx">接收</span> <span id="rxSTA">0</span></div>
-    </div>
-    <div class="link"><div class="flow center"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_air">HaLow 虚拟空口</div></div>
-    <div class="node" id="nodeAP">
-      <div class="node-title"><span data-i18n="node_ap">AP 模块</span><span class="chip" id="chipAP">--</span></div>
-      <div class="node-row small" data-i18n="sub_ap">路由器侧 HaLow</div>
-      <div class="node-row"><span data-i18n="lbl_conn">连接</span> <b class="conn" id="connAP">离线</b></div>
-      <div class="node-row small"><span data-i18n="lbl_tx">发送</span> <span id="txAP">0</span> · <span data-i18n="lbl_rx">接收</span> <span id="rxAP">0</span></div>
-    </div>
-    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_host">host口→路由器桥</div></div>
+    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_air">HaLow 虚拟空口</div></div>
     <div class="node" id="nodeRouter">
-      <div class="node-title"><span data-i18n="node_router">路由器桥</span><span class="chip" id="chipRouter">--</span></div>
-      <div class="node-row small" data-i18n="sub_router">拆帧 → UDP 上行</div>
+      <div class="node-title"><span data-i18n="node_router">路由器</span><span class="chip" id="chipRouter">--</span></div>
+      <div class="node-row small" data-i18n="sub_router">空口收 · UDP 上行</div>
       <div class="node-row" id="rowRouterCnt"></div>
+      <div class="node-row small"><span data-i18n="lbl_air">空口</span> <span data-i18n="lbl_tx">发送</span> <span id="txAP">0</span> · <span data-i18n="lbl_rx">接收</span> <span id="rxAP">0</span></div>
     </div>
-    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_udp">UDP :19447</div></div>
+    <div class="link"><div class="flow center"><span></span><span></span><span></span></div><div class="link-label" data-i18n="link_udp">UDP :19447</div></div>
     <div class="node" id="nodeServer">
       <div class="node-title"><span data-i18n="node_server">服务器</span><span class="chip" id="chipServer">--</span></div>
       <div class="node-row small" data-i18n="sub_server">Python UDP</div>

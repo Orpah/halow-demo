@@ -42,8 +42,10 @@ python ui_server.py                  # 自动开浏览器 http://127.0.0.1:8901/
 # 或：python ui_server.py --every 1.5 --sn ORPAH-0001
 ```
 - 内嵌 AP+STA 模拟器 + Router 桥 + Server，Client **自动周期上报**。
-- 页面：三层拓扑（Client→STA→空口→AP→Router→Server）+ ORPAH-REPORT 实时
-  报文流（Client注入/Router上行/Server收到 三阶段 ✓）+ 三端计数 + 暂停/改 sn/改间隔。
+- 页面：精简 3 节点拓扑（客户端 →(空口)→ 路由器 →(UDP)→ 服务器）+ ORPAH-REPORT
+  实时报文流（客户端注入/路由器上行/服务器收到 三阶段 ✓）+ 三端计数 + 空口收发
+  （单向上行：客户端发送/路由器接收增长）+ 暂停/改 sn/改间隔。
+- 文案走共享字典 `tools/ui/static/ui_i18n.js`（zh/en，`?lang=en` 可切英文预览）。
 - 页面数据链路：SSE 事件（点亮动画）+ `/api/status` 全量（计数/连接/表格真相）。
 
 ### 方式 2：命令行验收

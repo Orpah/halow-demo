@@ -9,9 +9,8 @@ let paused = false;
 
 const STAGE_NODE = {
   client: "nodeClient", router: "nodeRouter", server: "nodeServer",
-  sta: "nodeSTA", ap: "nodeAP",
 };
-const STAGE_CLS = { client: "flash", router: "flash-r", server: "flash", sta: "flash", ap: "flash-r" };
+const STAGE_CLS = { client: "flash", router: "flash-r", server: "flash" };
 
 /* 连接状态中文映射：机器值英文（后端 /api/status），仅展示层按字典翻译 */
 const connZh = v => {
@@ -140,9 +139,10 @@ async function refresh() {
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
-    // STA/AP 模块空口收发（单向上行：STA 发/AP 收增长，反向恒 0 属真实）
+    // 客户端侧空口收发（原 STA：单向上行 → 发送增长、接收 0 属真实）
     $("txSTA").textContent = s.tx_sta;
     $("rxSTA").textContent = s.rx_sta;
+    // 路由器侧空口收发（原 AP：单向上行 → 接收增长、发送 0 属真实）
     $("txAP").textContent = s.tx_ap;
     $("rxAP").textContent = s.rx_ap;
     // 连接 / 徽标（展示层按字典中文化）
@@ -152,10 +152,6 @@ async function refresh() {
       el.className = el.className.split(" ")[0] + " " +
         (val === "CONNECTED" ? "ok" : "");
     };
-    setConn("connSTA", s.conn_b);
-    setConn("connAP", s.conn_a);
-    setConn("chipSTA", s.conn_b);
-    setConn("chipAP", s.conn_a);
     setConn("chipClient", s.conn_b);
     setConn("chipRouter", s.conn_a);
     $("chipServer").textContent = s.server_recv > 0 ? T("chip_run") : T("chip_listen");
