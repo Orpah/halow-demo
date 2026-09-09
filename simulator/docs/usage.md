@@ -164,6 +164,23 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   （`txw8301_v2.4.1.3-39777`，CH341B 整片烧 0x0）后，**V2.4-WNB(AP) ↔ V2.4-FMAC(STA) 在 916MHz 完全互通**：
   A 侧 `STA1: 82:59:13:64:70:90`、B 侧 `STA0: d6:a2:2a:82:67:c0`、RSSI -55、双向数据流，无 channel0/timeout。
   烧录一律由用户执行（CH341B+夹子；官方 bin 从 0x0 整片写，头 `5A69`）。
+- **代次×族互联四象限测齐（2026-09-09，最终结论）**：WNB/FMAC 为「族」、V1.6/V2.4 为「代次」，
+  AP/STA 同 `halowlink@9080 bw8 open` 实测全象限：
+
+  | | V1.6 FMAC | V2.4 FMAC |
+  |---|---|---|
+  | **V1.6 WNB** | ✅ 通 | ❌ 不通 |
+  | **V2.4 WNB** | ❌ 不通 | ✅ 通 |
+
+  结论：**HaLow 互联只由固件代次决定——同代必通、跨代必不通，与 WNB/FMAC 族无关**。
+  跨代时 STA 恒 `+DISCONNECT`/SCANNING、AP 侧 `No pair STAs`（或早期 TX-AH 报
+  `at channel 0`/`assoc_timeout`）。早期「TH-RJ45(V1.6 WNB) 连不上 TX-AH(V2.4 FMAC)」
+  纯系代次不匹配，把 TH-RJ45 升到同代（V2.4 WNB）即解。
+- **UI 固件代次自动探测（2026-09-09，commit 02b9977）**：devprofiles 档案回纯硬件维度
+  （tj45=TH-RJ45 / txah=TX-AH，`tj45-v2` 等旧别名归一到 tj45）；真机连接后 server 先发裸
+  `AT+VERSION` 探测（v1.x→T-Halow 方言 / v2.x→AH-SDK V2 方言）再选轮询方言，卡片端口行合并
+  显示「COM6 v2.4.1.3-39777, app:0」；前端按后端 v2 标志动态切命令库。V1.6/V2.4 板任意 COM
+  插上都能自动识别。
 - **UI 频率/带宽行（2026-09-07 加，server.py + app.js/index.html）**：设备卡新增
   「频率 x MHz · 带宽 y MHz」；server 慢轮询 `AT+CHAN_LIST?`（tj45）/ `AT+CHAN_LIST=?`（txah）→
   `+CHAN_LIST:9160`，`AT+BSS_BW?`（应答 `+BSS_BW:8MHz` 带单位 → 解析取数字）；前端 `chan`÷10 显
@@ -172,6 +189,16 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
 - **跨固件再证非频段（2026-09-07 实测）**：此刻双端 `chan_list` 均读回 **9160**（非早前测试的 9080；
   SYSCFG/WNBCFG + CHAN_LIST 查询一致）→ 双卡同显 **916 MHz · 8 MHz**，跨族 STA 仍 `at channel 0` +
   `assoc_timeout` → 现已有 **9080 与 9160 两个单频点同样失败**，与频点/频段/带宽无关。
+- **V1.6 真机 TX/RX 计数 + uptime 修复（2026-09-09，commit 2716358）**：
+  - **TX/RX**：V1.6（T-Halow 方言 spaced_real）真机此前恒 0——poll_loop 对其发 `AT+SYSDBG=LMAC,0`
+    关闭、且 handle_line 只在 tahv2(V2.4) 解析 LMAC。修：`Device._lmac_counts`（真机 tah 族全开）
+    → poll_loop 对 V1.6 也发 `LMAC,1`（无 UMAC）；`_consume_tahv2_lmac` 放宽到 `_lmac_counts` 调用，
+    其中 AP-STA/连接判定包在 `if self.tahv2`（V1.6 只计数、连接仍 RSSI≠0）。V1.6 WNB/FMAC 的
+    LMAC STATUS 块格式与 V2.4 一致（`tx : cnt=N`/`rx : cnt=N`）。
+  - **uptime**：原只在 tahv2 `_tahv2_conn()`/CONN_STATE 更新，V1.6 恒 0s。修：`Device.push()` 对
+    `etype=="status"` 统一刷新 `state["uptime"]=now-t0`（写回 self.state，/api/status 与 SSE 一致）。
+  - **V1.6 RSSI 语义**：V1.6 `AT+RSSI` 应答是小整数档位（A 回 -3~2、B 回 2/3，正负会跳），**非 dBm**
+    （V2.4 才是 dBm）→ 前端对 V1.6 只显数字不加单位（用户确认维持现状）。
 
 ### 0.1.1 多模组（设备档案见 `host/devprofiles.py`）
 
