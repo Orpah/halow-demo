@@ -87,6 +87,15 @@ Router 主动拉表已在 **L3b** 落地（见下）。
 - **验收**：`demo_l4.py`（4 项检查全 PASS：mark 后启动 Router 即拉表追平、首次 REQ 答
   tracked=True、清缓存后 REQ 同步拉取首问即权威、变更推送仍生效且 REQ 不重复拉取）。
 
+## L3c（2026-09-10 已实现）发现走失上报（ORPAH-FOUND）
+
+- **业务**：Router 在 REQ-CONNECT **命中本地走失缓存**（tracked=True）时，即上报
+  **`ORPAH-FOUND`**（R→S，**每次命中都发**）——业务告警 = “某 Router 发现走失者”。
+- `router.py` `_announce_found`（found_count + on_found）；`server.py` 处理 FOUND 记录/计数。
+- **UI**：「发现记录（走失命中）」feed（时间 + 发现 sn）+ Router 卡片「发现 N 次」。
+- 与下链语义区分：逐条 TRACKING-STATUS 回执属响应不计数；**发现（ORPAH-FOUND）与走失表
+  下发（发布/收到）是业务事件**，单独计数/展示。
+
 ## 快速开始（零硬件）
 
 ### 方式 1：Web UI（推荐，看得见的 demo）
@@ -180,7 +189,7 @@ L1 上行示例：
 L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,tracked,server_ok,status?}、
 `ORPAH-TRACKING-STATUS`{sn,status:TRACKED|NOT-TRACKED|...}、`ORPAH-ERROR`{code}、
 `ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}、`ORPAH-LOST-TABLE-REQ`（R→S，Router
-主动拉表，Server 回当前全量 LOST-TABLE）。
+主动拉表，Server 回当前全量 LOST-TABLE）、`ORPAH-FOUND`（R→S，Router 发现走失，每次命中都发）。
 - `sn`：被追踪设备标识（F-01 定稿：**不用 IMEI15**，自定义 SN 允许中文/英文/数字，
   可含 `-`；Server 校验非法 → ERROR `FORMAT-ERR`，见 `orpah_proto.sn_err`）。
 - `seq`：Client 侧递增序号（去重用：Server 按 (sn,seq) 丢弃重复上报）。
