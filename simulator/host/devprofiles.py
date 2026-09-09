@@ -22,10 +22,12 @@ FAMILY_HC01 = "hc01"      # HT-HC01（惠特自动化 ESP32+MM6108，Morse Micro
 
 class Profile:
     """一个设备档案：key（规范名）+ aliases（别名）+ name（中文显示名）+ family（协议族）
-    + at（真实板 AT 指令版本：None=默认 T-Halow 风格 / "v2"=泰芯 AH-SDK V2.x）。
+    + at（真实板 AT 指令版本的「默认假设」：None=按 T-Halow V1.6 风格 / "v2"=泰芯 AH-SDK V2.x）。
 
-    at 只影响「真机串口」的轮询/解析/命令引导；PC 模拟器始终用 family 对应的模拟方言
-    （sim.py 只模拟 T-Halow 风格 tah 方言，不会模拟 WIFIMODE 等 V2 命令）。
+    at 只影响「真机串口」在「来不及探测时的兜底」与 PC 模拟器无关（PC 模拟器始终用 family
+    对应的模拟方言，sim.py 只模拟 T-Halow 风格 tah 方言）。2026-09-09 起真实固件代次
+    由 server 在连接后发 AT+VERSION 自动探测（v1.x→T-Halow 方言 / v2.x→AH-SDK V2 方言），
+    同硬件跑 V1.6 或 V2.4 都不需要额外变体档案——档案只表硬件（TH-RJ45/TX-AH）。
     """
 
     __slots__ = ("key", "aliases", "name", "family", "at")
@@ -44,9 +46,14 @@ ORDER = ["sim", "tj45", "txah", "hc01"]
 PROFILES = {
     "sim":  Profile("sim",  ("sim", "ch32", "ch32v203"),
                     "CH32V203", FAMILY_NATIVE),
-    "tj45": Profile("tj45", ("tj45", "thalow", "t-halow", "rj45"),
+    # T-Halow-RJ45（TH-RJ45）：出厂跑 T-Halow V1.6，也可升 V2.4 WNB（AH-SDK V2 方言）。
+    # 2026-09-09 起固件代次由 server 连接后 AT+VERSION 自动探测，档案只表硬件。
+    #   tj45 = TH-RJ45（任意代次）；别名 tj45-v1/v2 等为兼容旧启动命令，归一到本档案。
+    "tj45": Profile("tj45", ("tj45", "thalow", "t-halow", "rj45",
+                             "tj45-v1", "tj45v1", "tj45-v2", "tj45v2",
+                             "thalow-v1", "t-halow-v1", "thalow-v2", "t-halow-v2"),
                     "TH-RJ45", FAMILY_TAH),
-    # TX-AH 泰芯原厂模组（TX-AH-Rx00P 系列，AH-SDK V2.x 固件 v2.4.1.x）：
+    # TX-AH 泰芯原厂模组（TX-AH-Rx00P 系列，出厂 AH-SDK V2.x 固件 v2.4.1.x，at 兜底='v2'）：
     # 真机 AT 用 AT+WIFIMODE/AT+ENCRYPT/AT+KEY，查询带 '?'（AT+WIFIMODE=? 等），
     # 无 AT+MODE/AT+CONN_STATE/AT+RSSI(裸) —— 与 T-Halow(tj45) 方言不同（2026-09-06 实测）。
     "txah": Profile("txah", ("txah", "tx-ah", "tx_ah", "ah", "tx-ah-module"),
@@ -89,16 +96,17 @@ def name(key):
 
 
 def at_version(key):
-    """target key → 真实板 AT 指令版本：'v2'=泰芯 AH-SDK V2.x（txah），否则 None。
+    """target key → 真实板 AT 指令版本的「默认假设」：'v2'=泰芯 AH-SDK V2.x，否则 None。
 
-    仅供「真机串口」使用（PC 模拟器不受影响，见 Profile.at 注释）。
+    仅供「真机串口」在「AT+VERSION 探测失败/超时」时兜底（txah 出厂 V2.4 → 'v2'；
+    tj45 出厂 V1.6 → None）。正常情况方言由 server 连接后探测固件代次决定。
     """
     k = (key or "").lower()
     return PROFILES[k].at if k in PROFILES else None
 
 
 def real_at_v2(source, target):
-    """该真机串口设备是否用泰芯 AH-SDK V2.x 方言（source=serial 且档案 at='v2'）。"""
+    """该真机串口设备在「未探测到代次」时默认是否按泰芯 AH-SDK V2.x 方言（source=serial 且档案 at='v2'）。"""
     return (source or "").strip().lower() == "serial" and at_version(target) == "v2"
 
 

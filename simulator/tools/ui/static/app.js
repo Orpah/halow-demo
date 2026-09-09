@@ -2,9 +2,9 @@
 "use strict";
 
 const state = {
-  A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
+  A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
        ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
-  B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--",
+  B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
        ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
 };
 const consoles = { A: [], B: [] };
@@ -211,6 +211,12 @@ function onEvent(m) {
 /* ---------------- 状态 ---------------- */
 function updateStatus(d) {
   const s = state[d];
+  // 方言（v2）可能在连接后由后端探测才确定 → 若与当前命令库不一致，切换该台命令库/快捷按钮
+  if (s.v2 !== devV2[d]) {
+    devV2[d] = !!s.v2;
+    devCmd[d] = devV2[d] ? CMDS_TAHV2 : AT_CMDS;
+    renderQuick(d);
+  }
   // 显示用中文映射：仅前端展示文案；机器值仍是英文（CONNECTED/AP…），
   // 后端逻辑、/api/status、测试等都不受影响（拓扑判定读的是 s.conn 机器值）。
   const CONN_ZH = { CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
@@ -225,7 +231,8 @@ function updateStatus(d) {
   $(`pow${d}`).className = "chip pow " + (s.power === "on" ? "ok" : "off");
   $(`mode${d}`).textContent = MODE_ZH[s.mode] || s.mode || "--";
   $(`type${d}`).textContent = s.type || "--";
-  $(`port${d}`).textContent = s.port || "--";
+  // 端口行：串口号 + 固件版本合并成一行（如 “COM6 v2.4.1.3-39777, app:0”）
+  $(`port${d}`).textContent = (s.port || "--") + (s.version ? " " + s.version : "");
   $(`ssid${d}`).textContent = s.ssid || "-";
   // 频点/带宽：后端 chan 为 ×10 频点列表（如 9160），÷10 显示为 MHz
   const cf = String(s.chan || "").split(",").map((x) => x.trim()).filter(Boolean)

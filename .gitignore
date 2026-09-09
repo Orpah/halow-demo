@@ -3,3 +3,6 @@ SDK_*/
 
 # VS Code 多根工作区文件（机器/本地专用）
 *.code-workspace
+
+# 个人/待办交接文档（不随仓库提交）
+simulator/docs/crossfw-taixin-handoff.md

@@ -158,6 +158,12 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
   （非信道/方向 artifact，已排除信道：双方都确认在 9080）。
 - **混接 UI（A=TH-RJ45 + B=TX-AH 同页）**：命令提示/快捷按钮**按每台设备方言自动切换**（T-Halow 风格 vs
   AH-SDK V2 风格），`/api/info` 的 `v2` 标记逐设备，验证 OK。
+- **跨固件互通已解决（2026-09-09 实测）**：真根因 = TH-RJ45 停留在 **V1.6** 旧 WNB（`v1.6.4.3-38054`），
+  与 TX-AH 的 **V2.4**（FMAC v2.4.1.5）**跨代不兼容**（TX-AH 报 `at channel 0`+assoc_timeout，且
+  9080/9160 都失败）——不是 AH-vs-WNB 族间缺陷。**解法**：把 TH-RJ45 也升到 **V2.4 WNB**
+  （`txw8301_v2.4.1.3-39777`，CH341B 整片烧 0x0）后，**V2.4-WNB(AP) ↔ V2.4-FMAC(STA) 在 916MHz 完全互通**：
+  A 侧 `STA1: 82:59:13:64:70:90`、B 侧 `STA0: d6:a2:2a:82:67:c0`、RSSI -55、双向数据流，无 channel0/timeout。
+  烧录一律由用户执行（CH341B+夹子；官方 bin 从 0x0 整片写，头 `5A69`）。
 - **UI 频率/带宽行（2026-09-07 加，server.py + app.js/index.html）**：设备卡新增
   「频率 x MHz · 带宽 y MHz」；server 慢轮询 `AT+CHAN_LIST?`（tj45）/ `AT+CHAN_LIST=?`（txah）→
   `+CHAN_LIST:9160`，`AT+BSS_BW?`（应答 `+BSS_BW:8MHz` 带单位 → 解析取数字）；前端 `chan`÷10 显

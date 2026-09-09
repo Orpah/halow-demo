@@ -15,7 +15,8 @@ server.py — TXW8301 模拟器 Web UI 后端
     pc:tj45       PC 版 T-Halow-RJ45 兼容模拟器
     pc:hc01       PC 版 HT-HC01 兼容模拟器（占位）
     COM3          CH32V203 真机（串口）
-    COM3:tj45     T-Halow-RJ45 真机（串口，自动关调试刷屏）
+    COM3:tj45     T-Halow-RJ45 真机（串口，自动关调试刷屏；固件代次 V1.6/V2.4 连接后
+                  发 AT+VERSION 自动探测，自动选 T-Halow / AH-SDK V2 方言）
     COM3:txah     TX-AH 泰芯真机（串口，AH-SDK V2.x 方言：AT+WIFIMODE / AT+SSID=? /
                   AT+RSSI=?，无 AT+MODE/AT+CONN_STATE —— 见 host/devprofiles.py at='v2'）
     COM3:hc01     HT-HC01 真机（串口）
@@ -98,6 +99,9 @@ def norm_target(t, default):
 def parse_device_spec(spec, default_target="sim"):
     """解析单台设备描述 → (source, target, port) 或 None。
        支持：pc / pc:sim / pc:tj45 / pc:txah / pc:hc01 / COM3 / COM3:sim / ...
+       档案只表硬件（tj45=TH-RJ45 / txah=TX-AH）；真实固件代次 V1.6/V2.4 由 server
+       在连接后发 AT+VERSION 自动探测并选方言（V1.6→T-Halow / V2.4→AH-SDK V2）。
+       旧启动命令 tj45-v2/tj45v2 为兼容别名，归一到 tj45（探测后按实际代次走）。
        source: pc=PC 版模拟器，serial=真机串口
        target: 规范 key（见 devprofiles）sim=CH32V203，tj45=T-Halow-RJ45，
                txah=TX-AH-MODULE，hc01=HT-HC01（占位）
@@ -277,12 +281,24 @@ class Device:
         self._ever_rx = False              # 自(重)连后是否收到过字节（开机/关机据此判定）
         self._assert_at = 0.0              # 下次周期重断言 SYSDBG 流的时间（重连后提前触发）
         self._io_lock = threading.Lock()   # 串口句柄换新/收发的互斥（防重连时读写旧句柄）
-        # 泰芯真机 TX-AH(txah) 用 AH-SDK V2.x 方言：查询带 '?' 且无 AT+CONN_STATE/裸 AT+RSSI
-        self.tahv2 = dp.real_at_v2(source, target)
-        # 泰芯 AH 族真机一次只应答一条查询（背靠背会吞后面的应答，2026-09-07 实测 TX-AH 与 TH-RJ45
-        # 都是）。TX-AH(v2) 走下面 tahv2 专用逐条轮询；TH-RJ45(tj45, 非 v2) 在此标记，通用轮询也逐条错开。
-        self._spaced_real = (not self.tahv2 and source == "serial"
-                             and dp.family(target) == dp.FAMILY_TAH)
+        # ---- 真机 AT 方言：默认按档案 at（txah→V2 / tj45→None）作“探测失败兜底”；
+        # 连接后 poll_loop 先用裸 AT+VERSION 探测真实固件代次（v1.x→T-Halow 方言 /
+        # v2.x→AH-SDK V2 方言），据结果覆盖 tahv2/_spaced_real/poll 列表（_probe_dialect）。
+        self._fw_probed = False          # 是否已完成固件代次探测（仅真机 tah/hc01 族需要）
+        self._apply_dialect(dp.real_at_v2(source, target))
+        self.state["v2"] = self.tahv2    # 前端据此切 V2 命令库/快捷按钮（探测后推状态刷新）
+
+    def _apply_dialect(self, v2):
+        """按固件代次方言（v2=泰芯 AH-SDK V2.x）设定轮询命令集/节奏，并同步 tahv2 标志。
+
+        只影响“真机串口”轮询与解析；PC 模拟器始终用 family 对应模拟方言（sim.py）。
+        """
+        self.tahv2 = bool(v2)
+        # 泰芯 AH 族真机一次只应答一条查询（背靠背会吞后面的应答，2026-09-07 实测 TX-AH 与
+        # TH-RJ45 都是）。TX-AH(v2) 走下面 tahv2 专用逐条轮询；TH-RJ45(tj45, 非 v2) 在此标记，
+        # 通用轮询也逐条错开。
+        self._spaced_real = (not self.tahv2 and self.source == "serial"
+                             and dp.family(self.target) == dp.FAMILY_TAH)
         if self.tahv2:
             self.poll_status = ["AT+RSSI=?", "AT+WIFIMODE=?"]
             self.poll_slow = ["AT+SSID=?"]
@@ -290,10 +306,43 @@ class Device:
             # TH-RJ45 真机：连接用 RSSI 判（非 0=已连上），故只轮询 RSSI；不轮询 AT+CONN_STATE
             # （其应答 +CONNECTED/+DISCONNECT 是“事件”，会刷屏/误当事件推送）。
             self.poll_status = ["AT+RSSI"]
-            self.poll_slow = ["AT+MODE", "AT+SSID", "AT+CHAN_LIST?", "AT+BSS_BW?"]
+            self.poll_slow = ["AT+MODE", "AT+SSID", "AT+VERSION",
+                              "AT+CHAN_LIST?", "AT+BSS_BW?"]
         else:
             self.poll_status = POLL_STATUS   # ["AT+CONN_STATE", "AT+RSSI"]
             self.poll_slow = POLL_SLOW       # ["AT+MODE?", "AT+SSID?"]
+
+    def _probe_dialect(self):
+        """真机 tah/hc01 族启动时探测真实固件代次，决定用哪套方言轮询。
+
+        用裸 AT+VERSION（V1.6 与 V2.4 都认，返回 +VERSION:v2.4.1.3-…/v1.6.4.3-…），
+        从应答版本号首段判断 v1/v2 → 覆盖方言。探测不到（无应答/超时）回退档案 at 兜底。
+        reader_loop 已解析出 state["version"]；真机启动头几秒常打 LMAC 大块吞掉首条查询
+        → 周期重发直至读到版本或超时（2026-09-09，与启动 AT+VERSION 被挤掉的坑同源）。
+        """
+        self._fw_probed = True
+        self.push("log", text=f"[{self.name}] 探测固件代次…")
+        deadline = time.time() + 8.0
+        v = ""
+        while not STOP.is_set() and time.time() < deadline:
+            v = (self.state.get("version") or "").strip()
+            if v:
+                break
+            self.send("AT+VERSION")
+            time.sleep(1.5)
+        m = re.search(r"[vV]?(\d+)\.(\d+)", v)   # 兼容 v2.4.1.3 / 2.4.1.3 / v1.6.4.3
+        major = int(m.group(1)) if m else None
+        if major == 2:
+            want_v2 = True
+        elif major == 1:
+            want_v2 = False
+        else:
+            want_v2 = dp.real_at_v2(self.source, self.target)   # 失败兜底（txah→V2 / tj45→None）
+        self._apply_dialect(want_v2)
+        self.state["v2"] = self.tahv2
+        self.push("status", state=dict(self.state))
+        self.push("log", text=f"[{self.name}] 固件代次={'V2.4(AH-SDK V2)' if self.tahv2 else 'V1.6(T-Halow)'}"
+                              f" 版本={v or '（未读到，按档案默认）'}")
 
     def send(self, line):
         try:
@@ -659,6 +708,13 @@ class Device:
     def poll_loop(self):
         last_slow = 0
         time.sleep(0.3)
+        # 真机 tah/hc01 族：启动先探测真实固件代次（AT+VERSION → v1/v2）再选方言，
+        # 覆盖档案默认 —— 否则下方 SYSDBG/轮询命令集会按默认方言发错（TH-RJ45 升 V2.4
+        # 后必须按 AH-SDK V2 方言轮询，2026-09-09）。
+        if (self.source == "serial"
+                and dp.family(self.target) in (dp.FAMILY_TAH, dp.FAMILY_HC01)
+                and not self._fw_probed):
+            self._probe_dialect()
         if self.tahv2:
             # 泰芯真机：开 LMAC(TX/RX 计数) + UMAC(WPA 状态判定)，关 WNB；
             # 状态内容由服务端整块抑制（仅 AT+SCAN 的 BSS 表行放行）。
@@ -676,10 +732,12 @@ class Device:
         if self.tahv2:
             # 泰芯真机(V2)一次只应答一条查询（背靠背会吞掉后面的应答）：
             # 逐条错开发送；RSSI? 每轮 1 次，WIFIMODE?/SSID? 交替慢轮
+            #（VERSION 也放 seq 末尾周期重查：启动时那一次常被 SYSDBG 大块挤掉）
             seq = [("AT+RSSI=?", 1.3), ("AT+WIFIMODE=?", 1.3),
                    ("AT+RSSI=?", 1.3), ("AT+SSID=?", 1.3),
                    ("AT+RSSI=?", 1.3), ("AT+CHAN_LIST=?", 1.3),
-                   ("AT+RSSI=?", 1.3), ("AT+BSS_BW=?", 1.3)]
+                   ("AT+RSSI=?", 1.3), ("AT+BSS_BW=?", 1.3),
+                   ("AT+VERSION", 1.3)]
             i = 0
             self._assert_at = time.time() + 20.0  # 周期重断言调试流（板子 RST 会重置 SYSDBG）
             while not STOP.is_set():
