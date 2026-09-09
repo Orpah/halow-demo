@@ -27,12 +27,34 @@ HT-HC01模块是ESP32处理器+Morse Micro MM6108组成的。
 | `txah` | 泰芯 TX-AH-MODULE | 泰芯 AH（tah） |
 | `hc01` | HT-HC01（惠特自动化 ESP32+MM6108） | hc01（占位：命令集待手册） |
 
-零硬件快速体验（两台 HT-HC01 虚拟机演示）：
+零硬件快速体验（两台 CH32V203 虚拟机演示）：
 
 ```bash
 cd simulator
-python tools/ui/server.py --host-sim --target hc01   # 浏览器开 http://127.0.0.1:8899/
+python tools/ui/server.py --host-sim    # 浏览器开 http://127.0.0.1:8899/
 ```
+
+### Web UI 启动命令（tools/ui/server.py）
+
+每台设备可独立指定「来源 × 目标」，来源 `pc`（进程内模拟器）/ `serial`（真机串口），
+目标见上表（`sim`/`tj45`/`txah`/`hc01`）。常见启动方式（均 `cd simulator` 后执行）：
+
+| 场景 | 命令 |
+|---|---|
+| 两台本模拟器虚拟机（零硬件推荐） | `python tools/ui/server.py --host-sim` |
+| 两台 T-Halow-RJ45 虚拟机 | `python tools/ui/server.py --host-sim --target tj45` |
+| 两台 TX-AH 虚拟机 | `python tools/ui/server.py --host-sim --target txah` |
+| 两台 HT-HC01 虚拟机（占位） | `python tools/ui/server.py --host-sim --target hc01` |
+| 混接：A=CH32V203虚拟 + B=T-Halow虚拟 | `python tools/ui/server.py --a pc --b pc:tj45` |
+| TX-AH 真机 + 虚拟机（同一页面混管） | `python tools/ui/server.py --a pc:tj45 --b COM13:txah` |
+| 两块真实 T-Halow-RJ45（物理 RF） | `python tools/ui/server.py --a COM3:tj45 --b COM4:tj45` |
+| 自动识别 CH340 真机串口 | `python tools/ui/server.py` |
+| 列出可用串口 | `python tools/ui/server.py --list` |
+| 自定义 HTTP 端口 | `python tools/ui/server.py --host-sim --port 8899` |
+
+> 互联域：仅「PC↔PC」经虚拟空口(TCP) 互联；「真机↔真机」走物理 RF/UART。
+> PC 与真机无法自动建链，但 UI 可同时管理任意组合（如真机升级、对比验证）。
+> 真机 tj45/txah 启动会自动探测固件代次（V1.6 T-Halow / V2.4 AH-SDK V2）选对 AT 方言。
 
 设备档案/别名/协议族见 [`simulator/host/devprofiles.py`](simulator/host/devprofiles.py)，
 完整说明见 [`simulator/README.md`](simulator/README.md)。
