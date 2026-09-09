@@ -2,13 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>ORPAH-over-HaLow L1 Demo</title>
+<title>ORPAH-over-HaLow L1 演示</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="style.css?v=20260909">
+<link rel="stylesheet" href="style.css?v=20260909b">
 </head>
 <body>
 <header>
-  <div class="brand"><span class="logo">🛰️</span> ORPAH-over-HaLow <span class="sub">L1 数据通路 Demo · 纯 PC 模拟器</span></div>
+  <div class="brand"><img class="brand-logo" src="orpah-logo.png" alt="orpah" title="orpah"> <span class="brand-name">ORPAH-over-HaLow</span> <span class="sub">L1 数据通路演示 · 纯软件模拟器</span></div>
   <div class="tools">
     <span id="srvstatus" class="badge">未连接</span>
     <button id="btnPause" class="btn">暂停上报</button>
@@ -20,7 +20,7 @@
 <section id="topology" class="card">
   <div class="topo">
     <div class="node" id="nodeClient">
-      <div class="node-title">Client 终端<span class="chip" id="chipClient">--</span></div>
+      <div class="node-title">客户端<span class="chip" id="chipClient">--</span></div>
       <div class="node-row small" id="subClient">host · 组 ORPAH-REPORT</div>
       <div class="node-row">序列号 <b id="snClient">-</b></div>
       <div class="node-row">上报 <b class="cnt" id="cntClient">0</b> 条</div>
@@ -28,26 +28,26 @@
     <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label">注入(host口)</div></div>
     <div class="node" id="nodeSTA">
       <div class="node-title">STA 模块<span class="chip" id="chipSTA">--</span></div>
-      <div class="node-row small" id="subSTA">Client 侧 HaLow</div>
-      <div class="node-row">连接 <b class="conn" id="connSTA">OFFLINE</b></div>
-      <div class="node-row small">TX <span id="txSTA">0</span> · RX <span id="rxSTA">0</span></div>
+      <div class="node-row small" id="subSTA">客户端侧 HaLow</div>
+      <div class="node-row">连接 <b class="conn" id="connSTA">离线</b></div>
+      <div class="node-row small">发送 <span id="txSTA">0</span> · 接收 <span id="rxSTA">0</span></div>
     </div>
     <div class="link"><div class="flow center"><span></span><span></span><span></span></div><div class="link-label">HaLow 虚拟空口</div></div>
     <div class="node" id="nodeAP">
       <div class="node-title">AP 模块<span class="chip" id="chipAP">--</span></div>
-      <div class="node-row small" id="subAP">Router 侧 HaLow</div>
-      <div class="node-row">连接 <b class="conn" id="connAP">OFFLINE</b></div>
-      <div class="node-row small">TX <span id="txAP">0</span> · RX <span id="rxAP">0</span></div>
+      <div class="node-row small" id="subAP">路由器侧 HaLow</div>
+      <div class="node-row">连接 <b class="conn" id="connAP">离线</b></div>
+      <div class="node-row small">发送 <span id="txAP">0</span> · 接收 <span id="rxAP">0</span></div>
     </div>
-    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label">host口→Router桥</div></div>
+    <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label">host口→路由器桥</div></div>
     <div class="node" id="nodeRouter">
-      <div class="node-title">Router 桥<span class="chip" id="chipRouter">--</span></div>
+      <div class="node-title">路由器桥<span class="chip" id="chipRouter">--</span></div>
       <div class="node-row small" id="subRouter">拆帧 → UDP 上行</div>
       <div class="node-row">上行 <b class="cnt" id="cntRouter">0</b> 条</div>
     </div>
     <div class="link"><div class="flow"><span></span><span></span><span></span></div><div class="link-label">UDP :19447</div></div>
     <div class="node" id="nodeServer">
-      <div class="node-title">Server<span class="chip" id="chipServer">--</span></div>
+      <div class="node-title">服务器<span class="chip" id="chipServer">--</span></div>
       <div class="node-row small" id="subServer">Python UDP</div>
       <div class="node-row">收到 <b class="cnt" id="cntServer">0</b> 条</div>
     </div>
@@ -58,7 +58,7 @@
 <section class="card" id="msgsec">
   <h3>ORPAH-REPORT 实时报文流 <span class="hint" id="flowState"></span></h3>
   <table id="msgTable">
-    <thead><tr><th>时间</th><th>seq</th><th>sn</th><th>rssi</th><th>Client注入</th><th>Router上行</th><th>Server收到</th></tr></thead>
+    <thead><tr><th>时间</th><th>序号</th><th>序列号</th><th>信号</th><th>客户端注入</th><th>路由器上行</th><th>服务器收到</th></tr></thead>
     <tbody id="msgList"></tbody>
   </table>
 </section>
@@ -67,13 +67,13 @@
 <section class="card" id="ctlsec">
   <h3>上报控制</h3>
   <div class="config-row">
-    <label>间隔 <input id="ctlEvery" type="number" value="2" min="0.3" step="0.1"> s</label>
+    <label>间隔 <input id="ctlEvery" type="number" value="2" min="0.3" step="0.1"> 秒</label>
     <label>序列号 <input id="ctlSn" value="ORPAH-0001"></label>
     <button class="btn primary" id="btnApply">应用</button>
-    <span class="hint">Client 自动周期上报；Server 每收到一条即点亮对应行。</span>
+    <span class="hint">客户端自动周期上报；服务器每收到一条即点亮对应行。</span>
   </div>
 </section>
 
-<script src="app.js?v=20260909"></script>
+<script src="app.js?v=20260909b"></script>
 </body>
 </html>

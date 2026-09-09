@@ -10,6 +10,14 @@ const STAGE_NODE = {
 };
 const STAGE_CLS = { client: "flash", router: "flash-r", server: "flash", sta: "flash", ap: "flash-r" };
 
+/* 连接状态 / 模式中文映射（沿用 halow-demo 既定：机器值保持英文，仅展示层中文化） */
+const CONN_ZH = {
+  CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
+  PAIRING: "配对中", OFFLINE: "离线", IDLE: "空闲", DISCONNECTED: "已断开",
+  UNKNOWN: "未知",
+};
+const connZh = v => CONN_ZH[v] || v;
+
 /* ---------- SSE 事件流 ---------- */
 function connect() {
   const es = new EventSource("/api/events");
@@ -117,19 +125,19 @@ async function refresh() {
     $("cntRouter").textContent = s.router_up;
     $("cntServer").textContent = s.server_recv;
     $("snClient").textContent = s.sn;
-    $("connSTA").textContent = s.conn_b;
-    $("connSTA").className = "conn" + (s.conn_b === "CONNECTED" ? " ok" : "");
-    $("connAP").textContent = s.conn_a;
-    $("connAP").className = "conn" + (s.conn_a === "CONNECTED" ? " ok" : "");
-    $("chipSTA").textContent = s.conn_b;
-    $("chipSTA").className = "chip" + (s.conn_b === "CONNECTED" ? " ok" : "");
-    $("chipAP").textContent = s.conn_a;
-    $("chipAP").className = "chip" + (s.conn_a === "CONNECTED" ? " ok" : "");
-    // 芯片状态
-    $("chipClient").textContent = s.conn_b;
-    $("chipClient").className = "chip" + (s.conn_b === "CONNECTED" ? " ok" : "");
-    $("chipRouter").textContent = s.conn_a;
-    $("chipRouter").className = "chip" + (s.conn_a === "CONNECTED" ? " ok" : "");
+    // 连接 / 徽标（展示层中文化）
+    const setConn = (elId, val) => {
+      const el = $(elId);
+      el.textContent = connZh(val);
+      el.className = el.className.split(" ")[0] + " " +
+        (val === "CONNECTED" ? "ok" : "");
+    };
+    setConn("connSTA", s.conn_b);
+    setConn("connAP", s.conn_a);
+    setConn("chipSTA", s.conn_b);
+    setConn("chipAP", s.conn_a);
+    setConn("chipClient", s.conn_b);
+    setConn("chipRouter", s.conn_a);
     $("chipServer").textContent = s.server_recv > 0 ? "运行" : "监听";
     $("chipServer").className = "chip" + (s.server_recv > 0 ? " ok" : "");
     // 报文流表格（全量真相）
