@@ -373,6 +373,99 @@ class Link:
 
 
 # ---------------------------------------------------------------------------
+# Host 数据口（TCP）：对应真实 SPI MACBUS 的 DATA_TX / DATA_RX 语义
+# ---------------------------------------------------------------------------
+# PC 模拟器除 AT 控制台外，还提供一个「host 数据口」（可选，--host <port>），
+# 让外部 host 进程（如 orpah 的 Client/Router 程序）走与真实模块一致的
+# 「注入数据帧 / 读取收到的帧」数据面，而不是用 AT+TXDATA 逐帧敲命令。
+#
+#   帧格式与空口 Link 完全一致：AA 55 TYPE LEN CRC payload（TYPE=0x01 数据帧）。
+#   host → 模块：host 注入 DATA 帧  → wifi.send_data() → 走空口转发到对端（= DATA_TX）
+#   模块 → host：从空口收到、目的为本机/广播的 DATA 帧 → 推给已连接 host（= DATA_RX）
+#
+# 用法：python sim.py ... --host <port>
+class HostPort:
+    def __init__(self, core, port):
+        self.core = core
+        self.port = port
+        self.sock = None
+        self.rxbuf = b""
+        self.srv = None
+
+    def start(self):
+        self.srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.srv.bind(("127.0.0.1", self.port))
+        self.srv.listen(1)
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        while True:
+            try:
+                c, _ = self.srv.accept()
+            except OSError:
+                return
+            c.settimeout(None)
+            self.sock = c
+            self.core.out("log",
+                          f"[{self.core.name}] host 数据口 :{self.port} 已连接")
+            threading.Thread(target=self._reader, args=(c,), daemon=True).start()
+
+    def _frame(self, t, payload):
+        p = bytes(payload)
+        hdr = bytes([0xAA, 0x55, t, len(p) >> 8, len(p) & 0xFF])
+        return hdr + bytes([crc8(hdr[2:] + p)]) + p
+
+    def push(self, payload):
+        """把一帧待收数据（DATA_RX 语义）推给已连接的 host。无 host 连接则丢弃。"""
+        if self.sock is None:
+            return
+        try:
+            self.sock.sendall(self._frame(LINK_TYPE_DATA, payload))
+        except OSError:
+            self.sock = None
+
+    def _reader(self, c):
+        try:
+            while True:
+                data = c.recv(4096)
+                if not data:
+                    break
+                self._feed(data)
+        except OSError:
+            pass
+        finally:
+            self.sock = None
+            try:
+                c.close()
+            except OSError:
+                pass
+
+    def _feed(self, data):
+        """解 host 注入的数据帧（DATA_TX 语义）：DATA 帧 → wifi.send_data() 走空口。"""
+        self.rxbuf += data
+        while len(self.rxbuf) >= 6:
+            if self.rxbuf[0] != 0xAA or self.rxbuf[1] != 0x55:
+                self.rxbuf = self.rxbuf[1:]
+                continue
+            t = self.rxbuf[2]
+            ln = (self.rxbuf[3] << 8) | self.rxbuf[4]
+            if len(self.rxbuf) < 6 + ln:
+                break
+            body = self.rxbuf[2:5] + self.rxbuf[6:6 + ln]
+            if self.rxbuf[5] != crc8(body):
+                self.rxbuf = self.rxbuf[1:]
+                continue
+            payload = self.rxbuf[6:6 + ln]
+            self.rxbuf = self.rxbuf[6 + ln:]
+            if t != LINK_TYPE_DATA:
+                continue                       # host 口只接受数据帧
+            if len(payload) < 14:
+                continue
+            self.core.wifi.send_data(payload)  # 注入 → 空口转发到对端（若已连接）
+
+
+# ---------------------------------------------------------------------------
 # 无线状态机（对应固件 sim_wifi）
 # ---------------------------------------------------------------------------
 class Wifi:
@@ -507,6 +600,9 @@ class Wifi:
             is_group = (c.mode == MODE_GROUP and dst == c.group) or (dst[0] & 1)
             if not (is_bcast or dst == me or is_group):
                 return
+            # host 数据口（DATA_RX 语义）：把收到的帧推给已连接 host（如 orpah Router）
+            if self.core.hostport is not None:
+                self.core.hostport.push(p)
             if len(self.rx_queue) < 4:
                 self.rx_queue.append(p)
                 self.rx_pkts += 1
@@ -984,7 +1080,7 @@ At.TABLE = {
 class Core:
     def __init__(self, name, role, console_port, link_port, peer_link,
                  autoconf=True, family=FAMILY_NATIVE, link_serial=None,
-                 link_baud=115200):
+                 link_baud=115200, host_port=None):
         self.name = name
         self.family = family
         self.cfg = SimCfg()
@@ -997,6 +1093,7 @@ class Core:
         self.console = Console(console_port, self.at.run,
                                data_mode=lambda: self.at.txdata is not None,
                                on_byte=self.at.data_byte)
+        self.hostport = None
         self._t0 = time.monotonic()
         self._last5 = 0.0
         self._last_stats = 0.0
@@ -1011,7 +1108,10 @@ class Core:
                 threading.Thread(target=self.link.connect, args=(peer_link,),
                                  daemon=True).start()
         self.console.start()
-        self.out("log", f"[{self.name}] TXW8301 模拟器 PC 版启动 (AT 控制台 :{console_port}, 空口 {self.link_port_desc})")
+        if host_port:
+            self.hostport = HostPort(self, host_port)
+            self.hostport.start()
+        self.out("log", f"[{self.name}] TXW8301 模拟器 PC 版启动 (AT 控制台 :{console_port}, 空口 {self.link_port_desc})" + (f", host 口 :{host_port}" if host_port else ""))
         if autoconf:
             self._autoconf()
 
@@ -1072,6 +1172,9 @@ def main():
                     help="串口空口（连真实 CH32V203 板的 UART2，需 USB 转串口），如 COM5；"
                          "设置后不再使用 TCP 空口")
     ap.add_argument("--link-baud", type=int, default=115200)
+    ap.add_argument("--host", type=int, default=None,
+                    help="host 数据口 TCP 端口（可选）：host 经此注入/读取数据帧，"
+                         "语义对齐 SPI MACBUS 的 DATA_TX/DATA_RX")
     args = ap.parse_args()
 
     peer = None
@@ -1082,7 +1185,7 @@ def main():
     family = FAMILY_TAH if args.tj45 else args.family
     core = Core(args.name, args.role, args.console, args.link, peer,
                 family=family, link_serial=args.link_serial,
-                link_baud=args.link_baud)
+                link_baud=args.link_baud, host_port=args.host)
     core.cfg.ssid = args.ssid
     print(f"[{args.name}] 就绪 (family={family}): AT 控制台 127.0.0.1:{args.console}  空口 :{args.link}")
     core.loop()

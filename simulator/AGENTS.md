@@ -3,6 +3,21 @@
 本目录是 TXW8301 的纯软件模拟器（`host/` Python 移植 + `tools/ui/` Web UI +
 `firmware/` CH32V203 固件）。开发、修改、调试任何部分前，**先遵循以下规则与踩坑记录**。
 
+## 0. ORPAH demo（2026-09-09 起，`simulator/orpah/`）
+
+- 定位：在 halow-demo 内做 ORPAH-over-HaLow 的 L1 原型（成熟后抽 orpah-demo）。
+  L1 = 数据通路最小骨架：Client(STA) 上行 payload 到 Python Server（纯 PC，无硬件）。
+- 分层（对齐 `Protocol/docs/orpah-over-halow/SPEC.md`）：链路 = 以太网帧(ethertype
+  `0x88B5`) 经模拟器二层桥透传；Router→Server 段用真实 UDP。角色：Client=`client.py`+STA
+  模拟器、Router=`router.py`+AP 模拟器、Server=`server.py`(UDP `19447`)。
+- 运行：`python orpah/demo_l1.py --n 3`（内嵌 2 模拟器端到端验收，PASS=Server 收到 N 条）。
+  单独跑见 `orpah/README.md`。
+- **`host/sim.py` 新增「host 数据口」**（`--host <port>` / `Core(host_port=)`，缺省不启用）：
+  语义 = SPI MACBUS `DATA_TX`(host 注入→空口转发) / `DATA_RX`(收帧推 host)；帧格式同空口
+  `AA 55 TYPE LEN CRC payload`。不加参数完全不影响原有行为（24 项回归仍过）。
+- 涉及本 demo 的公共改动只有 `sim.py` 的 HostPort（可选）；orpah 各进程不 import sim
+  （`orpah/host_bus.py` 独立实现同帧格式，将来换真实 SPI 只替换底层收发）。
+
 ## 1. 定位与启动
 
 - 给泰芯 TXW8301（802.11ah HaLow）做的**无射频**模拟器，形态参考 T-Halow-RJ45
