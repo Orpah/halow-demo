@@ -75,6 +75,7 @@ class OrpahApp:
         self.lost = {}
         # 服务器发布走失表记录（每次下发 LOST-TABLE 记一条，最新在前）
         self.publishes = []
+        self.publish_total = 0             # 服务器发布走失表总次数（单调累加）
         # 组件
         self.cores = []
         self.srv = None
@@ -150,6 +151,7 @@ class OrpahApp:
 
     def _on_publish(self, entries, targets):
         """Server 发布/更新 LOST-TABLE（下发给 Router）→ 记发布记录（供前端展示）。"""
+        self.publish_total += 1
         rec = {"t": time.strftime("%H:%M:%S"), "n": len(entries),
                "targets": targets, "entries": list(entries)}
         self.publishes.insert(0, rec)
@@ -261,6 +263,7 @@ class OrpahApp:
             "flow": list(self.flow),
             "lost": self.lost,
             "publishes": list(self.publishes),
+            "publish_total": self.publish_total,
         }
 
     def cmd(self, action, sn=None, every=None, note=""):

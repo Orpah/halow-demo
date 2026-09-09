@@ -198,6 +198,8 @@ async function refresh() {
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
+    $("rowServerPub").innerHTML =
+      T("lbl_pub").replace("{n}", `<b class="cnt">${s.publish_total || 0}</b>`);
     // 链路段帧数（方向箭头旁）：空口段 = 客户端发出的空口帧(tx_sta)；
     // UDP 段 = 路由器上行转发帧(router_up)。单向上行 → 数值与上报一致。
     $("airFrames").textContent = s.tx_sta;
