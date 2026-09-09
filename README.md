@@ -37,6 +37,18 @@ python tools/ui/server.py --host-sim --target hc01   # 浏览器开 http://127.0
 设备档案/别名/协议族见 [`simulator/host/devprofiles.py`](simulator/host/devprofiles.py)，
 完整说明见 [`simulator/README.md`](simulator/README.md)。
 
+## ORPAH-over-HaLow demo（simulator/orpah/）
+
+基于模拟器的 ORPAH L1 数据通路原型（Client 终端上行 → 奥帕 Server）。纯 PC、零硬件：
+
+```bash
+cd simulator/orpah
+python ui_server.py        # Web UI：自动开浏览器 http://127.0.0.1:8901/
+python demo_l1.py --n 3    # 命令行验收（Server 收到 3 条 = PASS）
+```
+
+详见 [`simulator/orpah/README.md`](simulator/orpah/README.md)（分层、报文、验收标准）。
+
 ## 相关链接
 1. [TXW8301淘宝链接](https://item.taobao.com/item.htm?id=856103881366&skuId=5660266844543)
 2. [HT-HC01淘宝链接](https://item.taobao.com/item.htm?id=866899093076&skuId=6162648454293)

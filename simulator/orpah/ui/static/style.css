@@ -4,8 +4,11 @@
   --red: #f85149;
 }
 * { box-sizing: border-box; }
+html, body { overflow-x: auto; }
 body {
   margin: 0; background: var(--bg); color: var(--txt);
+  /* 拓扑（5 节点 + 4 连线）单行排开需要的最小宽度：窄视口时横向滚动，不折行挤乱 */
+  min-width: 1180px;
   font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 header {
@@ -39,11 +42,12 @@ header {
 /* ---- 拓扑 ---- */
 .topo {
   display: flex; align-items: stretch; justify-content: center; gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;               /* 拓扑恒单行，宽度靠页面 min-width 保证 */
 }
 .node {
   background: #0d1117; border: 1px solid var(--bd); border-radius: 8px;
   padding: 8px 12px; min-width: 132px; text-align: center;
+  flex: 0 1 auto;                  /* 不强制拉伸，按内容；由 min-width 兜底 */
   transition: box-shadow .25s, border-color .25s;
 }
 .node.flash { border-color: var(--grn); box-shadow: 0 0 12px #3fb95066; }
