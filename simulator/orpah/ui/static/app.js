@@ -1,7 +1,10 @@
-/* ORPAH L1 demo UI — 前端逻辑：SSE 报文流 + 拓扑点亮 + 计数 + 控制 */
+/* ORPAH L1 demo UI — 前端逻辑：SSE 报文流 + 拓扑点亮 + 计数 + 控制
+ * 文案统一走 OrpahI18n（ui_i18n.js，zh/en 单一源）；URL ?lang=en 可切英文预览。
+ */
 "use strict";
 
 const $ = id => document.getElementById(id);
+const T = key => OrpahI18n.t(key);          // 取文案
 let paused = false;
 
 const STAGE_NODE = {
@@ -10,13 +13,21 @@ const STAGE_NODE = {
 };
 const STAGE_CLS = { client: "flash", router: "flash-r", server: "flash", sta: "flash", ap: "flash-r" };
 
-/* 连接状态 / 模式中文映射（沿用 halow-demo 既定：机器值保持英文，仅展示层中文化） */
-const CONN_ZH = {
-  CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
-  PAIRING: "配对中", OFFLINE: "离线", IDLE: "空闲", DISCONNECTED: "已断开",
-  UNKNOWN: "未知",
+/* 连接状态中文映射：机器值英文（后端 /api/status），仅展示层按字典翻译 */
+const connZh = v => {
+  const s = OrpahI18n.t("conn_" + v);
+  return s === "conn_" + v ? (v || "?") : s;   // 字典无此键 → 回退机器值
 };
-const connZh = v => CONN_ZH[v] || v;
+
+/* ---------- 语言应用（静态 data-i18n） ---------- */
+function applyI18n() {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    el.textContent = OrpahI18n.t(el.getAttribute("data-i18n"));
+  });
+  // 按钮文案可能被状态切换，统一由 data-i18n 管理即可；这里再补 pause 态
+  $("btnPause").textContent = T(paused ? "btn_resume" : "btn_pause");
+}
+document.addEventListener("DOMContentLoaded", applyI18n);
 
 /* ---------- SSE 事件流 ---------- */
 function connect() {
@@ -31,7 +42,7 @@ function connect() {
 }
 function setSrv(ok) {
   const b = $("srvstatus");
-  b.textContent = ok ? "已连接" : "连接断开";
+  b.textContent = ok ? T("srv_connected") : T("srv_disconnected");
   b.className = "badge " + (ok ? "on" : "off");
 }
 
@@ -121,11 +132,20 @@ async function refresh() {
   try {
     const r = await fetch("/api/status");
     const s = await r.json();
-    $("cntClient").textContent = s.client_sent;
-    $("cntRouter").textContent = s.router_up;
-    $("cntServer").textContent = s.server_recv;
     $("snClient").textContent = s.sn;
-    // 连接 / 徽标（展示层中文化）
+    // 计数行（字典 fmt，数字高亮）
+    $("rowClientCnt").innerHTML =
+      T("lbl_sent").replace("{n}", `<b class="cnt">${s.client_sent}</b>`);
+    $("rowRouterCnt").innerHTML =
+      T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
+    $("rowServerCnt").innerHTML =
+      T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
+    // STA/AP 模块空口收发（单向上行：STA 发/AP 收增长，反向恒 0 属真实）
+    $("txSTA").textContent = s.tx_sta;
+    $("rxSTA").textContent = s.rx_sta;
+    $("txAP").textContent = s.tx_ap;
+    $("rxAP").textContent = s.rx_ap;
+    // 连接 / 徽标（展示层按字典中文化）
     const setConn = (elId, val) => {
       const el = $(elId);
       el.textContent = connZh(val);
@@ -138,7 +158,7 @@ async function refresh() {
     setConn("chipAP", s.conn_a);
     setConn("chipClient", s.conn_b);
     setConn("chipRouter", s.conn_a);
-    $("chipServer").textContent = s.server_recv > 0 ? "运行" : "监听";
+    $("chipServer").textContent = s.server_recv > 0 ? T("chip_run") : T("chip_listen");
     $("chipServer").className = "chip" + (s.server_recv > 0 ? " ok" : "");
     // 报文流表格（全量真相）
     const rows = (s.reports || []).map(x => ({
@@ -162,7 +182,7 @@ function postCtl(body) {
 $("btnPause").onclick = async () => {
   paused = !paused;
   await postCtl({ action: paused ? "pause" : "resume" });
-  $("btnPause").textContent = paused ? "继续上报" : "暂停上报";
+  $("btnPause").textContent = T(paused ? "btn_resume" : "btn_pause");
 };
 $("btnReset").onclick = () => {
   Object.keys(seenRows).forEach(k => delete seenRows[k]);
@@ -175,6 +195,7 @@ $("btnApply").onclick = async () => {
   await postCtl({ action: "set_sn", sn: $("ctlSn").value || "ORPAH-0001" });
 };
 
+applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，直接应用
 connect();
 setInterval(refresh, 1000);
 refresh();

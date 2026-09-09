@@ -603,9 +603,11 @@ class Wifi:
             # host 数据口（DATA_RX 语义）：把收到的帧推给已连接 host（如 orpah Router）
             if self.core.hostport is not None:
                 self.core.hostport.push(p)
+            # 帧计数：凡命中本机的数据帧都计（hostport 模式 rx_queue 无人取、堆满 4 会
+            # 停计 → 计数放到队列判定外；rx_queue 仅供进程内 take_rx 读，仍保 4 上限）
+            self.rx_pkts += 1
             if len(self.rx_queue) < 4:
                 self.rx_queue.append(p)
-                self.rx_pkts += 1
 
     # ---------------- 周期轮询 ----------------
     def poll(self):

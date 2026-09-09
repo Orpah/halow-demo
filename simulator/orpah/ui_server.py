@@ -179,6 +179,13 @@ class OrpahApp:
     def status(self):
         conn_a = self.cores[0].wifi.conn_str() if self.cores else "-"
         conn_b = self.cores[1].wifi.conn_str() if len(self.cores) > 1 else "-"
+        # 模块空口数据帧计数：wifi.tx_pkts/rx_pkts 只计 DATA 帧（不含 beacon/关联帧），
+        # 反映真实数据面。coreA=AP(Router 侧)、coreB=STA(Client 侧)；单向上行 → STA 发/
+        # AP 收增长，反向恒 0（真实）。
+        tx_ap = self.cores[0].wifi.tx_pkts if self.cores else 0
+        rx_ap = self.cores[0].wifi.rx_pkts if self.cores else 0
+        tx_sta = self.cores[1].wifi.tx_pkts if len(self.cores) > 1 else 0
+        rx_sta = self.cores[1].wifi.rx_pkts if len(self.cores) > 1 else 0
         rows = []
         for seq in self.order:
             r = self.reports[seq]
@@ -192,6 +199,8 @@ class OrpahApp:
             "client_sent": self.client_sent,
             "router_up": self.router_up,
             "server_recv": self.server_recv,
+            "tx_sta": tx_sta, "rx_sta": rx_sta,
+            "tx_ap": tx_ap, "rx_ap": rx_ap,
             "conn_a": conn_a, "conn_b": conn_b,
             "sn": self.client.sn if self.client else "-",
             "every": self.every, "paused": self.paused,
@@ -230,6 +239,8 @@ import http.server                                       # noqa: E402
 import socketserver                                      # noqa: E402
 
 STATIC_DIR = os.path.join(HERE, "ui", "static")
+# ui_i18n.js 单一源在 halow-demo 主 UI（simulator/tools/ui/static），这里只读不复制
+TOOLS_STATIC_DIR = os.path.join(HERE, "..", "tools", "ui", "static")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -262,8 +273,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             rel = "index.html"
         p = os.path.join(STATIC_DIR, rel)
         if not os.path.isfile(p):
-            self._send(404, b"not found", "text/plain")
-            return
+            # ui_i18n.js 是单一源共享字典，放在 halow-demo 主 UI（tools/ui/static）：
+            # 两个 UI 引用同一文件，改一处两边生效（避免复制两份不同步）。
+            if rel == "ui_i18n.js":
+                p = os.path.join(TOOLS_STATIC_DIR, "ui_i18n.js")
+            if not os.path.isfile(p):
+                self._send(404, b"not found", "text/plain")
+                return
         ctype = {"html": "text/html", "js": "application/javascript",
                  "css": "text/css", "png": "image/png",
                  "svg": "image/svg+xml"}.get(p.rsplit(".", 1)[-1], "text/plain")

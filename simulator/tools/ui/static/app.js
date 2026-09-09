@@ -219,17 +219,19 @@ function updateStatus(d) {
   }
   // 显示用中文映射：仅前端展示文案；机器值仍是英文（CONNECTED/AP…），
   // 后端逻辑、/api/status、测试等都不受影响（拓扑判定读的是 s.conn 机器值）。
-  const CONN_ZH = { CONNECTED: "已连接", SCANNING: "扫描中", ASSOCIATING: "关联中",
-                    PAIRING: "配对中", OFFLINE: "离线" };
-  const MODE_ZH = { AP: "接入点", STA: "客户端", APSTA: "双模", GROUP: "组网" };
+  // 文案统一来自共享字典 ui_i18n.js（OrpahI18n，zh/en 单一源），改一处全 UI 生效。
+  const tOr = (prefix, val, fb) => {      // 字典取词；无该键（返回 key 自身）→ 回退
+    const k = prefix + val, s = OrpahI18n.t(k);
+    return (s === k) ? fb : s;
+  };
   const connCls = { CONNECTED: "ok", SCANNING: "scan", ASSOCIATING: "scan",
                     PAIRING: "pair" }[s.conn] || "";
-  $(`conn${d}`).textContent = CONN_ZH[s.conn] || s.conn || "离线";
+  $(`conn${d}`).textContent = tOr("conn_", s.conn, s.conn || "离线");
   $(`conn${d}`).className = "conn " + connCls;
-  const powTxt = { on: "开机", off: "关机" }[s.power];
+  const powTxt = tOr("pow_", s.power, null);
   $(`pow${d}`).textContent = powTxt || "--";
   $(`pow${d}`).className = "chip pow " + (s.power === "on" ? "ok" : "off");
-  $(`mode${d}`).textContent = MODE_ZH[s.mode] || s.mode || "--";
+  $(`mode${d}`).textContent = tOr("mode_", s.mode, s.mode || "--");
   $(`type${d}`).textContent = s.type || "--";
   // 端口行：串口号 + 固件版本合并成一行（如 “COM6 v2.4.1.3-39777, app:0”）
   $(`port${d}`).textContent = (s.port || "--") + (s.version ? " " + s.version : "");
