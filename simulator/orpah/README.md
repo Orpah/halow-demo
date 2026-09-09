@@ -1,10 +1,10 @@
-# ORPAH-over-HaLow L1 Demo（纯 PC，无硬件）
+# ORPAH-over-HaLow L1/L2 Demo（纯 PC，无硬件）
 
-> 在 halow-demo 内、基于 PC 模拟器（`host/sim.py`）实现的 ORPAH **L1 数据通路最小
-> 骨架**。目标（SPEC §9 L1）：证明「HaLow STA 关联 AP 后能把一个 payload 上行到
-> 奥帕 Server」。成熟后再抽离独立 `orpah-demo` 仓库。
+> 在 halow-demo 内、基于 PC 模拟器（`host/sim.py`）实现的 ORPAH-over-HaLow 原型。
+> L1 = 数据通路最小骨架（SPEC §9 L1）；L2 = 全消息流 + 走失表 + 跟踪状态（§9 L2，
+> 已含双向 Server→Client 下行）。成熟后再抽离独立 `orpah-demo` 仓库。
 
-## 一图流
+## 一图流（L1 数据通路）
 
 ```
 [Client host]  --注入以太网帧-->  [STA 模块]  --HaLow 虚拟空口-->  [AP 模块]  --host口-->  [Router 桥]  --UDP-->  [Server]
@@ -12,16 +12,18 @@
                 JSON→0x88B5帧
 ```
 
+L2 在其上加**下行**（Router 的 host 口连接双向）：Server UDP 应答 → Router 注入
+AP 空口 → STA 模块收 → host 口推给 Client。
+
 | 角色 | 真实形态 | 本 Demo 形态 |
 |---|---|---|
 | Client | 免电池可穿戴：TX-AH(STA) + CH32V203(host/SPI 数据面) | `client.py` + STA 模拟器 |
 | Router | TH-RJ45：AP + RJ45 网口上行 | `router.py` + AP 模拟器（host 口 = 网口上行） |
-| Server | 云端/本地 Python | `server.py`（真实 UDP socket） |
+| Server | 云端/本地 Python | `server.py`（真实 UDP socket + 权威走失库） |
 | 链路 | 802.11ah 空口 | 模拟器「虚拟空口」（TCP，帧格式同固件 sim_link） |
 
-## L1 做什么 / 不做什么
+## L1 做什么
 
-**做**：
 - Client 周期生成 `ORPAH-REPORT`（JSON），封装成以太网帧（ethertype `0x88B5`
   ORPAH-L1 实验类型，见 `Protocol/docs/orpah-over-halow/SPEC.md` §5/§6 倾向 A），
   经 host 数据口注入 STA 模块。
@@ -29,8 +31,23 @@
 - Router 桥剥出 ORPAH JSON，用**真实 UDP** 转发到 Server 固定端口（默认 `19447`）。
 - Server 收到即打印 = **L1 验收：payload(JSON) 从 STA 上行到 Python Server**。
 
-**不做（L2+）**：`ORPAH-REQ-CONNECT` / `ACCESS-INFO` / `TRACKING-STATUS` 回程、
-走失表、多 Router 选路/去重、IMEI 15 位校验、免电池真硬件。
+## L2 做什么（2026-09-09 已实现）
+
+- **报文全集**（`orpah_proto.py`，统一 JSON 公共头 `v/type/sn/ts`）：
+  `ORPAH-REQ-CONNECT`(C→R) / `ORPAH-ACCESS-INFO`(R→C, 含 tracked/server_ok) /
+  `ORPAH-REPORT`(C→R→S) / `ORPAH-TRACKING-STATUS`(S→R→C) / `ORPAH-ERROR` /
+  `ORPAH-LOST-TABLE`(S→R)。
+- **双向时序**（对齐 SPEC §4）：
+  1. REQ-CONNECT (C→R) → Router 查本地走失缓存 → ACCESS-INFO (R→C, tracked?)
+  2. REPORT (C→R) → Router UDP 转发 → Server 查权威走失库 → TRACKING-STATUS
+     (S→R，命中=TRACKED / 未命中=NOT-TRACKED) → Router 注入空口下行 → Client 收到
+  3. Server `mark_tracked/untrack` → 下发 LOST-TABLE → Router 更新缓存 →
+     下一周期 REQ-CONNECT 的 ACCESS-INFO.tracked 随之变化
+- **验收**：`demo_l2.py`（两分支都 PASS：未命中 NOT-TRACKED / mark 后 TRACKED）。
+- UI 已加「L2 协议消息流」面板 + 走失表标记/取消按钮。
+
+**L2 不做（留后续）**：多 Router 选路/去重、IMEI 15 位校验、Router 主动从 Server
+拉取 LOST-TABLE（当前 Server 主动推）、免电池真硬件。
 
 ## 快速开始（零硬件）
 
@@ -90,14 +107,16 @@ simulator/
 │                         #   语义 = SPI MACBUS DATA_TX/DATA_RX；帧格式同空口
 │                         #   AA 55 TYPE LEN CRC payload；收帧进 rx_queue 的同时推给 host
 └── orpah/
-    ├── orpah_proto.py    # ORPAH 常量、REPORT JSON 编解码、以太网帧封装
+    ├── orpah_proto.py    # ORPAH 常量、L1/L2 报文编解码（REQ-CONNECT/ACCESS-INFO/
+    │                     #   REPORT/TRACKING-STATUS/ERROR/LOST-TABLE）、以太网帧封装
     ├── host_bus.py       # host 数据口驱动（只依赖 TCP+帧格式，不 import sim）
-    ├── client.py         # Client host：注入 ORPAH-REPORT
-    ├── router.py         # Router 桥：AP host 口收帧 → UDP 转发 Server
-    ├── server.py         # Server：UDP 收 ORPAH-REPORT
+    ├── client.py         # Client host：双向（REQ-CONNECT→REPORT + 收下行回执）
+    ├── router.py         # Router 桥：双向（上行转发 + 下行注入；走失缓存）
+    ├── server.py         # Server：权威走失库 + UDP 应答/TRACKING-STATUS/LOST-TABLE
     ├── ui_server.py      # Web UI：内嵌整条链路 + HTTP/SSE（方式 1）
     ├── ui/static/        # 前端 index.html / style.css / app.js
-    └── demo_l1.py        # 端到端演示 + 验收（内嵌 2 模拟器，命令行）
+    ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）
+    └── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
 ```
 
 ### sim.py host 数据口（本次给模拟器加的最小扩展）
@@ -112,22 +131,27 @@ simulator/
 AA 55 TYPE(0x01) LEN_H LEN_L CRC-8/ATM(poly 0x07) payload(=以太网帧 ≥14B)
 ```
 
-## 报文（L1：仅上行 ORPAH-REPORT）
+## 报文（L1/L2，统一 JSON 公共头 v/type/sn?/ts）
 
+L1 上行示例：
 ```json
-{"v":1,"type":"ORPAH-REPORT","sn":"ORPAH-DEMO-0001","ts":1788961894,"rssi":-55,"seq":1}
+{"v":1,"type":"ORPAH-REPORT","sn":"ORPAH-0001","ts":1788961894,"rssi":-55,"seq":1}
 ```
+L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,tracked,server_ok,status?}、
+`ORPAH-TRACKING-STATUS`{sn,status:TRACKED|NOT-TRACKED|...}、`ORPAH-ERROR`{code}、
+`ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}。
 - `sn`：被追踪设备序列号（F-01 待定：将来可换 15 位 IMEI）。
-- `seq`：Client 侧递增序号（后续去重/LOST-TABLE 用）。
+- `seq`：Client 侧递增序号（去重用）。
 
-## 验收标准（L1）
+## 验收标准
 
 1. 模拟器原 24 项回归不受影响（`python host/run_tests.py` 仍 24/24）。
-2. `demo_l1.py --n 3`：Server 收到 3 条、sn 一致 → PASS。
-   = 「HaLow STA 关联 AP 后 payload 上行到 Server」达成。
+2. L1：`demo_l1.py --n 3` → Server 收到 3 条、sn 一致 → PASS。
+3. L2：`demo_l2.py` → 双向打通（Client 收到 ACCESS-INFO + TRACKING-STATUS）且两分支
+   正确（未 mark → NOT-TRACKED；mark 后 → ACCESS-INFO.tracked=True + TRACKED）→ PASS。
 
-## 下一步（L2，另开任务）
+## 下一步（L3+）
 
-- 报文子集 + 走失表 + 跟踪状态（Server→Router→Client 回程），对齐 SPEC §4 时序。
+- 多 Router 选路/去重、IMEI 15 位校验、Router 主动拉取 LOST-TABLE、F-03..F-08 细化。
 - 跨固件最终形态（TH-RJ45 V2.4-WNB Router ↔ TX-AH V2.4-FMAC Client）真机数据面
   迁移（host 数据口语义已对齐 SPI MACBUS，可平滑替换底层）。

@@ -5,12 +5,22 @@
 
 ## 0. ORPAH demo（2026-09-09 起，`simulator/orpah/`）
 
-- 定位：在 halow-demo 内做 ORPAH-over-HaLow 的 L1 原型（成熟后抽 orpah-demo）。
-  L1 = 数据通路最小骨架：Client(STA) 上行 payload 到 Python Server（纯 PC，无硬件）。
+- 定位：在 halow-demo 内做 ORPAH-over-HaLow 的 L1/L2 原型（成熟后抽 orpah-demo）。
+  L1 = 数据通路最小骨架（Client 上行 payload 到 Server）；L2 = 全消息流 + 走失表 +
+  跟踪状态（SPEC §9，纯 PC 无硬件）。
 - 分层（对齐 `Protocol/docs/orpah-over-halow/SPEC.md`）：链路 = 以太网帧(ethertype
   `0x88B5`) 经模拟器二层桥透传；Router→Server 段用真实 UDP。角色：Client=`client.py`+STA
   模拟器、Router=`router.py`+AP 模拟器、Server=`server.py`(UDP `19447`)。
-- 运行：`python orpah/demo_l1.py --n 3`（内嵌 2 模拟器端到端验收，PASS=Server 收到 N 条）。
+- **L2 已实现（2026-09-09）**：`orpah_proto.py` 全套报文（REQ-CONNECT/ACCESS-INFO/
+  REPORT/TRACKING-STATUS/ERROR/LOST-TABLE，统一 JSON 公共头 v/type/sn/ts）。**双向打通**
+  （Server→Router UDP 应答→注入 AP 空口→STA→Client host 口）：`router.py` 双向桥
+  （REQ-CONNECT 查本地缓存回 ACCESS-INFO / REPORT UDP 转发 / 收 Server LOST-TABLE 更新
+  缓存 / 下行注入空口）；`server.py` **权威走失库**（mark_tracked/untrack → 下发
+  LOST-TABLE；收 REPORT → 校验+查库 → 回 TRACKING-STATUS）；`client.py` 双向会话
+  （REQ-CONNECT→ACCESS-INFO→REPORT→TRACKING-STATUS）。**验收：`demo_l2.py`**（两分支
+  未命中 NOT-TRACKED / mark 后 TRACKED，PASS）。UI 加「L2 协议消息流」面板 + 走失表
+  标记/取消按钮。
+- 运行：`python orpah/demo_l1.py --n 3`（L1 验收）、`python orpah/demo_l2.py`（L2 验收）。
   单独跑见 `orpah/README.md`。
 - **`host/sim.py` 新增「host 数据口」**（`--host <port>` / `Core(host_port=)`，缺省不启用）：
   语义 = SPI MACBUS `DATA_TX`(host 注入→空口转发) / `DATA_RX`(收帧推 host)；帧格式同空口
@@ -18,7 +28,8 @@
 - 涉及本 demo 的公共改动只有 `sim.py` 的 HostPort（可选）；orpah 各进程不 import sim
   （`orpah/host_bus.py` 独立实现同帧格式，将来换真实 SPI 只替换底层收发）。
 - **UI：`python orpah/ui_server.py`（浏览器 http://127.0.0.1:8901/，VS Code 任务
-  `orpah-ui`）**——内嵌整条链路自动周期上报，页面三层拓扑 + ORPAH-REPORT 实时报文流。
+  `orpah-ui`）**——内嵌整条链路自动周期会话（REQ-CONNECT→REPORT），页面三层拓扑 +
+  ORPAH-REPORT 实时报文流 + L2 协议消息流（方向↑↓/报文/sn/状态/节点）+ 走失表控制。
   两 UI 启动任务（`orpah-ui` / `sim-server-host-sim|tj45|hc01`）**不带端口参数、直接用
   缺省端口**（orpah=8901、tools=8899），一键即跑不弹窗；想换端口用命令行
   `python ... --port <n>`（后端均支持 `--port`，2026-09-09）。

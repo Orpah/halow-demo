@@ -127,6 +127,33 @@ function setCell(tr, sel, on) {
   td.className = on ? "yes" : "no";
 }
 
+/* ---------- L2：消息流面板 + 走失表 ---------- */
+const MAX_FLOW = 60;
+const FLOW_ZH = { "up": "↑", "down": "↓" };
+
+function renderFlow(flow) {
+  const tbody = $("flowList");
+  tbody.innerHTML = "";
+  flow.slice(0, MAX_FLOW).forEach(e => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${esc(e.t)}</td><td>${FLOW_ZH[e.dir] || esc(e.dir)}</td>` +
+      `<td>${esc(e.type)}</td><td>${esc(e.sn)}</td>` +
+      `<td>${esc(e.status === undefined ? "-" : e.status)}</td>` +
+      `<td>${esc(e.stage || "-")}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderLost(lost) {
+  const state = $("lostState");
+  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  const rec = lost[sn];
+  const tracked = rec && rec.tracked;
+  state.textContent = tracked ? T("lost_yes") : T("lost_no");
+  state.className = "hint" + (tracked ? " lost-yes" : "");
+}
+
 async function refresh() {
   try {
     const r = await fetch("/api/status");
@@ -159,9 +186,14 @@ async function refresh() {
       ...x, tm: new Date((x.ts || 0) * 1000).toTimeString().slice(0, 8),
     }));
     renderRows(rows);
+    // L2：消息流面板 + 走失表状态
+    renderFlow(s.flow || []);
+    renderLost(s.lost || {});
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;
+    if (!document.activeElement || document.activeElement.id !== "lostSn")
+      $("lostSn").value = s.sn;
   } catch (e) { /* 服务器未就绪 */ }
 }
 
@@ -187,6 +219,14 @@ $("btnApply").onclick = async () => {
     action: "every", every: parseFloat($("ctlEvery").value) || 2,
   });
   await postCtl({ action: "set_sn", sn: $("ctlSn").value || "ORPAH-0001" });
+};
+$("btnMark").onclick = async () => {
+  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  await postCtl({ action: "mark", sn });
+};
+$("btnUntrack").onclick = async () => {
+  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  await postCtl({ action: "untrack", sn });
 };
 
 applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，直接应用

@@ -69,12 +69,30 @@ class OrpahApp:
         # 最近报文（按 seq 记，stage 点亮；最多 50 条）
         self.reports = {}
         self.order = []
+        # L2 消息流日志（环形，dir=up/down；供前端面板展示）
+        self.flow = []
+        # Server 权威走失表快照（前端展示 + mark/untrack 控制）
+        self.lost = {}
         # 组件
         self.cores = []
         self.srv = None
         self.router = None
         self.client = None
         self.threads = []
+
+    # ---------------- 消息流日志 ----------------
+    def _push_flow(self, dirn, msg, stage=""):
+        """记一条 L2 消息流日志（最多 200 条，新的在前）。"""
+        ent = {
+            "dir": dirn,                 # "up" 上行 / "down" 下行
+            "stage": stage,              # client/router/server（可选）
+            "type": msg.get("type", "?"),
+            "sn": msg.get("sn", "-"),
+            "status": msg.get("status", msg.get("code", msg.get("tracked", "-"))),
+            "t": time.strftime("%H:%M:%S"),
+        }
+        self.flow.insert(0, ent)
+        del self.flow[200:]
 
     # ---------------- 事件（三端回调 → SSE） ----------------
     def _emit(self, stage, msg, **kw):
@@ -93,19 +111,40 @@ class OrpahApp:
                 pass
 
     def _on_sent(self, msg, eth_len):
+        """Client 注入上行（REQ-CONNECT / REPORT）。"""
         self.client_sent += 1
         self._remember(msg, "client")
+        self._push_flow("up", msg, "client")
         self._emit("client", msg, eth_len=eth_len)
 
+    def _on_recv(self, msg):
+        """Client 收到下行（ACCESS-INFO / TRACKING-STATUS / ERROR）。"""
+        self._push_flow("down", msg, "client")
+        # 表无 seq，不点亮三列；发 SSE 供控制台类日志
+        self._emit("log", msg, dir="rx")
+
     def _on_up(self, msg):
+        """Router 上行转发（REPORT → Server）。"""
         self.router_up += 1
         self._remember(msg, "router")
+        self._push_flow("up", msg, "router")
         self._emit("router", msg)
 
+    def _on_down(self, msg):
+        """Router 注入下行（回 Client：ACCESS-INFO/TRACKING-STATUS/ERROR）。"""
+        self._push_flow("down", msg, "router")
+        self._emit("log", msg, dir="tx")
+
     def _on_report(self, msg):
+        """Server 收到 REPORT。"""
         self.server_recv += 1
         self._remember(msg, "server")
+        self._push_flow("up", msg, "server")
         self._emit("server", msg)
+
+    def _on_lost(self, snap):
+        """Server 走失表变更 → 存快照（前端展示）。"""
+        self.lost = snap
 
     def _remember(self, msg, stage):
         seq = msg.get("seq")
@@ -132,20 +171,22 @@ class OrpahApp:
             th.start()
             self.threads.append(th)
 
-        # 2) Server（真实 UDP）
-        self.srv = OrpahServer(port=UDP_SRV, on_report=self._on_report)
+        # 2) Server（真实 UDP，权威走失库）
+        self.srv = OrpahServer(port=UDP_SRV, on_report=self._on_report,
+                               on_lost=self._on_lost)
         self.srv.start()
 
-        # 3) Router 桥（AP host 口 → UDP → Server）
+        # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
         self.router = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV,
-                                   on_up=self._on_up)
+                                   on_up=self._on_up, on_down=self._on_down)
         if not self.router.start():
             print("[ui] Router 连不上 AP host 口，退出")
             return False
 
-        # 4) Client host（周期上报）
+        # 4) Client host（双向会话：注入上行 + 收下行）
         self.client = ClientHost(sta_port=HOST_B, sn=self.sn or "ORPAH-0001",
-                                 rssi=self.rssi, on_sent=self._on_sent)
+                                 rssi=self.rssi, on_sent=self._on_sent,
+                                 on_recv=self._on_recv)
         if not self.client.connect():
             print("[ui] Client 连不上 STA host 口，退出")
             return False
@@ -157,7 +198,7 @@ class OrpahApp:
             time.sleep(0.1)
         print(f"[ui] STA conn = {coreB.wifi.conn_str()}  链路就绪")
 
-        # 6) 上报线程（自动持续）
+        # 6) 会话线程（L2：REQ-CONNECT → REPORT 自动周期）
         th = threading.Thread(target=self._report_loop, daemon=True)
         th.start()
         self.threads.append(th)
@@ -172,6 +213,8 @@ class OrpahApp:
     def _report_loop(self):
         while not self.stop.is_set():
             if not self.paused:
+                self.client.send_req_connect()
+                time.sleep(0.25)
                 self.client.report_once()
             time.sleep(self.every)
 
@@ -205,9 +248,11 @@ class OrpahApp:
             "sn": self.client.sn if self.client else "-",
             "every": self.every, "paused": self.paused,
             "reports": list(reversed(rows)),
+            "flow": list(self.flow),
+            "lost": self.lost,
         }
 
-    def cmd(self, action, sn=None, every=None):
+    def cmd(self, action, sn=None, every=None, note=""):
         if action == "pause":
             self.paused = True
         elif action == "resume":
@@ -217,6 +262,10 @@ class OrpahApp:
                 self.client.sn = sn
         elif action == "every" and every and every > 0:
             self.every = float(every)
+        elif action == "mark" and sn and self.srv:
+            self.srv.mark_tracked(sn, note=note or "ui")
+        elif action == "untrack" and sn and self.srv:
+            self.srv.untrack(sn)
         return {"ok": True}
 
     def stop_all(self):

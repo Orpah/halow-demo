@@ -60,6 +60,30 @@
   </table>
 </section>
 
+<!-- ============ L2 协议消息流 ============ -->
+<section class="card" id="flowsec">
+  <h3 data-i18n="flow_title">L2 协议消息流</h3>
+  <table id="flowTable">
+    <thead><tr>
+      <th data-i18n="th_time">时间</th><th data-i18n="th_dir">方向</th>
+      <th data-i18n="th_mtype">报文</th><th>sn</th>
+      <th data-i18n="th_status">状态</th><th data-i18n="th_node">节点</th>
+    </tr></thead>
+    <tbody id="flowList"></tbody>
+  </table>
+</section>
+
+<!-- ============ 走失表控制 ============ -->
+<section class="card" id="lostsec">
+  <h3 data-i18n="lost_title">走失表（服务器权威）</h3>
+  <div class="config-row">
+    <label><span data-i18n="ctl_sn">序列号</span> <input id="lostSn" value="ORPAH-0001"></label>
+    <button class="btn" id="btnMark" data-i18n="btn_mark">标记为走失</button>
+    <button class="btn" id="btnUntrack" data-i18n="btn_untrack">取消走失</button>
+    <span class="hint" id="lostState" data-i18n="lost_none">（空）</span>
+  </div>
+</section>
+
 <!-- ============ 控制 ============ -->
 <section class="card" id="ctlsec">
   <h3 data-i18n="ctl_title">上报控制</h3>
