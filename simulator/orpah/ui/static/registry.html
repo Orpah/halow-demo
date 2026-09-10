@@ -80,6 +80,9 @@
 
 <section class="card">
   <h3>2 · 走失者管理</h3>
+  <div class="toolbar">
+    <input id="pq" placeholder="搜索编号 / 名称 / 备注…" spellcheck="false">
+  </div>
   <table class="reg">
     <thead><tr>
       <th>编号</th><th>名称</th><th>备注</th><th>设备数</th><th>操作</th>
@@ -183,9 +186,16 @@ function render(r) {
     return p ? p.name : pid;
   };
 
-  // 走失者管理表
+  // 走失者管理表（搜索；编辑中暂不过滤，避免编辑行被滤掉后无法保存/取消）
+  const pq = editingPid ? "" : ($("pq").value || "").trim().toLowerCase();
+  const persons = r.persons.filter(p => {
+    if (!pq) return true;
+    return p.pid.toLowerCase().includes(pq) ||
+           (p.name || "").toLowerCase().includes(pq) ||
+           (p.note || "").toLowerCase().includes(pq);
+  });
   const pbody = $("personBody");
-  pbody.innerHTML = r.persons.map(p => {
+  pbody.innerHTML = persons.map(p => {
     const cnt = r.devices.filter(d => d.person_id === p.pid).length;
     if (p.pid === editingPid) {
       return `<tr data-pid="${esc(p.pid)}">
@@ -356,6 +366,7 @@ $("btnBatch").onclick = async () => {
 };
 $("q").oninput = () => render(cache);
 $("fStatus").onchange = () => render(cache);
+$("pq").oninput = () => render(cache);
 
 schedule();
 </script>
