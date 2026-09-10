@@ -30,6 +30,14 @@
   .ev-line { color: var(--mut); font-size: 12px; line-height: 1.6; }
   .devs { font-size: 12px; line-height: 1.6; }
   .hint.err { color: var(--red); }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .toolbar input, .toolbar select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .toolbar input { width: 210px; }
+  .ev-toggle { color: var(--acc); border-color: var(--bd); }
 </style>
 </head>
 <body>
@@ -57,6 +65,16 @@
 
 <section class="card">
   <h3>2 · 案件列表</h3>
+  <div class="toolbar">
+    <input id="cq" placeholder="搜索案件号 / 走失者…" spellcheck="false">
+    <select id="cStatus">
+      <option value="">全部状态</option>
+      <option value="open">走失中</option>
+      <option value="found">已发现</option>
+      <option value="closed">已找回</option>
+      <option value="revoked">已撤销</option>
+    </select>
+  </div>
   <table class="case">
     <thead><tr>
       <th>案件号</th><th>走失者</th><th>状态</th><th>设备</th><th>事件</th><th>操作</th>
@@ -108,6 +126,7 @@ async function api(body) {
 
 let registry = { persons: [], devices: [] };
 let casesData = { cases: [] };
+let expanded = new Set();
 
 function eventLine(e) {
   const label = EV_ZH[e.type] || e.type;
@@ -129,10 +148,31 @@ function render() {
   if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
 
   const tbody = $("caseBody");
-  const cs = casesData.cases || [];
-  $("caseEmpty").style.display = cs.length ? "none" : "";
+  const q = ($("cq").value || "").trim().toLowerCase();
+  const fs = $("cStatus").value;
+  const all = casesData.cases || [];
+  const cs = all.filter(c => {
+    if (fs && c.status !== fs) return false;
+    if (q) {
+      const cid = (c.case_id || "").toLowerCase();
+      const name = (c.person_name || "").toLowerCase();
+      if (!cid.includes(q) && !name.includes(q)) return false;
+    }
+    return true;
+  });
+  const emptyEl = $("caseEmpty");
+  if (!all.length) { emptyEl.textContent = "暂无案件。选择走失者立案。"; emptyEl.style.display = ""; }
+  else if (!cs.length) { emptyEl.textContent = "无匹配案件。"; emptyEl.style.display = ""; }
+  else emptyEl.style.display = "none";
+
   tbody.innerHTML = cs.map(c => {
-    const evs = (c.events || []).slice(-8).map(eventLine).join("<br>");
+    const evs = c.events || [];
+    const isOpen = expanded.has(c.case_id) || evs.length <= 8;
+    const evLines = evs.slice(isOpen ? 0 : -8).map(eventLine).join("<br>");
+    let evHtml = evLines || "—";
+    if (evs.length > 8) {
+      evHtml += `<br><button class="btn sm ev-toggle" data-act="toggle" data-cid="${esc(c.case_id)}">${isOpen ? "收起" : `查看全部（${evs.length} 条）`}</button>`;
+    }
     let ops = "—";
     if (c.status === "open" || c.status === "found") {
       ops = `<button class="btn sm ok" data-act="close" data-outcome="closed">找回（结案）</button>
@@ -146,7 +186,7 @@ function render() {
       <td class="person-name">${esc(c.person_name)}</td>
       <td><span class="badge c-${esc(c.status)}">${CASE_ZH[c.status] || c.status}</span></td>
       <td class="mono devs">${devs}</td>
-      <td class="ev-line">${evs || "—"}</td>
+      <td class="ev-line">${evHtml}</td>
       <td>${ops}</td>
     </tr>`;
   }).join("");
@@ -159,6 +199,13 @@ function render() {
       if (!confirm(`确认「${label}」该案件？名下设备将恢复启用。`)) return;
       await api({ action: "close", case_id: cid, outcome });
       load();
+    };
+  });
+  tbody.querySelectorAll("button[data-act='toggle']").forEach(b => {
+    b.onclick = () => {
+      const cid = b.dataset.cid;
+      if (expanded.has(cid)) expanded.delete(cid); else expanded.add(cid);
+      render();
     };
   });
 }
@@ -185,11 +232,20 @@ $("btnMark").onclick = async () => {
   const pid = $("personSel").value;
   const hint = $("markHint");
   if (!pid) { hint.textContent = "请先选择走失者"; hint.className = "hint err"; return; }
+  const cnt = registry.devices.filter(d => d.person_id === pid).length;
+  if (cnt === 0) {
+    hint.textContent = "该走失者名下无绑定设备，无法立案（请先在设备清册绑定设备）";
+    hint.className = "hint err";
+    return;
+  }
   hint.textContent = ""; hint.className = "hint";
   const r = await api({ action: "mark", person_id: pid });
   if (r.ok && r.dup) alert("该走失者已有未结案件");
   load();
 };
+
+$("cq").oninput = () => render();
+$("cStatus").onchange = () => render();
 
 schedule();
 </script>
