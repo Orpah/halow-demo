@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>走失案件 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260911c">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  table.case { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  table.case th, table.case td { padding: 6px 10px; text-align: left; font-size: 13px; vertical-align: top; }
+  table.case th { color: var(--mut); font-weight: 400; border-bottom: 1px solid var(--bd); }
+  table.case td { border-bottom: 1px solid #21262d; }
+  .badge { padding: 2px 10px; border-radius: 10px; font-size: 12px; border: 1px solid; display: inline-block; white-space: nowrap; }
+  .c-open { color: var(--red); border-color: var(--red); }
+  .c-found { color: var(--org); border-color: var(--org); }
+  .c-closed { color: var(--grn); border-color: var(--grn); }
+  .c-revoked { color: var(--mut); border-color: var(--mut); }
+  .person-name { font-weight: 600; }
+  .btn.sm { padding: 2px 8px; font-size: 12px; margin: 1px 0; }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .btn.ok { color: var(--grn); border-color: var(--grn); }
+  .ev-line { color: var(--mut); font-size: 12px; line-height: 1.6; }
+  .devs { font-size: 12px; line-height: 1.6; }
+  .hint.err { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
+    <span class="brand-name">走失案件</span>
+    <span class="sub">Orpah ID · 以人为单位：立案 → 发现 → 找回/撤销 → 结案</span>
+    <a class="btn back" href="registry.html">设备清册</a>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>1 · 立案</h3>
+  <div class="row">
+    <label>走失者
+      <select id="personSel"><option value="">（选择走失者）</option></select>
+    </label>
+    <button class="btn" id="btnMark">标记走失 / 立案</button>
+    <span class="hint" id="markHint"></span>
+  </div>
+  <p class="hint">立案后：该走失者名下<b>所有设备</b>进入「丢失」态并标记走失；任一台被路由器发现即视为发现该人。</p>
+</section>
+
+<section class="card">
+  <h3>2 · 案件列表</h3>
+  <table class="case">
+    <thead><tr>
+      <th>案件号</th><th>走失者</th><th>状态</th><th>设备</th><th>事件</th><th>操作</th>
+    </tr></thead>
+    <tbody id="caseBody"></tbody>
+  </table>
+  <p class="hint" id="caseEmpty">暂无案件。选择走失者立案。</p>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const CASE_ZH = { open: "走失中", found: "已发现", closed: "已找回", revoked: "已撤销" };
+const EV_ZH = { mark: "立案", found: "发现", close: "结案" };
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function fmtT(ts) {
+  if (ts === null || ts === undefined) return "—";
+  const d = new Date(ts * 1000);
+  const p = n => String(n).padStart(2, "0");
+  const mmdd = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const dayDiff = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (dayDiff <= 0) return hms;
+  if (dayDiff === 1) return `${mmdd} ${hms} · 昨天`;
+  return `${mmdd} ${hms} · ${dayDiff}天前`;
+}
+async function api(body) {
+  let r;
+  try {
+    const resp = await fetch("/api/cases", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    r = await resp.json();
+  } catch (e) {
+    console.error("cases:", e);
+    alert("操作失败：无法连接服务器，请检查网络/服务是否在线");
+    return { ok: false };
+  }
+  if (!r.ok) {
+    console.error("cases:", r.err);
+    alert("操作失败：" + (r.err || "未知错误"));
+  }
+  return r;
+}
+
+let registry = { persons: [], devices: [] };
+let casesData = { cases: [] };
+
+function eventLine(e) {
+  const label = EV_ZH[e.type] || e.type;
+  if (e.type === "mark") return `${fmtT(e.t)} · ${label}（设备 ${esc(e.sn)}）`;
+  if (e.type === "found") return `${fmtT(e.t)} · ${label} SN ${esc(e.sn)}${e.detail ? " · " + esc(e.detail) : ""}`;
+  if (e.type === "close") return `${fmtT(e.t)} · ${label}（${e.detail === "revoked" ? "撤销" : "找回"}，设备 ${esc(e.sn)}）`;
+  return `${fmtT(e.t)} · ${label} ${esc(e.sn || "")}`;
+}
+
+function render() {
+  // 立案下拉（含设备数）
+  const sel = $("personSel");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">（选择走失者）</option>' +
+    registry.persons.map(p => {
+      const cnt = registry.devices.filter(d => d.person_id === p.pid).length;
+      return `<option value="${esc(p.pid)}">${esc(p.name)}（${cnt} 台设备）</option>`;
+    }).join("");
+  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+
+  const tbody = $("caseBody");
+  const cs = casesData.cases || [];
+  $("caseEmpty").style.display = cs.length ? "none" : "";
+  tbody.innerHTML = cs.map(c => {
+    const evs = (c.events || []).slice(-8).map(eventLine).join("<br>");
+    let ops = "—";
+    if (c.status === "open" || c.status === "found") {
+      ops = `<button class="btn sm ok" data-act="close" data-outcome="closed">找回（结案）</button>
+             <button class="btn sm danger" data-act="close" data-outcome="revoked">撤销（误报）</button>`;
+    } else {
+      ops = `<span class="ev-line">${c.outcome === "revoked" ? "误报撤销" : "已找回"} · ${fmtT(c.closed_at)}</span>`;
+    }
+    const devs = (c.devices || []).map(s => esc(s)).join("<br>") || "—";
+    return `<tr data-cid="${esc(c.case_id)}">
+      <td class="mono">${esc(c.case_id)}</td>
+      <td class="person-name">${esc(c.person_name)}</td>
+      <td><span class="badge c-${esc(c.status)}">${CASE_ZH[c.status] || c.status}</span></td>
+      <td class="mono devs">${devs}</td>
+      <td class="ev-line">${evs || "—"}</td>
+      <td>${ops}</td>
+    </tr>`;
+  }).join("");
+
+  tbody.querySelectorAll("button[data-act='close']").forEach(b => {
+    b.onclick = async () => {
+      const cid = b.closest("tr").dataset.cid;
+      const outcome = b.dataset.outcome;
+      const label = outcome === "revoked" ? "撤销误报" : "找回";
+      if (!confirm(`确认「${label}」该案件？名下设备将恢复启用。`)) return;
+      await api({ action: "close", case_id: cid, outcome });
+      load();
+    };
+  });
+}
+
+async function load() {
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch("/api/registry").then(r => r.json()),
+      fetch("/api/cases").then(r => r.json()),
+    ]);
+    if (r1 && r1.persons) registry = r1;
+    if (r2 && r2.cases) casesData = r2;
+    render();
+  } catch (e) {
+    console.error("load failed", e);
+  }
+}
+async function schedule() {
+  await load();
+  setTimeout(schedule, 1000);
+}
+
+$("btnMark").onclick = async () => {
+  const pid = $("personSel").value;
+  const hint = $("markHint");
+  if (!pid) { hint.textContent = "请先选择走失者"; hint.className = "hint err"; return; }
+  hint.textContent = ""; hint.className = "hint";
+  const r = await api({ action: "mark", person_id: pid });
+  if (r.ok && r.dup) alert("该走失者已有未结案件");
+  load();
+};
+
+schedule();
+</script>
+</body>
+</html>

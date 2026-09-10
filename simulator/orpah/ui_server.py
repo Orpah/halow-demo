@@ -46,6 +46,7 @@ from router import RouterBridge           # noqa: E402
 from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
+import cases                              # noqa: E402  走失案件闭环（以人为单位）
 
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
@@ -93,6 +94,8 @@ class OrpahApp:
         self.sig_dev = None
         # 设备清册（P0：SN↔走失者一对多绑定、状态、首/最近见时间）
         self.registry = reg.Registry()
+        # 走失案件闭环（P0：以人为单位的状态机）
+        self.cases = cases.CaseManager()
         self._seed_registry()
         # 组件
         self.cores = []
@@ -109,6 +112,8 @@ class OrpahApp:
         p2 = self.registry.add_person("小红", "演示：走失中（手表）")
         self.registry.register("CN-WH02-5T9V1B4C", person_id=p2, org="WH02", cc="CN",
                                status=reg.STATUS_LOST)
+        # 演示：小红已立案走失（open 案件）
+        self.cases.mark(p2, self.registry)
 
     # ---------------- 消息流日志 ----------------
     def _push_flow(self, dirn, msg, stage=""):
@@ -193,12 +198,18 @@ class OrpahApp:
         self._push_flow("up", msg, "router")
 
     def _on_found_server(self, msg, addr):
-        """Server 收到 ORPAH-FOUND → 消息流记 Server 段 + 发现记录列表。"""
+        """Server 收到 ORPAH-FOUND → 消息流记 Server 段 + 发现记录列表 + 案件联动。"""
         self._push_flow("up", msg, "server")
         rec = {"t": time.strftime("%H:%M:%S"), "sn": msg.get("sn", "-")}
         self.founds.insert(0, rec)
         del self.founds[20:]
         self._emit("found", rec)
+        # 走失案件：任一台设备被 Router 发现 → 该人案件进入「已发现」
+        c = self.cases.on_found(msg.get("sn", "-"), self.registry,
+                                detail=f"router {addr[0]}:{addr[1]}")
+        if c is not None:
+            self._emit("case", {"case_id": c.case_id, "status": c.status,
+                                "sn": msg.get("sn", "-")})
 
     def _remember(self, msg, stage):
         seq = msg.get("seq")
@@ -232,6 +243,12 @@ class OrpahApp:
                                keystore=self.id_ks, id_nonces=self.id_used,
                                on_id_report=self._on_id_report)
         self.srv.start()
+
+        # 2.5) 已立案案件名下设备同步进权威走失表（种子案件等）
+        for c in self.cases.cases.values():
+            if c.status in (cases.CASE_OPEN, cases.CASE_FOUND):
+                for d in self.registry.devices_of(c.person_id):
+                    self.srv.mark_tracked(d.sn, note=f"case:{c.case_id}")
 
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
         self.router = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV,
@@ -436,6 +453,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/registry":
             self._send(200, json.dumps(APP.registry.to_dict()).encode())
             return
+        if self.path == "/api/cases":
+            self._send(200, json.dumps(APP.cases.to_dict(APP.registry)).encode())
+            return
         if self.path == "/api/events":
             self._sse()
             return
@@ -524,6 +544,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
+    def _api_cases(self):
+        """走失案件：mark 立案 / close 结案（找回或撤销）。"""
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+            return
+        action = req.get("action")
+        try:
+            if action == "mark":
+                c, sns, dup = APP.cases.mark(req.get("person_id", ""), APP.registry)
+                if c is None:
+                    self._send(200, json.dumps({"ok": False,
+                                                "err": "该走失者名下无设备"}).encode())
+                else:
+                    if not dup:
+                        for sn in sns:
+                            if APP.srv:
+                                APP.srv.mark_tracked(sn, note=f"case:{c.case_id}")
+                    self._send(200, json.dumps({"ok": True, "dup": dup,
+                                                "case_id": c.case_id}).encode())
+            elif action == "close":
+                c, sns = APP.cases.close(req.get("case_id", ""), APP.registry,
+                                         req.get("outcome", ""))
+                if c is None:
+                    self._send(200, json.dumps({"ok": False,
+                                                "err": "案件不存在"}).encode())
+                else:
+                    for sn in sns:
+                        if APP.srv:
+                            APP.srv.untrack(sn)
+                    self._send(200, json.dumps({"ok": True}).encode())
+            else:
+                self._send(200, json.dumps({"ok": False,
+                                            "err": f"unknown action: {action}"}).encode())
+        except Exception as e:
+            self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
+
     def _api_sig(self):
         """数字签名工具：newkey 生成临时密钥对；sign 算预像+签名；verify 验签。"""
         try:
@@ -580,6 +639,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         global APP
         if self.path == "/api/registry":
             self._api_registry()
+            return
+        if self.path == "/api/cases":
+            self._api_cases()
             return
         if self.path == "/api/sig":
             self._api_sig()
