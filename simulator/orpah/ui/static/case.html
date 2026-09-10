@@ -38,6 +38,21 @@
   }
   .toolbar input { width: 210px; }
   .ev-toggle { color: var(--acc); border-color: var(--bd); }
+  .row input {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .presults { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .pitem {
+    display: flex; gap: 8px; align-items: center;
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .pitem .pdev { color: var(--mut); font-size: 12px; }
+  .pitem.sel { border-color: var(--acc); color: var(--acc); }
+  .pitem:hover { border-color: var(--acc); }
 </style>
 </head>
 <body>
@@ -54,13 +69,15 @@
 <section class="card">
   <h3>1 · 立案</h3>
   <div class="row">
-    <label>走失者
-      <select id="personSel"><option value="">（选择走失者）</option></select>
-    </label>
+    <label>人员 <input id="personQ" placeholder="搜索编号 / 名称…" spellcheck="false"></label>
+    <span class="hint" id="personSel">未选择人员</span>
+  </div>
+  <div class="presults" id="personResults"></div>
+  <div class="row" style="margin-top:8px">
     <button class="btn" id="btnMark">标记走失 / 立案</button>
     <span class="hint" id="markHint"></span>
   </div>
-  <p class="hint">立案后：该走失者名下<b>所有设备</b>进入「丢失」态并标记走失；任一台被路由器发现即视为发现该人。</p>
+  <p class="hint">立案后：该人员名下<b>所有设备</b>进入「丢失」态并标记走失；任一台被路由器发现即视为发现该人。</p>
 </section>
 
 <section class="card">
@@ -127,6 +144,36 @@ async function api(body) {
 let registry = { persons: [], devices: [] };
 let casesData = { cases: [] };
 let expanded = new Set();
+let selectedPid = null;
+
+function updateSel() {
+  const p = registry.persons.find(x => x.pid === selectedPid);
+  $("personSel").textContent = p ? `已选：${p.name}（${p.pid}）` : "未选择人员";
+}
+
+function renderPersonResults() {
+  updateSel();
+  const q = ($("personQ").value || "").trim().toLowerCase();
+  const box = $("personResults");
+  if (!q) { box.innerHTML = ""; return; }
+  const hits = registry.persons.filter(p =>
+    p.pid.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q)
+  ).slice(0, 20);
+  box.innerHTML = hits.length
+    ? hits.map(p => {
+        const cnt = registry.devices.filter(d => d.person_id === p.pid).length;
+        const cls = p.pid === selectedPid ? "pitem sel" : "pitem";
+        return `<button class="${cls}" data-pid="${esc(p.pid)}">
+          <span class="person-name">${esc(p.name)}</span>
+          <span class="mono">${esc(p.pid)}</span>
+          <span class="pdev">${cnt} 台设备</span>
+        </button>`;
+      }).join("")
+    : '<span class="hint">无匹配人员</span>';
+  box.querySelectorAll("button[data-pid]").forEach(b => {
+    b.onclick = () => { selectedPid = b.dataset.pid; renderPersonResults(); };
+  });
+}
 
 function eventLine(e) {
   const label = EV_ZH[e.type] || e.type;
@@ -137,15 +184,8 @@ function eventLine(e) {
 }
 
 function render() {
-  // 立案下拉（含设备数）
-  const sel = $("personSel");
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">（选择走失者）</option>' +
-    registry.persons.map(p => {
-      const cnt = registry.devices.filter(d => d.person_id === p.pid).length;
-      return `<option value="${esc(p.pid)}">${esc(p.name)}（${cnt} 台设备）</option>`;
-    }).join("");
-  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+  // 人员搜索 + 选中展示
+  renderPersonResults();
 
   const tbody = $("caseBody");
   const q = ($("cq").value || "").trim().toLowerCase();
@@ -161,7 +201,7 @@ function render() {
     return true;
   });
   const emptyEl = $("caseEmpty");
-  if (!all.length) { emptyEl.textContent = "暂无案件。选择走失者立案。"; emptyEl.style.display = ""; }
+  if (!all.length) { emptyEl.textContent = "暂无案件。搜索并选择人员立案。"; emptyEl.style.display = ""; }
   else if (!cs.length) { emptyEl.textContent = "无匹配案件。"; emptyEl.style.display = ""; }
   else emptyEl.style.display = "none";
 
@@ -229,23 +269,24 @@ async function schedule() {
 }
 
 $("btnMark").onclick = async () => {
-  const pid = $("personSel").value;
+  const pid = selectedPid;
   const hint = $("markHint");
-  if (!pid) { hint.textContent = "请先选择走失者"; hint.className = "hint err"; return; }
+  if (!pid) { hint.textContent = "请先搜索并选择人员"; hint.className = "hint err"; return; }
   const cnt = registry.devices.filter(d => d.person_id === pid).length;
   if (cnt === 0) {
-    hint.textContent = "该走失者名下无绑定设备，无法立案（请先在设备清册绑定设备）";
+    hint.textContent = "该人员名下无绑定设备，无法立案（请先在设备清册绑定设备）";
     hint.className = "hint err";
     return;
   }
   hint.textContent = ""; hint.className = "hint";
   const r = await api({ action: "mark", person_id: pid });
-  if (r.ok && r.dup) alert("该走失者已有未结案件");
+  if (r.ok && r.dup) alert("该人员已有未结案件");
   load();
 };
 
 $("cq").oninput = () => render();
 $("cStatus").onchange = () => render();
+$("personQ").oninput = () => renderPersonResults();
 
 schedule();
 </script>
