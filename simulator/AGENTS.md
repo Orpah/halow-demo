@@ -39,8 +39,10 @@
      的 check 函数输入一律是 ORG-UNIQUE（或 ORG-UNIQUE-CHECK），不含 CC；
   ③ **所有文档与代码样例的 CC 只用 `CN`（中国）**，不使用其它国家——测试向量、黄金样本、
      UI 默认值、自检输出统一 `CN`（黄金样本 `WH01-9AF3C1D2 → B`，整串 `CN-WH01-9AF3C1D2-B`）；
-  ④ Damm32 工具页（`ui/static/damm32.html`）：校验位计算器放页面最顶端，CC 用下拉框
-     （`<datalist>`）+ 支持直接输入 + 提示。
+  ④ 工具页：`ui/static/damm32.html`（Damm32 构造/验证，计算器在最顶端）+
+     `ui/static/checksum.html`（SN 校验码工具，Damm32/Luhn32/Mod97 三 tab，主页入口
+     「校验码工具」）；CC 用下拉框（`<datalist>`）+ 支持直接输入 + 提示，CC 输入框回车
+     跳 ORG-UNIQUE、右侧实时显示国名、ORG-UNIQUE 自动大写。
 
 ## 0b. 编码约定（2026-09-09）：仓库文本一律 UTF-8
 

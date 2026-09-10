@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SN 校验码工具 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260910c">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .tabs { display: flex; gap: 6px; margin: 10px 0 14px; }
+  .tab {
+    background: #21262d; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 13px;
+  }
+  .tab:hover { background: #30363d; }
+  .tab.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .io { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .io input {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 6px 10px; font-size: 14px; width: 260px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    text-transform: uppercase;
+  }
+  .io input.cc { width: 70px; }
+  .cc-name { color: var(--txt); font-size: 14px; font-weight: 600; margin-left: 8px; }
+  .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
+  .demo-result { font-size: 12px; color: var(--txt); white-space: pre-line; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-name">SN 校验码工具</span>
+    <span class="sub">Orpah ID · CHECK 校验位计算（CC=CN，校验位只算 ORG-UNIQUE）</span>
+    <a class="btn back" href="damm32.html">Damm32 构造</a>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>校验位计算器</h3>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-algo="damm32">Damm32（1 位）</button>
+    <button class="tab" data-algo="luhn32">Luhn32（1 位）</button>
+    <button class="tab" data-algo="mod97">Mod97（2 位）</button>
+  </div>
+  <div class="io">
+    <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"><span class="cc-name" id="ccName">中国</span></label>
+    <datalist id="ccList">
+      <option value="CN">中国</option>
+      <option value="US">美国</option>
+      <option value="JP">日本</option>
+      <option value="GB">英国</option>
+      <option value="DE">德国</option>
+      <option value="FR">法国</option>
+      <option value="RU">俄罗斯</option>
+      <option value="KR">韩国</option>
+      <option value="AU">澳大利亚</option>
+      <option value="CA">加拿大</option>
+      <option value="IN">印度</option>
+      <option value="BR">巴西</option>
+      <option value="MX">墨西哥</option>
+      <option value="IT">意大利</option>
+      <option value="ES">西班牙</option>
+      <option value="NL">荷兰</option>
+      <option value="SE">瑞典</option>
+      <option value="CH">瑞士</option>
+      <option value="NO">挪威</option>
+      <option value="DK">丹麦</option>
+      <option value="FI">芬兰</option>
+      <option value="AT">奥地利</option>
+      <option value="BE">比利时</option>
+      <option value="PT">葡萄牙</option>
+      <option value="IE">爱尔兰</option>
+      <option value="NZ">新西兰</option>
+      <option value="SG">新加坡</option>
+      <option value="TW">中国台湾</option>
+      <option value="HK">中国香港</option>
+      <option value="MO">中国澳门</option>
+    </datalist>
+    <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
+      <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
+    <div class="out">
+      <div>校验位：<b id="checkOut">-</b></div>
+      <div>整串：<code id="fullOut">-</code></div>
+      <div>校验：<b id="verifyOut">-</b></div>
+    </div>
+  </div>
+  <div class="config-row" style="margin-top:12px">
+    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
+    <span class="hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
+    <span class="mono demo-result" id="demoResult"></span>
+  </div>
+  <p class="hint" id="algoNote"></p>
+</section>
+
+<script>
+"use strict";
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
+const POLY = 0x23;   // p(t) = t^5 + t + 1
+
+// ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
+const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
+  "FR":"法国","RU":"俄罗斯","KR":"韩国","AU":"澳大利亚","CA":"加拿大","IN":"印度",
+  "BR":"巴西","MX":"墨西哥","IT":"意大利","ES":"西班牙","NL":"荷兰","SE":"瑞典",
+  "CH":"瑞士","NO":"挪威","DK":"丹麦","FI":"芬兰","AT":"奥地利","BE":"比利时",
+  "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
+  "HK":"中国香港","MO":"中国澳门" };
+
+/* ---- Damm32：拟群 T[x][y] = 2·(x⊕y)，GF(2^5)、p(t)=t^5+t+1 ---- */
+function gfMul(a, b) {
+  let r = 0;
+  for (let i = 0; i < 5; i++) {
+    if (b & 1) r ^= a;
+    b >>= 1;
+    a <<= 1;
+    if (a & 0x20) a ^= POLY;
+  }
+  return r & 0x1F;
+}
+const T = (function buildTable() {
+  const t = [];
+  for (let x = 0; x < 32; x++) {
+    const row = [];
+    for (let y = 0; y < 32; y++) row.push(gfMul(2, x ^ y));
+    t.push(row);
+  }
+  return t;
+})();
+function damm32CheckDigit(digits) {
+  let s = 0;
+  for (const d of digits) s = T[s][d];
+  return T[s].indexOf(0);
+}
+function damm32Validate(digits) {
+  let s = 0;
+  for (const d of digits) s = T[s][d];
+  return s === 0;
+}
+
+/* ---- Luhn mod 32：从右往左隔位翻倍，模 32 ---- */
+function luhnSum(digits) {
+  let s = 0, dbl = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    const d = digits[i];
+    if (dbl) { const d2 = d * 2; s += Math.floor(d2 / 32) + (d2 % 32); }
+    else s += d;
+    dbl = !dbl;
+  }
+  return s;
+}
+function luhn32CheckDigit(digits) {
+  for (let c = 0; c < 32; c++)
+    if (luhnSum(digits.concat([c])) % 32 === 0) return c;
+  return 0;  // 理论不可达
+}
+function luhn32Validate(digits) { return luhnSum(digits) % 32 === 0; }
+
+/* ---- Mod 97（IBAN 思路）：字母 A=10..Z=35、数字 0-9 ---- */
+function mod97(s) {
+  let r = 0;
+  for (const ch of s) {
+    if (ch === "-") continue;
+    const c = ch.charCodeAt(0);
+    if (ch >= "0" && ch <= "9") r = (r * 10 + (c - 48)) % 97;
+    else if (ch >= "A" && ch <= "Z") r = (r * 100 + (c - 55)) % 97;
+  }
+  return r;
+}
+function mod97Check(s) {
+  return String(98 - mod97(s + "00")).padStart(2, "0");
+}
+function mod97Validate(s) { return mod97(s) === 1; }
+
+/* ---- 通用 ---- */
+function digitsOf(s) {
+  const out = [];
+  for (const ch of s) {
+    if (ch === "-") continue;
+    const u = ch.toUpperCase();
+    if (!(u in CI)) return null;
+    out.push(CI[u]);
+  }
+  return out;
+}
+
+const ALGO_NOTE = {
+  damm32: "Damm32：拟群 T[x][y] = 2·(x⊕y)（GF(2⁵)、p(t)=t⁵+t+1），检出所有单字符替换 + 相邻换位。构造与性质验证见「Damm32 构造」页。",
+  luhn32: "Luhn mod 32：从右往左隔位翻倍，和模 32 为 0。实现简单，检出大部分单错与换位。",
+  mod97: "Mod 97（IBAN 思路）：字母 A=10..Z=35、数字 0-9，整体取模 97；输出两位十进制（00–96）。"
+};
+let activeAlgo = "damm32";
+
+function compute(org) {
+  const d = digitsOf(org);
+  if (!d || d.length === 0) return null;
+  if (activeAlgo === "damm32") {
+    const c = damm32CheckDigit(d);
+    return { check: CROCKFORD[c], digits: d, ok: damm32Validate(d.concat([c])) };
+  }
+  if (activeAlgo === "luhn32") {
+    const c = luhn32CheckDigit(d);
+    return { check: CROCKFORD[c], digits: d, ok: luhn32Validate(d.concat([c])) };
+  }
+  const check = mod97Check(org);
+  return { check, digits: d, ok: mod97Validate(org + "-" + check) };
+}
+
+function refresh() {
+  const cc = document.getElementById("ccInput").value.trim().toUpperCase();
+  const org = document.getElementById("orgUnique").value.trim().toUpperCase();
+  document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
+  const out = document.getElementById("checkOut"),
+        full = document.getElementById("fullOut"),
+        ver = document.getElementById("verifyOut");
+  const r = compute(org);
+  if (!r) {
+    out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
+    return;
+  }
+  out.textContent = r.check;
+  full.textContent = cc + "-" + org + "-" + r.check;
+  ver.textContent = r.ok ? "✓ 通过" : "✗ 失败";
+  ver.className = r.ok ? "ok" : "bad";
+}
+
+/* ---- 单字符替换演示（改 ORG-UNIQUE 末位） ---- */
+document.getElementById("btnDemo").addEventListener("click", () => {
+  const cc = document.getElementById("ccInput").value.trim().toUpperCase();
+  const org = document.getElementById("orgUnique").value.trim().toUpperCase();
+  const r = compute(org);
+  const out = document.getElementById("demoResult");
+  if (!r) { out.textContent = "非法输入"; return; }
+  const flipped = CROCKFORD[(r.digits[r.digits.length - 1] + 1) % 32];
+  const badOrg = org.slice(0, -1) + flipped;
+  const badD = digitsOf(badOrg);
+  let badOk;
+  if (activeAlgo === "damm32") badOk = damm32Validate(badD.concat([damm32CheckDigit(r.digits)]));
+  else if (activeAlgo === "luhn32") badOk = luhn32Validate(badD.concat([luhn32CheckDigit(r.digits)]));
+  else badOk = mod97Validate(badOrg + "-" + r.check);
+  out.textContent =
+    `原始  ${cc}-${org}-${r.check}   → 校验 ${r.ok ? "通过" : "失败"}\n` +
+    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+});
+
+/* ---- tab 切换 ---- */
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".tab");
+  if (!btn) return;
+  activeAlgo = btn.dataset.algo;
+  document.querySelectorAll("#tabs .tab").forEach(t => t.classList.toggle("active", t === btn));
+  document.getElementById("algoNote").textContent = ALGO_NOTE[activeAlgo];
+  document.getElementById("demoResult").textContent = "";
+  refresh();
+});
+
+document.getElementById("orgUnique").addEventListener("input", refresh);
+document.getElementById("ccInput").addEventListener("input", refresh);
+document.getElementById("ccInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("orgUnique").focus();
+  }
+});
+
+document.getElementById("algoNote").textContent = ALGO_NOTE.damm32;
+refresh();
+</script>
+</body>
+</html>
