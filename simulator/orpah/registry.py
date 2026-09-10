@@ -45,13 +45,17 @@ STATUS_ZH = {
 class Person:
     """走失者/被保护对象（可挂多个客户端）。"""
 
-    def __init__(self, pid, name, note=""):
+    def __init__(self, pid, name, note="", gender="", age="", photo=""):
         self.pid = pid
         self.name = name
         self.note = note
+        self.gender = gender
+        self.age = age
+        self.photo = photo
 
     def to_dict(self):
-        return {"pid": self.pid, "name": self.name, "note": self.note}
+        return {"pid": self.pid, "name": self.name, "note": self.note,
+                "gender": self.gender, "age": self.age, "photo": self.photo}
 
 
 class DeviceRecord:
@@ -84,10 +88,10 @@ class Registry:
         self._pid_seq = 0
 
     # ---- 走失者 ----
-    def add_person(self, name, note=""):
+    def add_person(self, name, note="", gender="", age="", photo=""):
         self._pid_seq += 1
         pid = f"P{self._pid_seq:03d}"
-        self.persons[pid] = Person(pid, name, note)
+        self.persons[pid] = Person(pid, name, note, gender, age, photo)
         return pid
 
     # ---- 设备 ----
@@ -148,8 +152,8 @@ class Registry:
             return True
         return False
 
-    def update_person(self, pid, name=None, note=None):
-        """编辑走失者名称/备注。"""
+    def update_person(self, pid, name=None, note=None, gender=None, age=None, photo=None):
+        """编辑走失者名称/备注/性别/年龄/照片。"""
         p = self.persons.get(pid)
         if p is None:
             raise KeyError(f"未知 pid: {pid}")
@@ -157,6 +161,12 @@ class Registry:
             p.name = name.strip()
         if note is not None:
             p.note = note
+        if gender is not None:
+            p.gender = gender
+        if age is not None:
+            p.age = age
+        if photo is not None:
+            p.photo = photo
         return p
 
     def remove_person(self, pid):

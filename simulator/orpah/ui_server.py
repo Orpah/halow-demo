@@ -106,10 +106,12 @@ class OrpahApp:
 
     def _seed_registry(self):
         """演示种子：一个走失者绑多台客户端（项链/鞋），另一走失者一台已丢失。"""
-        p1 = self.registry.add_person("小明", "演示：被保护对象（项链 + 鞋）")
+        p1 = self.registry.add_person("小明", "演示：被保护对象（项链 + 鞋）",
+                                      gender="男", age="7")
         self.registry.register("CN-WH01-9AF3C1D2", person_id=p1, org="WH01", cc="CN")
         self.registry.register("CN-WH01-8K3M2P7Q", person_id=p1, org="WH01", cc="CN")
-        p2 = self.registry.add_person("小红", "演示：走失中（手表）")
+        p2 = self.registry.add_person("小红", "演示：走失中（手表）",
+                                      gender="女", age="6")
         self.registry.register("CN-WH02-5T9V1B4C", person_id=p2, org="WH02", cc="CN",
                                status=reg.STATUS_LOST)
         # 演示：小红已立案走失（open 案件）
@@ -515,7 +517,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         action = req.get("action")
         try:
             if action == "add_person":
-                pid = APP.registry.add_person(req.get("name", ""), req.get("note", ""))
+                pid = APP.registry.add_person(req.get("name", ""), req.get("note", ""),
+                                              req.get("gender", ""), req.get("age", ""),
+                                              req.get("photo", ""))
                 self._send(200, json.dumps({"ok": True, "pid": pid}).encode())
             elif action == "add_device":
                 APP.registry.register(req.get("sn", ""),
@@ -527,7 +531,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "update_person":
                 APP.registry.update_person(req.get("pid", ""),
-                                           req.get("name"), req.get("note"))
+                                           req.get("name"), req.get("note"),
+                                           req.get("gender"), req.get("age"),
+                                           req.get("photo"))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "remove_person":
                 pid = req.get("pid", "")

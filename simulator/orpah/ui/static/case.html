@@ -53,6 +53,9 @@
   .pitem .pdev { color: var(--mut); font-size: 12px; }
   .pitem.sel { border-color: var(--acc); color: var(--acc); }
   .pitem:hover { border-color: var(--acc); }
+  .pavatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #30363d; }
+  .pavatar.noimg { display: flex; align-items: center; justify-content: center; color: var(--txt); font-size: 13px; }
+  .pmeta { color: var(--mut); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -163,9 +166,15 @@ function renderPersonResults() {
     ? hits.map(p => {
         const cnt = registry.devices.filter(d => d.person_id === p.pid).length;
         const cls = p.pid === selectedPid ? "pitem sel" : "pitem";
+        const ava = p.photo
+          ? `<img class="pavatar" src="${esc(p.photo)}" alt="">`
+          : `<span class="pavatar noimg">${esc((p.name || "?").charAt(0))}</span>`;
+        const meta = [p.gender, p.age ? `${p.age}岁` : ""].filter(Boolean).join(" · ");
         return `<button class="${cls}" data-pid="${esc(p.pid)}">
+          ${ava}
           <span class="person-name">${esc(p.name)}</span>
           <span class="mono">${esc(p.pid)}</span>
+          <span class="pmeta">${esc(meta || "")}</span>
           <span class="pdev">${cnt} 台设备</span>
         </button>`;
       }).join("")

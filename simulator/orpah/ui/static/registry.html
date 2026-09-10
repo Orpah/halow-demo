@@ -17,6 +17,8 @@
   .row input.name { width: 120px; }
   .row input.note { width: 220px; }
   .row input.sn { width: 220px; }
+  .row input.age { width: 60px; }
+  .row input.photo { width: 200px; }
   table.reg { border-collapse: collapse; width: 100%; margin-top: 12px; }
   table.reg th, table.reg td { padding: 6px 10px; text-align: left; font-size: 13px; }
   table.reg th { color: var(--mut); font-weight: 400; border-bottom: 1px solid var(--bd); }
@@ -64,9 +66,18 @@
 <section class="card">
   <h3>1 · 登记</h3>
   <div class="row">
-    <label>走失者 <input class="name" id="personName" placeholder="姓名/对象"></label>
+    <label>姓名 <input class="name" id="personName" placeholder="姓名"></label>
+    <label>性别
+      <select id="personGender">
+        <option value="">未知</option>
+        <option value="男">男</option>
+        <option value="女">女</option>
+      </select>
+    </label>
+    <label>年龄 <input class="age" id="personAge" placeholder="岁"></label>
+    <label>照片URL <input class="photo" id="personPhoto" placeholder="http…（可空）"></label>
     <label>备注 <input class="note" id="personNote" placeholder="备注"></label>
-    <button class="btn" id="btnAddPerson">添加走失者</button>
+    <button class="btn" id="btnAddPerson">添加人员</button>
   </div>
   <div class="row" style="margin-top:8px">
     <label>SN <input class="sn" id="deviceSn" placeholder="CN-WH01-XXXXXXXX" spellcheck="false"></label>
@@ -85,7 +96,7 @@
   </div>
   <table class="reg">
     <thead><tr>
-      <th>编号</th><th>名称</th><th>备注</th><th>设备数</th><th>操作</th>
+      <th>编号</th><th>名称</th><th>性别</th><th>年龄</th><th>备注</th><th>设备数</th><th>操作</th>
     </tr></thead>
     <tbody id="personBody"></tbody>
   </table>
@@ -201,6 +212,8 @@ function render(r) {
       return `<tr data-pid="${esc(p.pid)}">
         <td class="mono">${esc(p.pid)}</td>
         <td><input class="edit-name" value="${esc(p.name)}"></td>
+        <td>${esc(p.gender || "—")}</td>
+        <td>${esc(p.age || "—")}</td>
         <td><input class="edit-note" value="${esc(p.note || "")}"></td>
         <td>${cnt}</td>
         <td>
@@ -212,6 +225,8 @@ function render(r) {
     return `<tr data-pid="${esc(p.pid)}">
       <td class="mono">${esc(p.pid)}</td>
       <td class="person-name">${esc(p.name)}</td>
+      <td>${esc(p.gender || "—")}</td>
+      <td>${esc(p.age || "—")}</td>
       <td class="note-cell">${esc(p.note || "—")}</td>
       <td>${cnt}</td>
       <td>
@@ -337,8 +352,11 @@ async function schedule() {
 $("btnAddPerson").onclick = async () => {
   const name = $("personName").value.trim();
   if (!name) return;
-  await api({ action: "add_person", name, note: $("personNote").value.trim() });
+  await api({ action: "add_person", name, note: $("personNote").value.trim(),
+              gender: $("personGender").value, age: $("personAge").value.trim(),
+              photo: $("personPhoto").value.trim() });
   $("personName").value = ""; $("personNote").value = "";
+  $("personGender").value = ""; $("personAge").value = ""; $("personPhoto").value = "";
   load();
 };
 $("btnAddDevice").onclick = async () => {
