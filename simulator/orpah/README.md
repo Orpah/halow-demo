@@ -96,6 +96,20 @@ Router 主动拉表已在 **L3b** 落地（见下）。
 - 与下链语义区分：逐条 TRACKING-STATUS 回执属响应不计数；**发现（ORPAH-FOUND）与走失表
   下发（发布/收到）是业务事件**，单独计数/展示。
 
+## Orpah ID 层（2026-09-10 已实现，`orpah_id.py` + `demo_id.py`）
+
+- **定位**：落实《Orpah ID 协议规范》（`Protocol/docs/OrpahIDProtocol.md` v1.12）的
+  **身份与真实性层**——SN 码号 + CHECK 校验 + 数字签名 + 防重放。**独立成层**，
+  不改动上面 L1–L4 的 ORPAH-REPORT 等业务报文。
+- `orpah_id.py`：Crockford Base32 编解码 / SN 生成·解析·校验（`CC-ORG-UNIQUE[-CHECK]`）/
+  CHECK（Mod 97 两位 + Luhn mod 32 一位；Damm32 待 Phase 2 表定稿）/
+  JCS(RFC 8785) 规范化 / 报文签名（ES256=ECDSA P-256、HS256=HMAC-SHA256、none）/
+  server 验签（§9.3：alg 白名单、时间窗口含 ts=0 跳过、nonce 去重、CHECK、撤销、密钥检索）/
+  router `xport` 附加观测（不参与验签）。
+- 依赖 `cryptography`（ES256/HS256 需要；缺失时仅 L3 none 可用）。
+- **验收**：`python demo_id.py`（22 用例：四级降级签名验签 + 篡改/重放/超窗/坏 CHECK/
+  未知设备/撤销/xport 全 PASS）。
+
 ## 快速开始（零硬件）
 
 ### 方式 1：Web UI（推荐，看得见的 demo）
