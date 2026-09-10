@@ -45,6 +45,7 @@ from server import OrpahServer            # noqa: E402
 from router import RouterBridge           # noqa: E402
 from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
+import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
@@ -90,12 +91,24 @@ class OrpahApp:
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
         # 数字签名工具：临时密钥对（供 /api/sig 演示 ES256/HS256）
         self.sig_dev = None
+        # 设备清册（P0：SN↔走失者一对多绑定、状态、首/最近见时间）
+        self.registry = reg.Registry()
+        self._seed_registry()
         # 组件
         self.cores = []
         self.srv = None
         self.router = None
         self.client = None
         self.threads = []
+
+    def _seed_registry(self):
+        """演示种子：一个走失者绑多台客户端（项链/鞋），另一走失者一台已丢失。"""
+        p1 = self.registry.add_person("小明", "演示：被保护对象（项链 + 鞋）")
+        self.registry.register("CN-WH01-9AF3C1D2", person_id=p1, org="WH01", cc="CN")
+        self.registry.register("CN-WH01-8K3M2P7Q", person_id=p1, org="WH01", cc="CN")
+        p2 = self.registry.add_person("小红", "演示：走失中（手表）")
+        self.registry.register("CN-WH02-5T9V1B4C", person_id=p2, org="WH02", cc="CN",
+                               status=reg.STATUS_LOST)
 
     # ---------------- 消息流日志 ----------------
     def _push_flow(self, dirn, msg, stage=""):
@@ -158,6 +171,9 @@ class OrpahApp:
         self._remember(msg, "server")
         self._push_flow("up", msg, "server")
         self._emit("server", msg)
+        # 设备清册：更新最近见时间
+        if msg.get("sn"):
+            self.registry.touch(msg["sn"])
 
     def _on_lost(self, snap):
         """Server 走失表变更 → 存快照（前端展示）。"""
@@ -301,6 +317,8 @@ class OrpahApp:
         self.id_report_total += 1
         self.id_reports.appendleft(rec)
         self._emit("id_report", rec)
+        if rec.get("sn"):
+            self.registry.touch(rec["sn"])
 
     # ---------------- 控制（前端按钮） ----------------
     def status(self):
@@ -415,6 +433,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self._send(200, json.dumps(APP.status()).encode())
             return
+        if self.path == "/api/registry":
+            self._send(200, json.dumps(APP.registry.to_dict()).encode())
+            return
         if self.path == "/api/events":
             self._sse()
             return
@@ -461,6 +482,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.flush()
         except OSError:
             pass
+
+    def _api_registry(self):
+        """设备清册增删改：add_person / add_device / set_status。"""
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+            return
+        action = req.get("action")
+        try:
+            if action == "add_person":
+                pid = APP.registry.add_person(req.get("name", ""), req.get("note", ""))
+                self._send(200, json.dumps({"ok": True, "pid": pid}).encode())
+            elif action == "add_device":
+                APP.registry.register(req.get("sn", ""),
+                                      person_id=req.get("person_id") or None,
+                                      org=req.get("org", "WH01"), cc=req.get("cc", "CN"))
+                self._send(200, json.dumps({"ok": True}).encode())
+            elif action == "set_status":
+                APP.registry.set_status(req.get("sn", ""), req.get("status", ""))
+                self._send(200, json.dumps({"ok": True}).encode())
+            else:
+                self._send(200, json.dumps({"ok": False,
+                                            "err": f"unknown action: {action}"}).encode())
+        except Exception as e:
+            self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
     def _api_sig(self):
         """数字签名工具：newkey 生成临时密钥对；sign 算预像+签名；verify 验签。"""
@@ -516,6 +564,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         global APP
+        if self.path == "/api/registry":
+            self._api_registry()
+            return
         if self.path == "/api/sig":
             self._api_sig()
             return

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设备清册 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260911a">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row input, .row select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .row input.name { width: 120px; }
+  .row input.note { width: 220px; }
+  .row input.sn { width: 220px; }
+  table.reg { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  table.reg th, table.reg td { padding: 6px 10px; text-align: left; font-size: 13px; }
+  table.reg th { color: var(--mut); font-weight: 400; border-bottom: 1px solid var(--bd); }
+  table.reg td { border-bottom: 1px solid #21262d; }
+  table.reg select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 3px 6px; font-size: 12px;
+  }
+  .badge { padding: 2px 10px; border-radius: 10px; font-size: 12px; border: 1px solid; display: inline-block; }
+  .st-active { color: var(--grn); border-color: var(--grn); }
+  .st-disabled { color: var(--mut); border-color: var(--mut); }
+  .st-lost { color: var(--red); border-color: var(--red); }
+  .st-scrapped { color: #6e7681; border-color: #6e7681; }
+  .person-name { font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-name">设备清册</span>
+    <span class="sub">Orpah ID · 客户端台账（一个走失者可绑多台设备）</span>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>1 · 登记</h3>
+  <div class="row">
+    <label>走失者 <input class="name" id="personName" placeholder="姓名/对象"></label>
+    <label>备注 <input class="note" id="personNote" placeholder="备注"></label>
+    <button class="btn" id="btnAddPerson">添加走失者</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>SN <input class="sn" id="deviceSn" placeholder="CN-WH01-XXXXXXXX" spellcheck="false"></label>
+    <label>绑定到
+      <select id="addPerson"><option value="">（未绑定）</option></select>
+    </label>
+    <button class="btn" id="btnAddDevice">添加/绑定设备</button>
+  </div>
+</section>
+
+<section class="card">
+  <h3>2 · 设备台账</h3>
+  <table class="reg">
+    <thead><tr>
+      <th>SN</th><th>走失者</th><th>组织</th><th>状态</th>
+      <th>首次见</th><th>最近见</th><th>状态操作</th>
+    </tr></thead>
+    <tbody id="deviceBody"></tbody>
+  </table>
+  <p class="hint">一个走失者可绑多台设备（项链/鞋/眼镜…）；未绑定设备列「—」。最近见时间随上报实时刷新。</p>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const STATUSES = ["active", "disabled", "lost", "scrapped"];
+const STATUS_ZH = { active: "启用", disabled: "停用", lost: "丢失", scrapped: "报废" };
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function fmtT(ts) {
+  if (ts === null || ts === undefined) return "—";
+  return new Date(ts * 1000).toTimeString().slice(0, 8);
+}
+async function api(body) {
+  const r = await fetch("/api/registry", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(x => x.json());
+  if (!r.ok) console.error("registry:", r.err);
+  return r;
+}
+
+function render(r) {
+  const sel = $("addPerson");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">（未绑定）</option>' +
+    r.persons.map(p => `<option value="${esc(p.pid)}">${esc(p.name)}</option>`).join("");
+  sel.value = cur;
+
+  const nameOf = (pid) => {
+    const p = r.persons.find(x => x.pid === pid);
+    return p ? p.name : pid;
+  };
+  const tbody = $("deviceBody");
+  tbody.innerHTML = r.devices.map(d => {
+    const name = d.person_id ? nameOf(d.person_id) : "—";
+    const opts = STATUSES.map(s =>
+      `<option value="${s}" ${s === d.status ? "selected" : ""}>${STATUS_ZH[s]}</option>`).join("");
+    return `<tr data-sn="${esc(d.sn)}">
+      <td class="mono">${esc(d.sn)}</td>
+      <td class="person-name">${esc(name)}</td>
+      <td class="mono">${esc(d.cc)}-${esc(d.org)}</td>
+      <td><span class="badge st-${esc(d.status)}">${STATUS_ZH[d.status] || d.status}</span></td>
+      <td class="mono">${fmtT(d.first_seen)}</td>
+      <td class="mono">${fmtT(d.last_seen)}</td>
+      <td><select class="stsel">${opts}</select></td>
+    </tr>`;
+  }).join("");
+
+  tbody.querySelectorAll("select.stsel").forEach(sel => {
+    sel.onchange = async () => {
+      const sn = sel.closest("tr").dataset.sn;
+      await api({ action: "set_status", sn, status: sel.value });
+      load();
+    };
+  });
+}
+
+async function load() {
+  const r = await fetch("/api/registry").then(x => x.json());
+  render(r);
+}
+
+$("btnAddPerson").onclick = async () => {
+  const name = $("personName").value.trim();
+  if (!name) return;
+  await api({ action: "add_person", name, note: $("personNote").value.trim() });
+  $("personName").value = ""; $("personNote").value = "";
+  load();
+};
+$("btnAddDevice").onclick = async () => {
+  const sn = $("deviceSn").value.trim().toUpperCase();
+  if (!sn) return;
+  await api({ action: "add_device", sn, person_id: $("addPerson").value || null });
+  $("deviceSn").value = "";
+  load();
+};
+
+load();
+setInterval(load, 1000);
+</script>
+</body>
+</html>
