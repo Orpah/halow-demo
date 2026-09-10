@@ -88,6 +88,8 @@ class OrpahApp:
         self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
+        # 数字签名工具：临时密钥对（供 /api/sig 演示 ES256/HS256）
+        self.sig_dev = None
         # 组件
         self.cores = []
         self.srv = None
@@ -460,8 +462,63 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    def _api_sig(self):
+        """数字签名工具：newkey 生成临时密钥对；sign 算预像+签名；verify 验签。"""
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+            return
+        action = req.get("action")
+        if action == "newkey":
+            APP.sig_dev = oid.Device(cc="CN", org="WH01", check="mod97")
+            dev = APP.sig_dev
+            self._send(200, json.dumps({
+                "ok": True,
+                "sn": dev.sn,
+                "pubkey_pem": oid.pubkey_to_pem(dev.pubkey) if dev.pubkey else None,
+                "hmac_hex": dev.hmac_key.hex(),
+            }).encode())
+            return
+        dev = APP.sig_dev
+        if dev is None:
+            self._send(200, json.dumps({"ok": False, "err": "请先生成密钥"}).encode())
+            return
+        if action in ("sign", "verify"):
+            alg = req.get("alg", "ES256")
+            hdr, payload = req.get("hdr"), req.get("payload")
+            if not isinstance(hdr, dict) or not isinstance(payload, dict):
+                self._send(200, json.dumps({"ok": False,
+                                            "err": "hdr/payload 必须是 JSON 对象"}).encode())
+                return
+            preimage = oid.preimage_of({"hdr": hdr, "payload": payload})
+            if action == "sign":
+                sig = oid.sign_preimage(alg, preimage, dev)
+                self._send(200, json.dumps({
+                    "ok": True,
+                    "preimage": preimage.decode("utf-8"),
+                    "sig": oid.b64url_encode(sig) if sig is not None else None,
+                }).encode())
+                return
+            sig = req.get("sig")
+            if alg == "ES256":
+                ok = bool(sig) and dev.pubkey is not None and oid._verify_es256(dev.pubkey, preimage, sig)
+            elif alg == "HS256":
+                ok = bool(sig) and oid._verify_hs256(dev.hmac_key, preimage, sig)
+            elif alg == "none":
+                ok = sig is None
+            else:
+                ok = False
+            self._send(200, json.dumps({"ok": True, "verified": ok}).encode())
+            return
+        self._send(200, json.dumps({"ok": False, "err": f"unknown action: {action}"}).encode())
+
     def do_POST(self):
         global APP
+        if self.path == "/api/sig":
+            self._api_sig()
+            return
         if self.path != "/api/ctl":
             self._send(404, b"not found", "text/plain")
             return

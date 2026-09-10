@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>数字签名工具 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260910d">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row label { display: flex; align-items: center; gap: 6px; }
+  .row input, .row select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .row input { width: 90px; }
+  .json-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .json-grid textarea {
+    width: 100%; height: 180px; background: #0d1117; color: var(--txt);
+    border: 1px solid var(--bd); border-radius: 6px; padding: 8px 10px;
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 1.5;
+    resize: vertical; white-space: pre;
+  }
+  .json-grid label .hint { display: block; margin-bottom: 4px; }
+  pre.pem {
+    background: #0d1117; border: 1px solid var(--bd); border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; overflow: auto; max-height: 140px;
+    margin: 8px 0 0;
+  }
+  .kv { margin: 6px 0; }
+  .kv .k { color: var(--mut); }
+  .sigout { background: #0d1117; border: 1px solid var(--bd); border-radius: 6px;
+    padding: 10px 14px; margin: 8px 0; font-size: 12px; line-height: 1.8; }
+  .sigout .k { color: var(--mut); }
+  .sigout code { word-break: break-all; }
+  .ok { color: var(--grn); }
+  .bad { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-name">数字签名工具</span>
+    <span class="sub">Orpah ID · ES256 / HS256 / none 签名与验签（JCS 预像）</span>
+    <a class="btn back" href="checksum.html">校验码工具</a>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>1 · 密钥（临时生成，仅用于演示）</h3>
+  <div class="row">
+    <button class="btn" id="btnKey">生成新密钥</button>
+    <span>SN：<b class="mono" id="sigSn">-</b></span>
+  </div>
+  <div class="kv"><span class="k">ECDSA 公钥（P-256，PEM）：</span></div>
+  <pre class="pem mono" id="sigPub">-</pre>
+  <div class="kv"><span class="k">HMAC 密钥（降级 HS256，hex）：</span> <code class="mono" id="sigHmac">-</code></div>
+  <p class="hint">密钥由后端用 <code>orpah_id.py</code> 真实生成；SN 与公钥在协议中按设备绑定（本页只演示签名原语，不做绑定校验）。</p>
+</section>
+
+<section class="card">
+  <h3>2 · 报文（hdr + payload，可编辑 JSON）</h3>
+  <div class="row">
+    <label>算法 <select id="sigAlg"><option value="ES256">ES256</option><option value="HS256">HS256</option><option value="none">none</option></select></label>
+    <label>level <input id="sigLevel" type="number" value="0" min="0" max="3"></label>
+    <span class="hint">改算法/level 会同步回填到 hdr 的 alg/level 字段。</span>
+  </div>
+  <div class="json-grid">
+    <label><span class="hint">hdr（JSON）</span>
+      <textarea id="sigHdr" spellcheck="false">{"typ":"orpah-id-report","ver":1,"alg":"ES256","level":0}</textarea></label>
+    <label><span class="hint">payload（JSON）</span>
+      <textarea id="sigPayload" spellcheck="false">{"sn":"CN-WH01-9AF3C1D2","ts":1789000000,"rssi":-55}</textarea></label>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn primary" id="btnSign">签名</button>
+    <button class="btn" id="btnVerify">验签</button>
+    <button class="btn" id="btnTamper">演示篡改被检出</button>
+    <span class="hint" id="sigHint"></span>
+  </div>
+</section>
+
+<section class="card">
+  <h3>3 · 结果</h3>
+  <div class="sigout">
+    <div><span class="k">预像（JCS）：</span><code id="sigPreimage">-</code></div>
+    <div><span class="k">签名 sig：</span><code id="sigSig">-</code></div>
+    <div><span class="k">验签：</span><b id="sigResult">-</b></div>
+  </div>
+</section>
+
+<script>
+"use strict";
+async function api(body) {
+  const r = await fetch("/api/sig", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+const $ = (id) => document.getElementById(id);
+
+function hdrObj() { return JSON.parse($("sigHdr").value); }
+function payloadObj() { return JSON.parse($("sigPayload").value); }
+
+function syncHdr() {
+  const h = hdrObj();
+  h.alg = $("sigAlg").value;
+  h.level = parseInt($("sigLevel").value, 10) || 0;
+  $("sigHdr").value = JSON.stringify(h, null, 2);
+}
+
+$("sigAlg").addEventListener("change", syncHdr);
+$("sigLevel").addEventListener("change", syncHdr);
+
+function parseErr() {
+  $("sigHint").textContent = "hdr/payload 不是合法 JSON";
+  $("sigHint").className = "hint bad";
+  return null;
+}
+
+async function newkey() {
+  const r = await api({ action: "newkey" });
+  if (!r.ok) { $("sigHint").textContent = r.err; return; }
+  $("sigSn").textContent = r.sn;
+  $("sigPub").textContent = r.pubkey_pem || "（cryptography 未安装，ES256 不可用）";
+  $("sigHmac").textContent = r.hmac_hex;
+  // payload 的 sn 同步为设备 sn
+  try {
+    const p = payloadObj();
+    p.sn = r.sn;
+    $("sigPayload").value = JSON.stringify(p, null, 2);
+  } catch (e) { /* ignore */ }
+  $("sigHint").textContent = "密钥已生成";
+  $("sigHint").className = "hint";
+}
+
+async function doSign() {
+  let hdr, payload;
+  try { hdr = hdrObj(); payload = payloadObj(); } catch (e) { parseErr(); return; }
+  const r = await api({ action: "sign", alg: $("sigAlg").value, hdr, payload });
+  if (!r.ok) { $("sigHint").textContent = r.err; $("sigHint").className = "hint bad"; return; }
+  $("sigPreimage").textContent = r.preimage;
+  $("sigSig").textContent = r.sig === null ? "（none，无签名）" : r.sig;
+  $("sigResult").textContent = "-";
+  $("sigHint").textContent = "已签名（可点「验签」验证，或「演示篡改」后验签看失败）";
+  $("sigHint").className = "hint";
+}
+
+async function doVerify() {
+  let hdr, payload;
+  try { hdr = hdrObj(); payload = payloadObj(); } catch (e) { parseErr(); return; }
+  const sigText = $("sigSig").textContent;
+  const sig = sigText.startsWith("（") ? null : sigText;
+  const r = await api({ action: "verify", alg: $("sigAlg").value, hdr, payload, sig });
+  if (!r.ok) { $("sigHint").textContent = r.err; $("sigHint").className = "hint bad"; return; }
+  const el = $("sigResult");
+  el.textContent = r.verified ? "✓ 通过" : "✗ 失败";
+  el.className = r.verified ? "ok" : "bad";
+  $("sigHint").textContent = r.verified ? "签名有效" : "签名无效（预像被改动或签名不匹配）";
+  $("sigHint").className = "hint";
+}
+
+async function doTamper() {
+  try {
+    const p = payloadObj();
+    p.ts = (typeof p.ts === "number" ? p.ts : 1789000000) + 1;   // 篡改时间戳
+    $("sigPayload").value = JSON.stringify(p, null, 2);
+  } catch (e) { parseErr(); return; }
+  await doVerify();
+}
+
+$("btnKey").addEventListener("click", newkey);
+$("btnSign").addEventListener("click", doSign);
+$("btnVerify").addEventListener("click", doVerify);
+$("btnTamper").addEventListener("click", doTamper);
+
+newkey();
+</script>
+</body>
+</html>
