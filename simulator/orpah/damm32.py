@@ -115,19 +115,45 @@ def crockford_index(ch):
 
 
 def sn_digits(sn_core):
-    """CC-ORG-UNIQUE 串 → 数字序列（跳过分隔符 '-'，Crockford 索引）。"""
-    return [crockford_index(c) for c in sn_core if c != "-"]
+    """CC-ORG-UNIQUE 串 → 数字序列（跳过分隔符 '-'，Crockford 索引）。
+
+    遇非法字符（含 Crockford 排除的 I/L/O/U）抛 ValueError，而不是静默产出
+    None 再在索引表时抛 TypeError（曾致调用方 500）。
+    """
+    out = []
+    for c in sn_core:
+        if c == "-":
+            continue
+        idx = crockford_index(c)
+        if idx is None:
+            raise ValueError(f"非法 Crockford 字符: {c!r}")
+        out.append(idx)
+    return out
+
+
+# 模块加载时构建一次，damm32_check / damm32_verify 复用（免每次重建 32×32 表）
+_TABLE = build_table()
 
 
 def damm32_check(sn_core):
-    """给 CC-ORG-UNIQUE 算 1 位 Damm32 校验字符（Crockford 字母表）。"""
-    d = check_digit(build_table(), sn_digits(sn_core))
+    """给 CC-ORG-UNIQUE 算 1 位 Damm32 校验字符（Crockford 字母表）。
+
+    含非法字符抛 ValueError（调用方自行处理）。
+    """
+    d = check_digit(_TABLE, sn_digits(sn_core))
     return CROCKFORD[d]
 
 
 def damm32_verify(sn):
-    """校验含 1 位 Damm32 校验码的整串 SN。"""
-    return validate(build_table(), sn_digits(sn))
+    """校验含 1 位 Damm32 校验码的整串 SN。
+
+    含非法字符（I/L/O/U 或非 Crockford 字符）视为校验不通过，返回 False。
+    """
+    try:
+        digits = sn_digits(sn)
+    except ValueError:
+        return False
+    return validate(_TABLE, digits)
 
 
 # ---------------------------------------------------------------------------
