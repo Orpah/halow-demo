@@ -68,30 +68,36 @@ ERR_SERVER = "SERVER-ERR"
 
 
 # ---------------------------------------------------------------------------
-# SN（被追踪设备标识）规则（F-01 定稿 2026-09-10）
+# SN（Orpah ID 码号）规则（对齐《Orpah ID 协议规范》v1.7，2026-09-10）
 # ---------------------------------------------------------------------------
-# 不用真实 IMEI15/Luhn（用户定：不引入 IMEI 结构）。身份 = 自定义 SN，字符集：
-# 中文汉字 + 英文(大小写) + 数字；另保留 '-' 作分隔符，兼容既有示范值
-# （如 ORPAH-0001）。用于 Server 端格式校验（非法 → ERROR code=FORMAT-ERR）。
-SN_MIN_LEN = 1
+# 格式：CC-ORG-UNIQUE[-CHECK]
+#   CC     = ISO 3166-1 alpha-2（A–Z；不套用 Crockford 限制）
+#   ORG    = 2–6 位 Crockford Base32
+#   UNIQUE = 8–16 位 Crockford Base32
+#   CHECK  = 0/1/2 位 Crockford Base32（可选）
+# Crockford Base32：0-9 A-Z（去除易混的 I L O U）。
+# 中文/Unicode（姓名等）不进 SN，放 payload 的业务字段。
+# 用于 Server 端格式校验（非法 → ERROR code=FORMAT-ERR）。
 SN_MAX_LEN = 32
-_SN_RE = re.compile(r"^[0-9A-Za-z\u4e00-\u9fff-]+$")
+_SN_RE = re.compile(
+    r"^[A-Z]{2}-[0-9A-HJKMNP-TV-Z]{2,6}-[0-9A-HJKMNP-TV-Z]{8,16}"
+    r"(-[0-9A-HJKMNP-TV-Z]{1,2})?$")
 
 
 def sn_ok(sn):
-    """SN 是否合法：非空、≤{SN_MAX_LEN} 字符、仅含中/英/数字（与 '-'）。"""
-    return (isinstance(sn, str) and SN_MIN_LEN <= len(sn) <= SN_MAX_LEN
+    """SN 是否合法（Orpah ID：CC-ORG-UNIQUE[-CHECK]，Crockford Base32）。"""
+    return (isinstance(sn, str) and 0 < len(sn) <= SN_MAX_LEN
             and bool(_SN_RE.match(sn)))
 
 
 def sn_err(sn):
-    """SN 校验失败原因；合法返回 None。原因：empty / too-long / bad-charset。"""
+    """SN 校验失败原因；合法返回 None。原因：empty / too-long / bad-format。"""
     if not isinstance(sn, str) or not sn:
         return "empty"
     if len(sn) > SN_MAX_LEN:
         return "too-long"
     if not _SN_RE.match(sn):
-        return "bad-charset"
+        return "bad-format"
     return None
 
 

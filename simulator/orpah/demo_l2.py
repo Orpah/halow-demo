@@ -19,7 +19,7 @@ L2 目标（SPEC §9）：实现报文集子集 + 走失表 + 跟踪状态，端
               mark 后 → tracked=True + TRACKED
   - 每个下行报文都有对应上行触发（REQ-CONNECT/REPORT 计数一致）
 
-运行：python demo_l2.py [--sn ORPAH-DEMO-0001]
+运行：python demo_l2.py [--sn CN-WH01-9AF3C1D2]
 """
 import argparse
 import os
@@ -90,7 +90,7 @@ def wait(pred, secs=5.0, step=0.1):
 
 def main():
     ap = argparse.ArgumentParser(description="ORPAH L2 全消息流演示+验收（纯 PC）")
-    ap.add_argument("--sn", default="ORPAH-DEMO-0001")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2")
     args = ap.parse_args()
     sn = args.sn
 

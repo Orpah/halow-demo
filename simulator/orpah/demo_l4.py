@@ -19,7 +19,7 @@ demo_l4.py — Router 主动拉取 LOST-TABLE 验收（F-03 补充，纯 PC，�
 
 报文：R→S ORPAH-LOST-TABLE-REQ（新增，见 orpah_proto）；Server 回 ORPAH-LOST-TABLE。
 
-运行：python demo_l4.py [--sn 小明2024]
+运行：python demo_l4.py [--sn CN-WH01-9AF3C1D2]
 """
 import argparse
 import os
@@ -88,7 +88,7 @@ def last_access(access):
 
 def main():
     ap = argparse.ArgumentParser(description="ORPAH Router 主动拉表验收（纯 PC）")
-    ap.add_argument("--sn", default="小明2024")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2")
     args = ap.parse_args()
     sn = args.sn
 

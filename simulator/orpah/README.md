@@ -2,7 +2,7 @@
 
 > 在 halow-demo 内、基于 PC 模拟器（`host/sim.py`）实现的 ORPAH-over-HaLow 原型。
 > L1 = 数据通路最小骨架（SPEC §9 L1）；L2 = 全消息流 + 走失表 + 跟踪状态（§9 L2，
-> 已含双向 Server→Client 下行）；L3 = 多 Router 漫游/去重 + SN 中英数字校验
+> 已含双向 Server→Client 下行）；L3 = 多 Router 漫游/去重 + SN 码号校验
 > （SPEC F-04/F-07/F-01）。成熟后再抽离独立 `orpah-demo` 仓库。
 
 ## 一图流（L1 数据通路）
@@ -60,11 +60,11 @@ Router 主动拉表已在 **L3b** 落地（见下）。
   Router 迟到转发同一帧）：不重复计数、不再回 TRACKING-STATUS、且**不把“当前
   Router”切回旧 Router**（防漫游时被迟到重传拽回）。`server.py` 维护 seen 窗口
   （每 sn 最近 256 个 seq，容忍序号重启/回绕）。
-- **F-01 SN 字符集（用户定：不用 IMEI15/Luhn）**：身份 = 自定义 SN，允许**中文
-  汉字 + 英文 + 数字**（另保留 `-` 分隔兼容既有示例）；`orpah_proto.sn_err()`
-  校验（空/超长/非法字符），Server 收 REPORT 时校验，非法 → ERROR
-  `FORMAT-ERR`（msg_text `bad-sn:<原因>`），不计数。demo 默认 `--sn 小明2024`
-  直接演示中文 SN 端到端可达。
+- **F-01 SN 码号（对齐《Orpah ID 协议规范》v1.7）**：SN = **`CC-ORG-UNIQUE[-CHECK]`**
+  （CC=ISO 3166 alpha-2；ORG 2–6 / UNIQUE 8–16 / CHECK 0–2 位，均为 **Crockford Base32**，
+  去 `I L O U`）。`orpah_proto.sn_err()` 校验（empty / too-long / bad-format），Server
+  收 REPORT 时校验，非法 → ERROR `FORMAT-ERR`（msg_text `bad-sn:<原因>`），不计数。
+  **中文/姓名不进 SN**（放 payload 业务字段）；默认 SN = `CN-WH01-9AF3C1D2`。
 - **F-03 补充：新 Router 首报追平**：Server 首次见到一台 Router 上报 → 立即把当前
   走失表全量推给它，避免它在 REQ-CONNECT 时因本地缓存为空误答 NOT-TRACKED。
 - **验收**：`demo_l3.py`（7 项检查全 PASS：两阶段漫游回执归属、双 Router 缓存一致、
@@ -103,7 +103,7 @@ Router 主动拉表已在 **L3b** 落地（见下）。
 ```bash
 cd simulator/orpah
 python ui_server.py                  # 自动开浏览器 http://127.0.0.1:8901/
-# 或：python ui_server.py --every 1.5 --sn ORPAH-0001
+# 或：python ui_server.py --every 1.5 --sn CN-WH01-9AF3C1D2
 ```
 - 内嵌 AP+STA 模拟器 + Router 桥 + Server，Client **自动周期上报**。
 - 页面：精简 3 节点拓扑（客户端 →(空口)→ 路由器 →(UDP)→ 服务器）+ ORPAH-REPORT
@@ -140,7 +140,7 @@ python orpah/router.py --ap-port 9421 --server-port 19447
 ```
 终端 5 — Client（连 STA 的 host 口，周期上报）：
 ```bash
-python orpah/client.py --sta-port 9422 --sn ORPAH-0001 --every 3
+python orpah/client.py --sta-port 9422 --sn CN-WH01-9AF3C1D2 --every 3
 ```
 > 需先让 STA 关联 AP（同一 SSID，默认自动 halowlink@9080；等 `AT+CONN_STATE`=CONNECTED
 > 再开 Client）。可用 `telnet 127.0.0.1 9402` 看状态。
@@ -184,14 +184,14 @@ AA 55 TYPE(0x01) LEN_H LEN_L CRC-8/ATM(poly 0x07) payload(=以太网帧 ≥14B)
 
 L1 上行示例：
 ```json
-{"v":1,"type":"ORPAH-REPORT","sn":"ORPAH-0001","ts":1788961894,"rssi":-55,"seq":1}
+{"v":1,"type":"ORPAH-REPORT","sn":"CN-WH01-9AF3C1D2","ts":1788961894,"rssi":-55,"seq":1}
 ```
 L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,tracked,server_ok,status?}、
 `ORPAH-TRACKING-STATUS`{sn,status:TRACKED|NOT-TRACKED|...}、`ORPAH-ERROR`{code}、
 `ORPAH-LOST-TABLE`{entries:[{sn,tracked,note}]}、`ORPAH-LOST-TABLE-REQ`（R→S，Router
 主动拉表，Server 回当前全量 LOST-TABLE）、`ORPAH-FOUND`（R→S，Router 发现走失，每次命中都发）。
-- `sn`：被追踪设备标识（F-01 定稿：**不用 IMEI15**，自定义 SN 允许中文/英文/数字，
-  可含 `-`；Server 校验非法 → ERROR `FORMAT-ERR`，见 `orpah_proto.sn_err`）。
+- `sn`：被追踪设备标识（Orpah ID 码号 `CC-ORG-UNIQUE[-CHECK]`，Crockford Base32；
+  中文/姓名放 payload；Server 校验非法 → ERROR `FORMAT-ERR`，见 `orpah_proto.sn_err`）。
 - `seq`：Client 侧递增序号（去重用：Server 按 (sn,seq) 丢弃重复上报）。
 
 ## 验收标准

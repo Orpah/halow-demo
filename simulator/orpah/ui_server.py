@@ -12,7 +12,7 @@ ui_server.py — ORPAH-over-HaLow L1 demo Web UI（纯 PC，无硬件）
 - 启动 OrpahServer（UDP 19447）+ RouterBridge + ClientHost（周期自动上报）
 - 浏览器打开即看：三层拓扑 + ORPAH-REPORT 实时报文流 + 三端计数
 
-运行：python ui_server.py [--port 8901] [--every 2] [--sn ORPAH-0001]
+运行：python ui_server.py [--port 8901] [--every 2] [--sn CN-WH01-9AF3C1D2]
 零第三方依赖（仅标准库）。启动后自动打开浏览器 http://127.0.0.1:8901/
 """
 import argparse
@@ -56,7 +56,7 @@ EVENTS = queue.Queue(maxsize=1000)   # SSE 事件（满丢最旧）
 class OrpahApp:
     """装配整条 L1 链路 + 状态/计数（供 UI 轮询）。"""
 
-    def __init__(self, every=2.0, sn="ORPAH-0001", rssi=-55):
+    def __init__(self, every=2.0, sn="CN-WH01-9AF3C1D2", rssi=-55):
         self.every = every
         self.sn = sn
         self.rssi = rssi
@@ -212,7 +212,7 @@ class OrpahApp:
             return False
 
         # 4) Client host（双向会话：注入上行 + 收下行）
-        self.client = ClientHost(sta_port=HOST_B, sn=self.sn or "ORPAH-0001",
+        self.client = ClientHost(sta_port=HOST_B, sn=self.sn or "CN-WH01-9AF3C1D2",
                                  rssi=self.rssi, on_sent=self._on_sent,
                                  on_recv=self._on_recv)
         if not self.client.connect():
@@ -418,7 +418,8 @@ def main():
     ap = argparse.ArgumentParser(description="ORPAH-over-HaLow L1 demo Web UI")
     ap.add_argument("--port", type=int, default=HTTP_PORT)
     ap.add_argument("--every", type=float, default=2.0, help="自动上报间隔秒")
-    ap.add_argument("--sn", default="ORPAH-0001", help="终端序列号/IMEI")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2",
+                    help="终端序列号（Orpah ID：CC-ORG-UNIQUE[-CHECK]）")
     ap.add_argument("--rssi", type=int, default=-55)
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()

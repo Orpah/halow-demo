@@ -13,7 +13,7 @@ TRACKING-STATUS（Router 注入下行，经 STA host 口到达本 Client）。
     client.py --(host 口 双向)--> STA 模块 <--HaLow--> AP 模块(Router)
 
 可独立运行（周期会话），也可被 demo/ui 内嵌（复用 ClientHost 类）：
-    python orpah/client.py --sta-port 9102 --sn TXAH-0001 --every 5
+    python orpah/client.py --sta-port 9102 --sn CN-WH01-9AF3C1D2 --every 5
 """
 import argparse
 import socket
@@ -46,7 +46,7 @@ def log(*a):
 class ClientHost:
     """ORPAH Client host（双向）：向 STA 注入 / 从 STA 收下行。"""
 
-    def __init__(self, sta_port, sn="ORPAH-0001", rssi=-55, mac=None,
+    def __init__(self, sta_port, sn="CN-WH01-9AF3C1D2", rssi=-55, mac=None,
                  sta_host="127.0.0.1", on_sent=None, on_recv=None):
         self.sta = HostBus(host=sta_host, port=sta_port, name="client")
         self.sn = sn
@@ -133,7 +133,8 @@ def main():
     ap = argparse.ArgumentParser(description="ORPAH Client host（双向会话）")
     ap.add_argument("--sta-port", type=int, required=True,
                     help="STA 模块 host 数据口 TCP 端口（sim.py --host）")
-    ap.add_argument("--sn", default="ORPAH-0001", help="终端序列号/IMEI")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2",
+                    help="终端序列号（Orpah ID：CC-ORG-UNIQUE[-CHECK]）")
     ap.add_argument("--rssi", type=int, default=-55, help="注入报文的 rssi")
     ap.add_argument("--every", type=float, default=5.0,
                     help="周期会话秒数（默认 5；<=0 只做一次后退出）")

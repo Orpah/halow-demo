@@ -7,7 +7,7 @@ server.py — ORPAH 奥帕服务器（L1 + L2）
 「一个 payload(JSON) 从 Client(STA) 上行到 Server」。
 
 L2 扩展（SPEC §7/§5）：Server 是**走失表权威**：
-  - 收 REPORT → 校验(格式/解码 + SN 字符集，F-01) → 查走失库 → 回 TRACKING-STATUS
+  - 收 REPORT → 校验(格式/解码 + SN 码号，见《Orpah ID 协议规范》) → 查走失库 → 回 TRACKING-STATUS
     给该 Router（命中=TRACKED+LOG-OK / 未命中=NOT-TRACKED / 校验失败=*ERR）
   - 去重/最新位置（F-04/F-07）：同 (sn,seq) 重复（重传/多 Router 转发同一帧）丢弃
     不重复计数；每次接受新 REPORT 才把该 sn 的「当前 Router」切到上报来源（漫游时
@@ -184,7 +184,7 @@ class OrpahServer:
 
     def _on_report(self, msg, addr):
         sn = msg.get("sn")
-        # 校验 1：SN 字符集（F-01，中/英/数字，见 orpah_proto.sn_err）→ FORMAT-ERR
+        # 校验 1：SN 格式（Orpah ID：CC-ORG-UNIQUE[-CHECK]，见 orpah_proto.sn_err）→ FORMAT-ERR
         reason = sn_err(sn)
         if reason:
             log(f"SN 校验失败 sn={sn!r} ({reason}) -> FORMAT-ERR")
@@ -282,7 +282,7 @@ def main():
     ap = argparse.ArgumentParser(description="ORPAH 奥帕服务器（UDP 收报文 + 走失库）")
     ap.add_argument("--port", type=int, default=ORPAH_UDP_PORT)
     ap.add_argument("--mark", action="append", default=[],
-                    help="启动即标记为走失的 sn（可多次，如 --mark ORPAH-0001）")
+                    help="启动即标记为走失的 sn（可多次，如 --mark CN-WH01-9AF3C1D2）")
     ap.add_argument("--timeout", type=float, default=30,
                     help="空闲退出前秒数（默认 30；<=0 一直跑）")
     args = ap.parse_args()

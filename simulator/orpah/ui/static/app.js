@@ -147,7 +147,7 @@ function renderFlow(flow) {
 
 function renderLost(lost) {
   const state = $("lostState");
-  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";
   const rec = lost[sn];
   const tracked = rec && rec.tracked;
   state.textContent = tracked ? T("lost_yes") : T("lost_no");
@@ -284,14 +284,14 @@ $("btnApply").onclick = async () => {
   await postCtl({
     action: "every", every: parseFloat($("ctlEvery").value) || 2,
   });
-  await postCtl({ action: "set_sn", sn: $("ctlSn").value || "ORPAH-0001" });
+  await postCtl({ action: "set_sn", sn: $("ctlSn").value || "CN-WH01-9AF3C1D2" });
 };
 $("btnMark").onclick = async () => {
-  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";
   await postCtl({ action: "mark", sn });
 };
 $("btnUntrack").onclick = async () => {
-  const sn = $("lostSn").value || $("ctlSn").value || "ORPAH-0001";
+  const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";
   await postCtl({ action: "untrack", sn });
 };
 

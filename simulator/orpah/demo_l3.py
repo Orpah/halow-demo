@@ -13,8 +13,8 @@ demo_l3.py — ORPAH-over-HaLow L3 多 Router 漫游/去重 演示 + 验收（�
   ② 去重（F-04）：同 (sn,seq) 重复（同一 Router 重发、或另一 Router 迟到转发同一
      帧）→ Server 丢弃：不重复计数、不再回 TRACKING-STATUS、且**不把“当前 Router”
      切回旧 Router**（防漫游时被迟到重传拽回）。
-  ③ SN 字符集校验（F-01，2026-09-10 定：不用 IMEI15；身份=中文/英文/数字的自定义
-     SN）：非法 sn（含空格/特殊符号）→ Server 回 ERROR code=FORMAT-ERR（bad-sn:…），
+  ③ SN 格式校验（F-01，对齐《Orpah ID 协议规范》v1.7）：SN = CC-ORG-UNIQUE[-CHECK]
+     非法 sn（如含空格/不合法字符）→ Server 回 ERROR code=FORMAT-ERR（bad-sn:…），
      不计数。
   ④ 新 Router 追平（F-03 补充）：Server 首次见到一台 Router 上报 → 立即把当前走失
      表推给它，避免它在 REQ-CONNECT 时因本地缓存为空误答 NOT-TRACKED。
@@ -23,7 +23,7 @@ demo_l3.py — ORPAH-over-HaLow L3 多 Router 漫游/去重 演示 + 验收（�
     Client(同 sn) --STA1--> R1(AP1) --UDP--> Server
                  └--STA2--> R2(AP2) --UDP--> /      （漫游：先后经 R1、R2）
 
-运行：python demo_l3.py [--sn 小明2024]
+运行：python demo_l3.py [--sn CN-WH01-9AF3C1D2]
 验收断言见文件尾（PASS/FAIL 汇总）。
 """
 import argparse
@@ -111,8 +111,8 @@ def count_tracking(downs):
 
 def main():
     ap = argparse.ArgumentParser(description="ORPAH L3 多 Router 漫游/去重演示+验收")
-    ap.add_argument("--sn", default="小明2024",
-                    help="终端 SN（F-01：中文/英文/数字，默认中文演示）")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2",
+                    help="终端 SN（Orpah ID：CC-ORG-UNIQUE[-CHECK]，Crockford Base32）")
     args = ap.parse_args()
     sn = args.sn
 
@@ -212,9 +212,9 @@ def main():
     print(f"去重丢弃={srv.dup_dropped} · Server 计数 {accepted_before}→{accepted_after}"
           f"（应不变）· 当前 Router 未切回 R1={not_bounced}")
 
-    # ========== 阶段 F：SN 字符集校验（F-01，非法 sn → FORMAT-ERR）==========
+    # ========== 阶段 F：SN 格式校验（F-01，非法 sn → FORMAT-ERR）==========
     print(f"\n--- 阶段F：SN 校验（非法 sn → FORMAT-ERR）---")
-    bad = "bad sn!"                        # 含空格 + 标点 → bad-charset
+    bad = "bad sn!"                        # 含空格 + 标点 → bad-format
     c2.sn = bad
     before_f = srv.count
     c2.report_once()                       # 会带非法 sn 经 R2 → Server 拒

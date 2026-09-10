@@ -58,7 +58,7 @@ def _loop(core, stop):
 def main():
     ap = argparse.ArgumentParser(description="ORPAH L1 端到端演示+验收（纯 PC）")
     ap.add_argument("--n", type=int, default=3, help="上报条数（默认 3）")
-    ap.add_argument("--sn", default="ORPAH-DEMO-0001")
+    ap.add_argument("--sn", default="CN-WH01-9AF3C1D2")
     args = ap.parse_args()
 
     # 1) 两台 PC 模拟器：A=AP(Router) 开 host 口；B=STA(Client) 开 host 口
