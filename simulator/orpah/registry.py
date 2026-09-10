@@ -9,7 +9,23 @@ Orpah ID 的客户端台账：一个「走失者/被保护对象」可绑定多�
 
 纯内存实现（demo 用），后续 P0 审计/告警/案件闭环都挂在这个清册上。
 """
+import re
 import time
+
+# SN 格式（协议 §2：CC-ORG-UNIQUE[-CHECK]；CC=ISO 3166-1 alpha-2，ORG/UNIQUE=Crockford Base32）
+_SN_RE = re.compile(
+    r"^[A-Z]{2}-[0-9A-HJKMNP-TV-Z]{2,6}-[0-9A-HJKMNP-TV-Z]{8,16}"
+    r"(-[0-9A-HJKMNP-TV-Z]{1,2})?$")
+
+
+def parse_sn(sn):
+    """解析 SN → {cc, org, unique, check}；非法返回 None。"""
+    if not isinstance(sn, str) or not _SN_RE.match(sn):
+        return None
+    parts = sn.split("-")
+    return {"cc": parts[0], "org": parts[1],
+            "unique": parts[2], "check": parts[3] if len(parts) == 4 else ""}
+
 
 # 设备状态（生命周期）
 STATUS_ACTIVE = "active"      # 启用
@@ -75,11 +91,19 @@ class Registry:
         return pid
 
     # ---- 设备 ----
-    def register(self, sn, person_id=None, org="WH01", cc="CN",
+    def register(self, sn, person_id=None, org=None, cc=None,
                  status=STATUS_ACTIVE):
-        """登记一台设备；sn 已存在则更新绑定/组织/状态。"""
+        """登记一台设备；sn 已存在则更新绑定/组织/状态。
+
+        org/cc 缺省时从 SN（CC-ORG-UNIQUE）解析，保证「组织」列自动回填。
+        """
         if not sn:
             raise ValueError("sn 不能为空")
+        parsed = parse_sn(sn)
+        if org is None:
+            org = parsed["org"] if parsed else "????"
+        if cc is None:
+            cc = parsed["cc"] if parsed else "??"
         rec = self.devices.get(sn)
         if rec is None:
             rec = DeviceRecord(sn, org, cc, person_id, status)
@@ -107,12 +131,57 @@ class Registry:
         ts = ts if ts is not None else int(time.time())
         rec = self.devices.get(sn)
         if rec is None:
-            rec = DeviceRecord(sn)
+            parsed = parse_sn(sn)
+            rec = DeviceRecord(sn,
+                              org=parsed["org"] if parsed else "????",
+                              cc=parsed["cc"] if parsed else "??")
             self.devices[sn] = rec
         if rec.first_seen is None:
             rec.first_seen = ts
         rec.last_seen = ts
         return rec
+
+    def remove_device(self, sn):
+        """删除设备；存在返回 True。"""
+        if sn in self.devices:
+            del self.devices[sn]
+            return True
+        return False
+
+    def update_person(self, pid, name=None, note=None):
+        """编辑走失者名称/备注。"""
+        p = self.persons.get(pid)
+        if p is None:
+            raise KeyError(f"未知 pid: {pid}")
+        if name is not None and name.strip():
+            p.name = name.strip()
+        if note is not None:
+            p.note = note
+        return p
+
+    def remove_person(self, pid):
+        """删除走失者；其名下设备全部解绑（person_id=None）。返回解绑设备数。"""
+        self.persons.pop(pid, None)
+        n = 0
+        for rec in self.devices.values():
+            if rec.person_id == pid:
+                rec.person_id = None
+                n += 1
+        return n
+
+    def set_statuses(self, sns, status):
+        """批量设置状态；返回 (成功数, 未找到的 sn 列表)。"""
+        if status not in STATUSES:
+            raise ValueError(f"非法状态: {status}")
+        ok, missing = 0, []
+        for sn in sns:
+            rec = self.devices.get(sn)
+            if rec is None:
+                missing.append(sn)
+            else:
+                rec.status = status
+                ok += 1
+        return ok, missing
 
     def devices_of(self, person_id):
         return [r for r in self.devices.values() if r.person_id == person_id]

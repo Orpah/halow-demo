@@ -97,7 +97,18 @@ function renderRows(rows) {
     }
     tr.querySelector(".tm").textContent = r.tm || "";
     tr.querySelector(".sq").textContent = seq;
-    tr.querySelector(".sn").textContent = esc(r.sn || "-");
+    const snCell = tr.querySelector(".sn");
+    snCell.textContent = "";
+    if (r.sn) {
+      const a = document.createElement("a");
+      a.href = "registry.html?sn=" + encodeURIComponent(r.sn);
+      a.textContent = r.sn;
+      a.title = "在设备清册中查看该 SN";
+      a.className = "snlink";
+      snCell.appendChild(a);
+    } else {
+      snCell.textContent = "-";
+    }
     tr.querySelector(".rs").textContent = r.rssi != null ? r.rssi : "-";
     setCell(tr, ".c", r.client);
     setCell(tr, ".r", r.router);

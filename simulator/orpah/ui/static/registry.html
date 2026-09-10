@@ -31,11 +31,30 @@
   .st-lost { color: var(--red); border-color: var(--red); }
   .st-scrapped { color: #6e7681; border-color: #6e7681; }
   .person-name { font-weight: 600; }
+  .note-cell { color: var(--mut); }
+  .btn.sm { padding: 2px 8px; font-size: 12px; }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .toolbar input, .toolbar select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .toolbar input { width: 210px; }
+  tr.hl { background: rgba(88, 166, 255, .10); }
+  .hint.err { color: var(--red); }
+  .edit-name, .edit-note {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 4px; padding: 2px 6px; font-size: 13px; width: 100%;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><span class="brand-name">设备清册</span>
+  <div class="brand">
+    <a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
+    <span class="brand-name">设备清册</span>
     <span class="sub">Orpah ID · 客户端台账（一个走失者可绑多台设备）</span>
     <a class="btn back" href="index.html">← 返回主页</a>
   </div>
@@ -54,15 +73,46 @@
       <select id="addPerson"><option value="">（未绑定）</option></select>
     </label>
     <button class="btn" id="btnAddDevice">添加/绑定设备</button>
+    <span class="hint" id="snHint"></span>
   </div>
 </section>
 
 <section class="card">
-  <h3>2 · 设备台账</h3>
+  <h3>2 · 走失者管理</h3>
   <table class="reg">
     <thead><tr>
+      <th>编号</th><th>名称</th><th>备注</th><th>设备数</th><th>操作</th>
+    </tr></thead>
+    <tbody id="personBody"></tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>3 · 设备台账</h3>
+  <div class="toolbar">
+    <input id="q" placeholder="搜索 SN / 走失者…" spellcheck="false">
+    <select id="fStatus">
+      <option value="">全部状态</option>
+      <option value="active">启用</option>
+      <option value="disabled">停用</option>
+      <option value="lost">丢失</option>
+      <option value="scrapped">报废</option>
+    </select>
+    <span style="flex:1"></span>
+    <select id="batchStatus">
+      <option value="">批量操作…</option>
+      <option value="active">批量标记启用</option>
+      <option value="disabled">批量标记停用</option>
+      <option value="lost">批量标记丢失</option>
+      <option value="scrapped">批量标记报废</option>
+    </select>
+    <button class="btn" id="btnBatch">应用</button>
+  </div>
+  <table class="reg">
+    <thead><tr>
+      <th><input type="checkbox" id="chkAll" title="全选"></th>
       <th>SN</th><th>走失者</th><th>组织</th><th>状态</th>
-      <th>首次见</th><th>最近见</th><th>状态操作</th>
+      <th>首次见</th><th>最近见</th><th>状态操作</th><th></th>
     </tr></thead>
     <tbody id="deviceBody"></tbody>
   </table>
@@ -74,40 +124,111 @@
 const $ = (id) => document.getElementById(id);
 const STATUSES = ["active", "disabled", "lost", "scrapped"];
 const STATUS_ZH = { active: "启用", disabled: "停用", lost: "丢失", scrapped: "报废" };
+// 协议 §2：CC-ORG-UNIQUE[-CHECK]（CC=ISO 3166-1 alpha-2；ORG/UNIQUE=Crockford Base32）
+const SN_RE = /^[A-Z]{2}-[0-9A-HJKMNP-TV-Z]{2,6}-[0-9A-HJKMNP-TV-Z]{8,16}(-[0-9A-HJKMNP-TV-Z]{1,2})?$/;
+// index.html 报文流 SN 点进来时定位/高亮该设备
+const URL_SN = new URLSearchParams(location.search).get("sn");
+let scrolled = false;
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 function fmtT(ts) {
   if (ts === null || ts === undefined) return "—";
-  return new Date(ts * 1000).toTimeString().slice(0, 8);
+  const d = new Date(ts * 1000);
+  const p = n => String(n).padStart(2, "0");
+  const mmdd = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const dayDiff = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (dayDiff <= 0) return hms;
+  if (dayDiff === 1) return `${mmdd} ${hms} · 昨天`;
+  return `${mmdd} ${hms} · ${dayDiff}天前`;
 }
 async function api(body) {
-  const r = await fetch("/api/registry", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).then(x => x.json());
-  if (!r.ok) console.error("registry:", r.err);
+  let r;
+  try {
+    const resp = await fetch("/api/registry", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    r = await resp.json();
+  } catch (e) {
+    console.error("registry:", e);
+    alert("操作失败：无法连接服务器，请检查网络/服务是否在线");
+    return { ok: false };
+  }
+  if (!r.ok) {
+    console.error("registry:", r.err);
+    alert("操作失败：" + (r.err || "未知错误"));
+  }
   return r;
 }
 
+let cache = { persons: [], devices: [] };
+let editingPid = null;
+let paused = false;
+
 function render(r) {
+  cache = r;
+  // 绑定下拉（恢复选中）
   const sel = $("addPerson");
   const cur = sel.value;
   sel.innerHTML = '<option value="">（未绑定）</option>' +
     r.persons.map(p => `<option value="${esc(p.pid)}">${esc(p.name)}</option>`).join("");
-  sel.value = cur;
+  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
 
   const nameOf = (pid) => {
     const p = r.persons.find(x => x.pid === pid);
     return p ? p.name : pid;
   };
+
+  // 走失者管理表
+  const pbody = $("personBody");
+  pbody.innerHTML = r.persons.map(p => {
+    const cnt = r.devices.filter(d => d.person_id === p.pid).length;
+    if (p.pid === editingPid) {
+      return `<tr data-pid="${esc(p.pid)}">
+        <td class="mono">${esc(p.pid)}</td>
+        <td><input class="edit-name" value="${esc(p.name)}"></td>
+        <td><input class="edit-note" value="${esc(p.note || "")}"></td>
+        <td>${cnt}</td>
+        <td>
+          <button class="btn sm" data-act="save">保存</button>
+          <button class="btn sm" data-act="cancel">取消</button>
+        </td>
+      </tr>`;
+    }
+    return `<tr data-pid="${esc(p.pid)}">
+      <td class="mono">${esc(p.pid)}</td>
+      <td class="person-name">${esc(p.name)}</td>
+      <td class="note-cell">${esc(p.note || "—")}</td>
+      <td>${cnt}</td>
+      <td>
+        <button class="btn sm" data-act="edit">编辑</button>
+        <button class="btn sm danger" data-act="del">删除</button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  // 设备台账（搜索 + 状态过滤）
+  const q = ($("q").value || "").trim().toLowerCase();
+  const fs = $("fStatus").value;
+  const rows = r.devices.filter(d => {
+    if (fs && d.status !== fs) return false;
+    if (q) {
+      const name = d.person_id ? nameOf(d.person_id) : "";
+      if (!d.sn.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
   const tbody = $("deviceBody");
-  tbody.innerHTML = r.devices.map(d => {
+  tbody.innerHTML = rows.map(d => {
     const name = d.person_id ? nameOf(d.person_id) : "—";
     const opts = STATUSES.map(s =>
       `<option value="${s}" ${s === d.status ? "selected" : ""}>${STATUS_ZH[s]}</option>`).join("");
     return `<tr data-sn="${esc(d.sn)}">
+      <td><input type="checkbox" class="chk" data-sn="${esc(d.sn)}"></td>
       <td class="mono">${esc(d.sn)}</td>
       <td class="person-name">${esc(name)}</td>
       <td class="mono">${esc(d.cc)}-${esc(d.org)}</td>
@@ -115,21 +236,91 @@ function render(r) {
       <td class="mono">${fmtT(d.first_seen)}</td>
       <td class="mono">${fmtT(d.last_seen)}</td>
       <td><select class="stsel">${opts}</select></td>
+      <td><button class="btn sm danger" data-act="del">删除</button></td>
     </tr>`;
   }).join("");
 
-  tbody.querySelectorAll("select.stsel").forEach(sel => {
-    sel.onchange = async () => {
-      const sn = sel.closest("tr").dataset.sn;
-      await api({ action: "set_status", sn, status: sel.value });
+  // 全选联动
+  const checks = [...tbody.querySelectorAll(".chk")];
+  const chkAll = $("chkAll");
+  chkAll.checked = checks.length > 0 && checks.every(c => c.checked);
+  chkAll.onchange = () => checks.forEach(c => c.checked = chkAll.checked);
+
+  // 行内状态切换
+  tbody.querySelectorAll("select.stsel").forEach(s => {
+    s.onchange = async () => {
+      const sn = s.closest("tr").dataset.sn;
+      await api({ action: "set_status", sn, status: s.value });
       load();
     };
   });
+
+  // 删除设备
+  tbody.querySelectorAll("button[data-act='del']").forEach(b => {
+    b.onclick = async () => {
+      const sn = b.closest("tr").dataset.sn;
+      if (!confirm(`删除设备 ${sn}？`)) return;
+      await api({ action: "remove_device", sn });
+      load();
+    };
+  });
+
+  // 编辑 / 删除走失者
+  pbody.querySelectorAll("button[data-act]").forEach(b => {
+    b.onclick = async () => {
+      const tr = b.closest("tr");
+      const pid = tr.dataset.pid;
+      const p = r.persons.find(x => x.pid === pid);
+      const act = b.dataset.act;
+      if (act === "edit") {
+        editingPid = pid;
+        paused = true;
+        render(cache);
+      } else if (act === "save") {
+        const name = tr.querySelector(".edit-name").value.trim();
+        const note = tr.querySelector(".edit-note").value.trim();
+        editingPid = null;
+        paused = false;
+        await api({ action: "update_person", pid, name, note });
+        load();
+      } else if (act === "cancel") {
+        editingPid = null;
+        paused = false;
+        render(cache);
+      } else if (act === "del") {
+        if (!confirm(`删除走失者「${p ? p.name : pid}」？其名下设备将解绑。`)) return;
+        await api({ action: "remove_person", pid });
+        load();
+      }
+    };
+  });
+
+  highlightFromUrl();
+}
+
+function highlightFromUrl() {
+  if (!URL_SN) return;
+  const tr = [...$("deviceBody").children].find(t =>
+    (t.dataset.sn || "").toLowerCase() === URL_SN.toLowerCase());
+  if (tr) {
+    tr.classList.add("hl");
+    if (!scrolled) { tr.scrollIntoView({ block: "center" }); scrolled = true; }
+  }
 }
 
 async function load() {
-  const r = await fetch("/api/registry").then(x => x.json());
-  render(r);
+  try {
+    const resp = await fetch("/api/registry");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const r = await resp.json();
+    if (r && r.devices) render(r);
+  } catch (e) {
+    console.error("load failed", e);
+  }
+}
+async function schedule() {
+  if (!paused) await load();
+  setTimeout(schedule, 1000);
 }
 
 $("btnAddPerson").onclick = async () => {
@@ -141,14 +332,31 @@ $("btnAddPerson").onclick = async () => {
 };
 $("btnAddDevice").onclick = async () => {
   const sn = $("deviceSn").value.trim().toUpperCase();
-  if (!sn) return;
+  const hint = $("snHint");
+  if (!sn) { hint.textContent = "请输入 SN"; hint.className = "hint err"; return; }
+  if (!SN_RE.test(sn)) {
+    hint.textContent = "格式应为 CC-ORG-UNIQUE[-CHECK]，如 CN-WH01-9AF3C1D2";
+    hint.className = "hint err";
+    return;
+  }
+  hint.textContent = ""; hint.className = "hint";
   await api({ action: "add_device", sn, person_id: $("addPerson").value || null });
   $("deviceSn").value = "";
   load();
 };
+$("btnBatch").onclick = async () => {
+  const status = $("batchStatus").value;
+  if (!status) return;
+  const sns = [...document.querySelectorAll("#deviceBody .chk:checked")].map(c => c.dataset.sn);
+  if (!sns.length) { alert("请先勾选要批量操作的设备"); return; }
+  await api({ action: "set_status_many", sns, status });
+  $("batchStatus").value = "";
+  load();
+};
+$("q").oninput = () => render(cache);
+$("fStatus").onchange = () => render(cache);
 
-load();
-setInterval(load, 1000);
+schedule();
 </script>
 </body>
 </html>

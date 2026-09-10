@@ -27,6 +27,8 @@ header {
     0 0 9px 2px rgba(122, 96, 255, .15);
 }
 .brand-name { margin-right: 2px; }
+a.snlink { color: var(--acc); text-decoration: none; }
+a.snlink:hover { text-decoration: underline; }
 .brand .sub { font-size: 12px; color: var(--mut); font-weight: 400; margin-left: 8px; }
 .tools { display: flex; align-items: center; gap: 8px; }
 .badge {

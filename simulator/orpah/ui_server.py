@@ -484,7 +484,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _api_registry(self):
-        """设备清册增删改：add_person / add_device / set_status。"""
+        """设备清册增删改：add_person / add_device / remove_device /
+        update_person / remove_person / set_status / set_status_many。"""
         try:
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n) or b"{}")
@@ -499,10 +500,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif action == "add_device":
                 APP.registry.register(req.get("sn", ""),
                                       person_id=req.get("person_id") or None,
-                                      org=req.get("org", "WH01"), cc=req.get("cc", "CN"))
+                                      org=req.get("org"), cc=req.get("cc"))
+                self._send(200, json.dumps({"ok": True}).encode())
+            elif action == "remove_device":
+                APP.registry.remove_device(req.get("sn", ""))
+                self._send(200, json.dumps({"ok": True}).encode())
+            elif action == "update_person":
+                APP.registry.update_person(req.get("pid", ""),
+                                           req.get("name"), req.get("note"))
+                self._send(200, json.dumps({"ok": True}).encode())
+            elif action == "remove_person":
+                APP.registry.remove_person(req.get("pid", ""))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "set_status":
                 APP.registry.set_status(req.get("sn", ""), req.get("status", ""))
+                self._send(200, json.dumps({"ok": True}).encode())
+            elif action == "set_status_many":
+                APP.registry.set_statuses(req.get("sns", []), req.get("status", ""))
                 self._send(200, json.dumps({"ok": True}).encode())
             else:
                 self._send(200, json.dumps({"ok": False,
