@@ -37,7 +37,7 @@
     font-family: "Cascadia Code", Consolas, monospace;
   }
   .io input.cc { width: 70px; text-transform: uppercase; }
-  .cc-name { color: var(--txt); font-size: 14px; font-weight: 600; min-width: 90px; }
+  .cc-name { color: var(--txt); font-size: 14px; font-weight: 600; margin-left: 8px; }
   .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
   .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
   .demo-grid .k { color: var(--mut); }
@@ -57,7 +57,7 @@
   <h3>1 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
   <div class="io">
     <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
-      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"></label>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"><span class="cc-name" id="ccName">中国</span></label>
     <datalist id="ccList">
       <option value="CN">中国</option>
       <option value="US">美国</option>
@@ -90,7 +90,6 @@
       <option value="HK">中国香港</option>
       <option value="MO">中国澳门</option>
     </datalist>
-    <span class="cc-name" id="ccName">中国</span>
     <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
       <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
     <div class="out">
