@@ -210,6 +210,19 @@ function renderPublishes(publishes) {
   });
 }
 
+function renderId(d) {
+  if (!d || !d.sn) return;
+  $("idSn").textContent = d.sn;
+  $("idAlg").textContent = d.alg || "-";
+  $("idLevel").textContent = d.level != null ? d.level : "-";
+  const t = $("idTrust");
+  const ok = d.accepted;
+  t.textContent = (ok ? T("id_ok") : T("id_bad")) + " · " + T("trust_" + d.trust);
+  t.className = ok ? "ok" : "bad";
+  $("idSig").textContent = d.sig || "-";
+  $("idNonce").textContent = d.nonce || "-";
+}
+
 async function refresh() {
   try {
     const r = await fetch("/api/status");
@@ -255,6 +268,7 @@ async function refresh() {
     renderLost(s.lost || {});
     renderPublishes(s.publishes || []);
     renderFounds(s.founds || []);
+    renderId(s.id_demo || {});
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;

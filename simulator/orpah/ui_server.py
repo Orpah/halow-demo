@@ -43,6 +43,7 @@ import sim                                # noqa: E402
 from server import OrpahServer            # noqa: E402
 from router import RouterBridge           # noqa: E402
 from client import ClientHost             # noqa: E402
+import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
 
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
@@ -78,6 +79,13 @@ class OrpahApp:
         self.publish_total = 0             # 服务器发布走失表总次数（单调累加）
         # 发现记录（Router 命中走失表 → ORPAH-FOUND，最新在前）
         self.founds = []
+        # Orpah ID 层演示（只读展示）：独立设备 + 密钥库 + nonce 缓存
+        self.id_ks = oid.KeyStore()
+        self.id_dev = oid.Device()
+        self.id_ks.register(self.id_dev, model="CH32V203+TX-AH+ATECC608B",
+                            firmware="1.0.3")
+        self.id_used = oid.NonceCache()
+        self.id_demo = {}
         # 组件
         self.cores = []
         self.srv = None
@@ -230,6 +238,7 @@ class OrpahApp:
         th = threading.Thread(target=self._report_loop, daemon=True)
         th.start()
         self.threads.append(th)
+        self._id_tick()          # 立即填充一次，不必等首个周期
         return True
 
     def _loop(self, core):
@@ -244,7 +253,30 @@ class OrpahApp:
                 self.client.send_req_connect()
                 time.sleep(0.25)
                 self.client.report_once()
+                self._id_tick()
             time.sleep(self.every)
+
+    def _id_tick(self):
+        """生成一条真实签名的 orpah-id-report 并验签（只读展示，不参与业务流）。"""
+        try:
+            r = self.id_dev.report(
+                level=0,
+                seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
+                               "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
+                battery_mv=3700, firmware="1.0.3")
+            v = oid.verify_report(r, self.id_ks, used_nonces=self.id_used)
+            self.id_demo = {
+                "t": time.strftime("%H:%M:%S"),
+                "sn": self.id_dev.sn,
+                "alg": r["hdr"]["alg"],
+                "level": r["hdr"]["level"],
+                "trust": v["trust"],
+                "accepted": v["accepted"],
+                "sig": r["sig"][:36] + "…",
+                "nonce": r["payload"]["nonce"],
+            }
+        except Exception as e:  # 无 cryptography 时退化为错误展示
+            self.id_demo = {"t": time.strftime("%H:%M:%S"), "err": str(e)}
 
     # ---------------- 控制（前端按钮） ----------------
     def status(self):
@@ -284,6 +316,7 @@ class OrpahApp:
             "founds": list(self.founds),
             "found_total": self.router.found_count if self.router else 0,
             "found_recv": self.srv.found_count if self.srv else 0,
+            "id_demo": self.id_demo,
         }
 
     def cmd(self, action, sn=None, every=None, note=""):

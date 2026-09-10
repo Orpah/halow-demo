@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>ORPAH-over-HaLow L1 演示</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="style.css?v=20260909c">
+<link rel="stylesheet" href="style.css?v=20260910a">
 </head>
 <body>
 <header>
@@ -77,6 +77,19 @@
   </table>
 </section>
 
+<!-- ============ Orpah ID 签名上报（真实密钥，只读展示） ============ -->
+<section class="card" id="idsec">
+  <h3 data-i18n="id_title">Orpah ID 签名上报</h3>
+  <div class="id-grid">
+    <div class="id-row"><span data-i18n="lbl_sn">序列号</span><b id="idSn">-</b></div>
+    <div class="id-row"><span data-i18n="id_alg">算法</span><b id="idAlg">-</b></div>
+    <div class="id-row"><span data-i18n="id_level">降级级别</span><b id="idLevel">-</b></div>
+    <div class="id-row"><span data-i18n="id_trust">验签结果</span><b id="idTrust" class="ok">-</b></div>
+    <div class="id-row full"><span data-i18n="id_sig">签名 sig</span><code id="idSig">-</code></div>
+    <div class="id-row full"><span data-i18n="id_nonce">nonce</span><code id="idNonce">-</code></div>
+  </div>
+</section>
+
 <!-- ============ 发现记录（走失命中） ============ -->
 <section class="card" id="foundsec">
   <h3 data-i18n="found_title">发现记录（走失命中）</h3>
@@ -110,6 +123,6 @@
 </section>
 
 <script src="ui_i18n.js"></script>
-<script src="app.js?v=20260909c"></script>
+<script src="app.js?v=20260910a"></script>
 </body>
 </html>
