@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.12）
+orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.15）
 ====================================================================
 本模块是 Orpah ID「身份与真实性层」的权威参考实现（纯 Python，独立成层，
 不依赖 orpah 既有业务报文；现有 L1–L4 的 ORPAH-REPORT 等业务流不动）。
@@ -9,8 +9,8 @@ orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.1
 包含：
   - Crockford Base32 编解码（字母表 0123456789ABCDEFGHJKMNPQRSTVWXYZ，去 I L O U）
   - SN 生成/解析/合法性校验（CC-ORG-UNIQUE[-CHECK]，CC=ISO 3166-1 alpha-2）
-  - CHECK 校验码：Mod 97（2 位十进制）＋ Luhn mod 32（1 位 Crockford）
-    （Damm32 需 32×32 quasigroup 表，规范 Phase 2 定稿前不实现，用上述两个兜底）
+  - CHECK 校验码（只算 ORG-UNIQUE，不含 CC）：Mod 97（2 位十进制）＋
+    Luhn mod 32（1 位 Crockford）；Damm32 见独立参考实现 `damm32.py`
   - JCS 规范化（RFC 8785）：key 字典序、无空白、UTF-8、数字最短表示
   - 报文构建/签名：ES256（ECDSA P-256，raw R‖S 64B → base64url）、
     HS256（HMAC-SHA256 直接对 preimage）、none（L3 无签名）
@@ -131,10 +131,11 @@ def gen_unique(length=10):
 def gen_sn(cc="CN", org="WH01", unique_len=10, check="mod97"):
     """生成完整 SN。check 取 "mod97" / "luhn32" / ""（无校验）。"""
     unique = gen_unique(unique_len)
-    core = f"{cc}-{org}-{unique}"
+    org_unique = f"{org}-{unique}"
+    sn = f"{cc}-{org_unique}"
     if check:
-        core += "-" + compute_check(core, check)
-    return core
+        sn += "-" + compute_check(org_unique, check)   # 校验位只算 ORG-UNIQUE（不含 CC）
+    return sn
 
 
 # ---------------------------------------------------------------------------
@@ -153,14 +154,14 @@ def _mod97(s):
     return r
 
 
-def compute_check_mod97(core):
-    """core = CC-ORG-UNIQUE → 2 位十进制校验码（IBAN 思路，输出 00–96）。"""
-    return "%02d" % (98 - _mod97(core + "00"))
+def compute_check_mod97(org_unique):
+    """org_unique = ORG-UNIQUE（不含 CC）→ 2 位十进制校验码（IBAN 思路，输出 00–96）。"""
+    return "%02d" % (98 - _mod97(org_unique + "00"))
 
 
-def verify_check_mod97(sn):
-    """整串 SN（含 2 位校验码）取模 97 应等于 1。"""
-    return _mod97(sn) == 1
+def verify_check_mod97(org_unique_check):
+    """ORG-UNIQUE-CHECK（不含 CC，含 2 位校验码）取模 97 应等于 1。"""
+    return _mod97(org_unique_check) == 1
 
 
 def _luhn_sum(digits):
@@ -177,43 +178,47 @@ def _luhn_sum(digits):
     return s
 
 
-def compute_check_luhn32(core):
-    """core = CC-ORG-UNIQUE → 1 位 Crockford 校验码（Luhn mod 32）。"""
-    digits = [crockford_index(c) for c in core if c != "-"]
+def compute_check_luhn32(org_unique):
+    """org_unique = ORG-UNIQUE（不含 CC）→ 1 位 Crockford 校验码（Luhn mod 32）。"""
+    digits = [crockford_index(c) for c in org_unique if c != "-"]
     for c in range(32):
         if _luhn_sum(digits + [c]) % 32 == 0:
             return crockford_encode(c)
     return "0"  # 理论不可达
 
 
-def verify_check_luhn32(sn):
-    """整串 SN（含 1 位校验码）Luhn 和模 32 应等于 0。"""
-    digits = [crockford_index(c) for c in sn if c != "-"]
+def verify_check_luhn32(org_unique_check):
+    """ORG-UNIQUE-CHECK（不含 CC，含 1 位校验码）Luhn 和模 32 应等于 0。"""
+    digits = [crockford_index(c) for c in org_unique_check if c != "-"]
     if any(d is None for d in digits):
         return False
     return _luhn_sum(digits) % 32 == 0
 
 
-def compute_check(core, algo="mod97"):
-    """计算校验码：algo="mod97"（2 位）或 "luhn32"（1 位）。"""
+def compute_check(org_unique, algo="mod97"):
+    """给 ORG-UNIQUE（不含 CC）算校验码：algo="mod97"（2 位）或 "luhn32"（1 位）。"""
     if algo == "mod97":
-        return compute_check_mod97(core)
+        return compute_check_mod97(org_unique)
     if algo == "luhn32":
-        return compute_check_luhn32(core)
+        return compute_check_luhn32(org_unique)
     raise ValueError(f"unknown check algo: {algo}")
 
 
 def verify_check(sn):
-    """按 CHECK 长度自动选择算法验证：0 位=无校验(通过)；1 位=Luhn32；2 位=Mod97。"""
+    """整串 SN（CC-ORG-UNIQUE[-CHECK]）按 CHECK 长度选择算法验证。
+
+    CC 不参与校验（校验位只算 ORG-UNIQUE）：0 位=无校验(通过)；1 位=Luhn32；2 位=Mod97。
+    """
     p = parse_sn(sn)
     if p is None:
         return False
     if not p["check"]:
         return True
+    body = f"{p['org']}-{p['unique']}-{p['check']}"   # 不含 CC
     if len(p["check"]) == 1:
-        return verify_check_luhn32(sn)
+        return verify_check_luhn32(body)
     if len(p["check"]) == 2:
-        return verify_check_mod97(sn)
+        return verify_check_mod97(body)
     return False
 
 

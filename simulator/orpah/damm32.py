@@ -5,6 +5,7 @@ damm32.py — Damm32 校验（Crockford Base32 的 Damm 算法）构造与验证
 ==================================================================
 对齐《Orpah ID 协议规范》§3.2：SN 校验码 CHECK 的一种算法。规范将 32×32
 quasigroup 表标为「Phase 2 待定稿」，本模块给出一个**可构造、可验证**的参考实现。
+校验位只算 `ORG-UNIQUE`（**不含 CC**；CC=ISO 3166-1 alpha-2，不套 Crockford 限制）。
 
 构造（弱全反对称拟群 weak totally anti-symmetric quasigroup）：
   拟群 Q 定义在有限域 GF(2^5) 上，不可约多项式 p(t) = t^5 + t + 1（系数 0x23）：
@@ -115,7 +116,7 @@ def crockford_index(ch):
 
 
 def sn_digits(sn_core):
-    """CC-ORG-UNIQUE 串 → 数字序列（跳过分隔符 '-'，Crockford 索引）。
+    """ORG-UNIQUE 串（不含 CC）→ 数字序列（跳过分隔符 '-'，Crockford 索引）。
 
     遇非法字符（含 Crockford 排除的 I/L/O/U）抛 ValueError，而不是静默产出
     None 再在索引表时抛 TypeError（曾致调用方 500）。
@@ -135,22 +136,22 @@ def sn_digits(sn_core):
 _TABLE = build_table()
 
 
-def damm32_check(sn_core):
-    """给 CC-ORG-UNIQUE 算 1 位 Damm32 校验字符（Crockford 字母表）。
+def damm32_check(org_unique):
+    """给 ORG-UNIQUE（不含 CC）算 1 位 Damm32 校验字符（Crockford 字母表）。
 
     含非法字符抛 ValueError（调用方自行处理）。
     """
-    d = check_digit(_TABLE, sn_digits(sn_core))
+    d = check_digit(_TABLE, sn_digits(org_unique))
     return CROCKFORD[d]
 
 
-def damm32_verify(sn):
-    """校验含 1 位 Damm32 校验码的整串 SN。
+def damm32_verify(org_unique_check):
+    """校验 ORG-UNIQUE-CHECK（不含 CC，含 1 位 Damm32 校验码）。
 
     含非法字符（I/L/O/U 或非 Crockford 字符）视为校验不通过，返回 False。
     """
     try:
-        digits = sn_digits(sn)
+        digits = sn_digits(org_unique_check)
     except ValueError:
         return False
     return validate(_TABLE, digits)
@@ -193,14 +194,15 @@ def self_test():
     print("== 暴力验证（长度≤3 全部串）==")
     print("  单错/换位漏检:", brute_verify(T, 32, 3))
     print("== 示例 ==")
-    core = "CN-WH01-9AF3C1D2"
-    c = damm32_check(core)
-    sn = core + "-" + c
-    print(f"  SN 核心: {core}")
+    org_unique = "WH01-9AF3C1D2"          # ORG-UNIQUE（不含 CC）
+    c = damm32_check(org_unique)
+    body = org_unique + "-" + c
+    print(f"  ORG-UNIQUE: {org_unique}")
     print(f"  Damm32 校验位: {c}")
-    print(f"  整串 {sn} 校验: {'通过' if damm32_verify(sn) else '失败'}")
-    # 单错 / 换位演示
-    bad = core[:-1] + ("1" if core[-1] == "0" else "0") + "-" + c
+    print(f"  ORG-UNIQUE-CHECK {body} 校验: {'通过' if damm32_verify(body) else '失败'}")
+    print(f"  整串 SN: CN-{body}（CC=CN 固定，样例统一用 CN）")
+    # 单错 / 换位演示（改 ORG-UNIQUE 末位）
+    bad = org_unique[:-1] + ("1" if org_unique[-1] == "0" else "0") + "-" + c
     print(f"  改一位后 {bad} 校验: {'通过(异常!)' if damm32_verify(bad) else '失败'}")
     return ok and c is not None
 

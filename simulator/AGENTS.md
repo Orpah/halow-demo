@@ -33,6 +33,14 @@
   两 UI 启动任务（`orpah-ui` / `sim-server-host-sim|tj45|hc01`）**不带端口参数、直接用
   缺省端口**（orpah=8901、tools=8899），一键即跑不弹窗；想换端口用命令行
   `python ... --port <n>`（后端均支持 `--port`，2026-09-09）。
+- **Orpah ID SN 硬规则（2026-09-10 用户定）**：
+  ① CC = ISO 3166-1 alpha-2，**不套 Crockford 限制**（可含 I/L/O/U，正则 `[A-Z]{2}`）；
+  ② **校验位只算 `ORG-UNIQUE`（不含 CC）**——`damm32.py` / `orpah_id.py` / `c/damm32.c`
+     的 check 函数输入一律是 ORG-UNIQUE（或 ORG-UNIQUE-CHECK），不含 CC；
+  ③ **所有文档与代码样例的 CC 只用 `CN`（中国）**，不使用其它国家——测试向量、黄金样本、
+     UI 默认值、自检输出统一 `CN`（黄金样本 `WH01-9AF3C1D2 → B`，整串 `CN-WH01-9AF3C1D2-B`）；
+  ④ Damm32 工具页（`ui/static/damm32.html`）：校验位计算器放页面最顶端，CC 用下拉框
+     （`<datalist>`）+ 支持直接输入 + 提示。
 
 ## 0b. 编码约定（2026-09-09）：仓库文本一律 UTF-8
 

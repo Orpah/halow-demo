@@ -6,10 +6,10 @@
  * 该拟群是弱全反对称拟群，满足 Damm 检出「所有单字符替换 + 所有相邻换位」的充要条件。
  *
  * 用法：
- *   damm32 compute <CC-ORG-UNIQUE>      计算 1 位校验字符（跳过分隔符 '-'）
- *   damm32 verify  <SN>                 校验整串（含校验字符），输出 1/0
- *   damm32 batch                        从 stdin 逐行读核心，输出「核心\t校验字符」
- *   damm32 selftest [vectors.txt]       跑测试向量（默认 test_vectors.txt），全过 PASS
+ *   damm32 compute <ORG-UNIQUE>       计算 1 位校验字符（跳过分隔符 '-'；不含 CC）
+ *   damm32 verify  <ORG-UNIQUE-CHECK> 校验整串（含校验字符；不含 CC），输出 1/0
+ *   damm32 batch                       从 stdin 逐行读 ORG-UNIQUE，输出「ORG-UNIQUE\t校验字符」
+ *   damm32 selftest [vectors.txt]      跑测试向量（默认 test_vectors.txt），全过 PASS
  *
  * 编译（任选其一）：
  *   MSVC: cl /nologo /utf-8 damm32.c
@@ -54,7 +54,7 @@ static char index_to_char(uint8_t idx) {
     return (idx < 32) ? CA[idx] : '\0';
 }
 
-/* 计算 Damm32 校验字符（输入 = CC-ORG-UNIQUE，可含 '-' 分隔符）。非法输入返回 '\0'。 */
+/* 计算 Damm32 校验字符（输入 = ORG-UNIQUE，不含 CC，可含 '-' 分隔符）。非法输入返回 '\0'。 */
 char damm32_compute(const char *input) {
     uint8_t interim = 0;
     size_t len = strlen(input);
@@ -69,7 +69,7 @@ char damm32_compute(const char *input) {
     return index_to_char(interim);
 }
 
-/* 验证 Damm32 校验（输入包含校验字符）。 */
+/* 验证 Damm32 校验（输入 = ORG-UNIQUE-CHECK，不含 CC）。 */
 int damm32_verify(const char *input) {
     uint8_t interim = 0;
     size_t len = strlen(input);
@@ -82,7 +82,7 @@ int damm32_verify(const char *input) {
     return (interim == 0);
 }
 
-/* ---- 测试向量（test_vectors.txt：每行「核心<TAB>校验字符」）---- */
+/* ---- 测试向量（test_vectors.txt：每行「ORG-UNIQUE<TAB>校验字符」）---- */
 static int selftest(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) { fprintf(stderr, "cannot open %s\n", path); return 2; }
@@ -138,6 +138,6 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    fprintf(stderr, "usage: damm32 compute <CC-ORG-UNIQUE> | verify <SN> | batch | selftest [vectors.txt]\n");
+    fprintf(stderr, "usage: damm32 compute <ORG-UNIQUE> | verify <ORG-UNIQUE-CHECK> | batch | selftest [vectors.txt]\n");
     return 2;
 }

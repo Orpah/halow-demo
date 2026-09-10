@@ -7,8 +7,8 @@ run_cross_test.py — Damm32 跨语言一致性测试（Python vs C）
 编译 C 参考实现（damm32.c），然后：
 
   1. C `selftest`   —— 读向量文件，内部重算校验字符并验证，比对黄金值；
-  2. C `batch`      —— 一次性把全部 SN 核心喂给 C，逐行比对 C 校验位 vs Python 校验位；
-  3. C `verify`     —— 对黄金样本整串抽查 verify=1。
+  2. C `batch`      —— 一次性把全部 ORG-UNIQUE 喂给 C，逐行比对 C 校验位 vs Python 校验位；
+  3. C `verify`     —— 对黄金样本 ORG-UNIQUE-CHECK 抽查 verify=1。
 
 任一步不一致即非零退出；全部一致输出 PASS（Phase 2 真机验证前零偏差）。
 
@@ -30,24 +30,23 @@ import damm32 as m  # noqa: E402  Python 参考实现
 C_SRC = os.path.join(HERE, "damm32.c")
 VEC_FILE = os.path.join(HERE, "test_vectors.txt")
 
-# 非法输入样例（含 Crockford 排除的 I/L/O/U 或其它符号）：Python/C 应一致拒绝。
+# 非法输入样例（ORG-UNIQUE 部分含 Crockford 排除的 I/L/O/U 或其它符号）：Python/C 应一致拒绝。
 INVALID = [
-    "US-CA-0001",          # CC 含 U（ISO alpha-2 允许，但 Crockford 排除）
-    "CN-WH0I-9AF3C1D2",    # 含 I
-    "CN-WH0L-9AF3C1D2",    # 含 L
-    "CN-WH0O-9AF3C1D2",    # 含 O
-    "CN-WH01-9AF3C1D2+",   # 含非字母数字
+    "WH0I-9AF3C1D2",    # 含 I
+    "WH0L-9AF3C1D2",    # 含 L
+    "WH0O-9AF3C1D2",    # 含 O
+    "WH01-9AF3C1D2+",   # 含非字母数字
 ]
 
 
 def gen_vectors():
-    """确定性向量集：黄金样本 + 手工边界 + 固定种子随机。"""
+    """确定性向量集：黄金样本 + 手工边界 + 固定种子随机（均为 ORG-UNIQUE，不含 CC）。"""
     cores = [
-        "CN-WH01-9AF3C1D2",   # 黄金样本 → H
+        "WH01-9AF3C1D2",   # 黄金样本 → B（ORG=WH01, UNIQUE=9AF3C1D2）
         "0", "Z", "2", "7", "T", "V",
         "000000000000", "ZZZZZZZZ",
-        "cn-wh01-9af3c1d2",   # 小写 → 与黄金样本同 H
-        "CN-WH01", "CN-CA-0001", "AA-000-0000",
+        "wh01-9af3c1d2",   # 小写 → 与黄金样本同 B
+        "WH01", "CA-0001", "AA-000-0000",
     ]
     rnd = random.Random(20260910)
     alpha = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -98,7 +97,8 @@ def compile_c(exe):
     vc = _vs_env()
     if vc and shutil.which("cl"):
         cmd = f'"{vc}" >nul 2>&1 && cl /nologo /utf-8 "{C_SRC}" /Fe:"{exe}"'
-        subprocess.run(cmd, shell=True, check=True)
+        # 在临时目录里编译：cl 默认把 .obj 写到 cwd，别污染仓库
+        subprocess.run(cmd, shell=True, check=True, cwd=os.path.dirname(exe))
         return
     raise RuntimeError("未找到可用 C 编译器；可设 CC 环境变量指定")
 
@@ -141,8 +141,8 @@ def main():
             print(f"FAIL: batch 比对 {mismatch} 处不一致")
             return 1
 
-        # 3) C verify 抽查：黄金样本整串应得 1，篡改一位应得 0
-        golden = "CN-WH01-9AF3C1D2"
+        # 3) C verify 抽查：黄金样本 ORG-UNIQUE-CHECK 应得 1，篡改一位应得 0
+        golden = "WH01-9AF3C1D2"
         good = golden + "-" + m.damm32_check(golden)
         bad = good[:-2] + ("1" if good[-1] == "0" else "0")
         v_ok = run(exe, ["verify", good]).stdout.strip()

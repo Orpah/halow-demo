@@ -36,6 +36,7 @@
     border-radius: 6px; padding: 6px 10px; font-size: 14px; width: 260px;
     font-family: "Cascadia Code", Consolas, monospace;
   }
+  .io input.cc { width: 70px; text-transform: uppercase; }
   .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
   .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
   .demo-grid .k { color: var(--mut); }
@@ -52,7 +53,30 @@
 </header>
 
 <section class="card">
-  <h3>1 · 构造算法</h3>
+  <h3>1 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
+  <div class="io">
+    <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="CN"></label>
+    <datalist id="ccList">
+      <option value="CN">中国</option>
+    </datalist>
+    <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
+      <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
+    <div class="out">
+      <div>校验位：<b id="checkOut">-</b></div>
+      <div>整串：<code id="fullOut">-</code></div>
+      <div>校验：<b id="verifyOut">-</b></div>
+    </div>
+  </div>
+  <div class="config-row" style="margin-top:12px">
+    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
+    <span class="hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
+  </div>
+  <div class="log mono" id="demoLog"></div>
+</section>
+
+<section class="card">
+  <h3>2 · 构造算法</h3>
   <div class="formula">
     Damm32 拟群定义在有限域 <b>GF(2⁵)</b> 上，不可约多项式
     <code>p(t) = t⁵ + t + 1</code>（系数 <code>0x23</code>）：<br>
@@ -72,7 +96,7 @@
 </section>
 
 <section class="card">
-  <h3>2 · 拟群性质验证（浏览器内实时计算）</h3>
+  <h3>3 · 拟群性质验证（浏览器内实时计算）</h3>
   <div class="prop-row" id="propRow"></div>
   <div class="config-row">
     <button class="btn" id="btnBrute" data-run="3">全量穷举验证（长度 ≤ 3 全部串）</button>
@@ -82,27 +106,9 @@
 </section>
 
 <section class="card">
-  <h3>3 · 生成的 32×32 表（<code>T[x][y] = 2·(x⊕y)</code>）</h3>
+  <h3>4 · 生成的 32×32 表（<code>T[x][y] = 2·(x⊕y)</code>）</h3>
   <p class="hint">对角线上为 0（蓝色）；第 0 行 <code>T[0][y] = 2y</code>（橙色）= GF(2⁵) 中乘 <code>t</code>。</p>
   <div class="tablewrap"><table class="t32" id="t32"></table></div>
-</section>
-
-<section class="card">
-  <h3>4 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
-  <div class="io">
-    <label><span class="hint">SN 核心（CC-ORG-UNIQUE，Crockford）</span><br>
-      <input id="snCore" value="CN-WH01-9AF3C1D2" spellcheck="false"></label>
-    <div class="out">
-      <div>校验位：<b id="checkOut">-</b></div>
-      <div>整串：<code id="fullOut">-</code></div>
-      <div>校验：<b id="verifyOut">-</b></div>
-    </div>
-  </div>
-  <div class="config-row" style="margin-top:12px">
-    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
-    <span class="hint">对整串改动一位（最后一个数据字符取反），校验应失败。</span>
-  </div>
-  <div class="log mono" id="demoLog"></div>
 </section>
 
 <script>
@@ -201,10 +207,11 @@ function digitsOf(sn) {
   el.innerHTML = h + "</tbody>";
 })();
 
-/* ---- 校验位 ---- */
+/* ---- 校验位（只算 ORG-UNIQUE，不含 CC）---- */
 function refresh() {
-  const core = document.getElementById("snCore").value.trim();
-  const d = digitsOf(core);
+  const cc = document.getElementById("ccInput").value.trim().toUpperCase();
+  const org = document.getElementById("orgUnique").value.trim();
+  const d = digitsOf(org);
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
         ver = document.getElementById("verifyOut");
@@ -215,30 +222,32 @@ function refresh() {
   const c = checkDigit(d);
   const ch = CROCKFORD[c];
   out.textContent = ch;
-  full.textContent = core + "-" + ch;
+  full.textContent = cc + "-" + org + "-" + ch;
   const ok = validate(d.concat([c]));
   ver.textContent = ok ? "✓ 通过" : "✗ 失败";
   ver.className = ok ? "ok" : "bad";
 }
-document.getElementById("snCore").addEventListener("input", refresh);
+document.getElementById("orgUnique").addEventListener("input", refresh);
+document.getElementById("ccInput").addEventListener("input", refresh);
 refresh();
 
 /* ---- 单字符替换演示 ---- */
 document.getElementById("btnDemo").addEventListener("click", () => {
-  const core = document.getElementById("snCore").value.trim();
-  const d = digitsOf(core);
+  const cc = document.getElementById("ccInput").value.trim().toUpperCase();
+  const org = document.getElementById("orgUnique").value.trim();
+  const d = digitsOf(org);
   const log = document.getElementById("demoLog");
   if (!d || d.length === 0) { log.textContent = "非法输入"; return; }
   const c = checkDigit(d);
   const ch = CROCKFORD[c];
   const last = d.length - 1;
   const flipped = CROCKFORD[(d[last] + 1) % 32];
-  const badCore = core.slice(0, -1) + flipped;
-  const badD = digitsOf(badCore);
+  const badOrg = org.slice(0, -1) + flipped;
+  const badD = digitsOf(badOrg);
   const badOk = validate(badD.concat([c]));
   log.textContent =
-    `原始  ${core}-${ch}   → 校验 ${validate(d.concat([c])) ? "通过" : "失败"}\n` +
-    `改一位 ${badCore}-${ch} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+    `原始  ${cc}-${org}-${ch}   → 校验 ${validate(d.concat([c])) ? "通过" : "失败"}\n` +
+    `改一位 ${cc}-${badOrg}-${ch} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
 });
 
 /* ---- 全量穷举 ---- */
