@@ -35,8 +35,9 @@
     background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
     border-radius: 6px; padding: 6px 10px; font-size: 14px; width: 260px;
     font-family: "Cascadia Code", Consolas, monospace;
+    text-transform: uppercase;
   }
-  .io input.cc { width: 70px; text-transform: uppercase; }
+  .io input.cc { width: 70px; }
   .cc-name { color: var(--txt); font-size: 14px; font-weight: 600; margin-left: 8px; }
   .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
   .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
@@ -248,7 +249,7 @@ function digitsOf(sn) {
 /* ---- 校验位（只算 ORG-UNIQUE，不含 CC）---- */
 function refresh() {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
-  const org = document.getElementById("orgUnique").value.trim();
+  const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
   const d = digitsOf(org);
   const out = document.getElementById("checkOut"),
@@ -279,7 +280,7 @@ refresh();
 /* ---- 单字符替换演示 ---- */
 document.getElementById("btnDemo").addEventListener("click", () => {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
-  const org = document.getElementById("orgUnique").value.trim();
+  const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   const d = digitsOf(org);
   const log = document.getElementById("demoLog");
   if (!d || d.length === 0) { log.textContent = "非法输入"; return; }
