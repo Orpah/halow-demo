@@ -42,8 +42,7 @@
   .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
   .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
   .demo-grid .k { color: var(--mut); }
-  .log { background: #0d1117; border: 1px solid var(--bd); border-radius: 6px;
-    padding: 10px 14px; font-size: 12px; line-height: 1.8; margin-top: 10px; }
+  .demo-result { font-size: 12px; color: var(--txt); white-space: pre-line; }
 </style>
 </head>
 <body>
@@ -102,8 +101,8 @@
   <div class="config-row" style="margin-top:12px">
     <button class="btn" id="btnDemo">演示单字符替换被检出</button>
     <span class="hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
+    <span class="mono demo-result" id="demoResult"></span>
   </div>
-  <div class="log mono" id="demoLog"></div>
 </section>
 
 <section class="card">
@@ -133,7 +132,6 @@
     <button class="btn" id="btnBrute" data-run="3">全量穷举验证（长度 ≤ 3 全部串）</button>
     <span class="hint" id="bruteHint">点击后穷举 32¹ + 32² + 32³ = 33824 个串，逐一检查单字符替换与相邻换位是否都被检出。</span>
   </div>
-  <div class="log mono" id="bruteLog"></div>
 </section>
 
 <section class="card">
@@ -282,8 +280,8 @@ document.getElementById("btnDemo").addEventListener("click", () => {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   const d = digitsOf(org);
-  const log = document.getElementById("demoLog");
-  if (!d || d.length === 0) { log.textContent = "非法输入"; return; }
+  const out = document.getElementById("demoResult");
+  if (!d || d.length === 0) { out.textContent = "非法输入"; return; }
   const c = checkDigit(d);
   const ch = CROCKFORD[c];
   const last = d.length - 1;
@@ -291,19 +289,17 @@ document.getElementById("btnDemo").addEventListener("click", () => {
   const badOrg = org.slice(0, -1) + flipped;
   const badD = digitsOf(badOrg);
   const badOk = validate(badD.concat([c]));
-  log.textContent =
+  out.textContent =
     `原始  ${cc}-${org}-${ch}   → 校验 ${validate(d.concat([c])) ? "通过" : "失败"}\n` +
     `改一位 ${cc}-${badOrg}-${ch} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
 });
 
 /* ---- 全量穷举 ---- */
 document.getElementById("btnBrute").addEventListener("click", async function () {
-  const log = document.getElementById("bruteLog");
   const hint = document.getElementById("bruteHint");
   this.disabled = true;
   const maxlen = parseInt(this.dataset.run, 10);
-  log.textContent = "正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个串，可能需数秒）";
-  hint.textContent = "运行中…";
+  hint.textContent = "正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个串，可能需数秒）";
   await new Promise(r => setTimeout(r, 30));   // 让 UI 先刷新
   const t0 = performance.now();
   let misses = null, count = 0;
@@ -338,11 +334,10 @@ document.getElementById("btnBrute").addEventListener("click", async function () 
   }
   const ms = (performance.now() - t0).toFixed(0);
   if (misses) {
-    log.textContent = `发现漏检：${JSON.stringify(misses)}（耗时 ${ms} ms）—— 该拟群不满足 Damm 检出条件！`;
+    hint.textContent = `发现漏检：${JSON.stringify(misses)}（耗时 ${ms} ms）—— 该拟群不满足 Damm 检出条件！`;
   } else {
-    log.textContent = `✓ 穷举 ${count} 个串（长度 ≤ ${maxlen}）完毕：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${ms} ms）`;
+    hint.textContent = `✓ 穷举 ${count} 个串（长度 ≤ ${maxlen}）完毕：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${ms} ms）`;
   }
-  hint.textContent = "已完成。";
   this.disabled = false;
 });
 </script>
