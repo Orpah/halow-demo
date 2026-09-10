@@ -37,6 +37,7 @@
     font-family: "Cascadia Code", Consolas, monospace;
   }
   .io input.cc { width: 70px; text-transform: uppercase; }
+  .cc-name { color: var(--txt); font-size: 14px; font-weight: 600; min-width: 90px; }
   .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
   .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
   .demo-grid .k { color: var(--mut); }
@@ -56,10 +57,40 @@
   <h3>1 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
   <div class="io">
     <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
-      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="CN"></label>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"></label>
     <datalist id="ccList">
       <option value="CN">中国</option>
+      <option value="US">美国</option>
+      <option value="JP">日本</option>
+      <option value="GB">英国</option>
+      <option value="DE">德国</option>
+      <option value="FR">法国</option>
+      <option value="RU">俄罗斯</option>
+      <option value="KR">韩国</option>
+      <option value="AU">澳大利亚</option>
+      <option value="CA">加拿大</option>
+      <option value="IN">印度</option>
+      <option value="BR">巴西</option>
+      <option value="MX">墨西哥</option>
+      <option value="IT">意大利</option>
+      <option value="ES">西班牙</option>
+      <option value="NL">荷兰</option>
+      <option value="SE">瑞典</option>
+      <option value="CH">瑞士</option>
+      <option value="NO">挪威</option>
+      <option value="DK">丹麦</option>
+      <option value="FI">芬兰</option>
+      <option value="AT">奥地利</option>
+      <option value="BE">比利时</option>
+      <option value="PT">葡萄牙</option>
+      <option value="IE">爱尔兰</option>
+      <option value="NZ">新西兰</option>
+      <option value="SG">新加坡</option>
+      <option value="TW">中国台湾</option>
+      <option value="HK">中国香港</option>
+      <option value="MO">中国澳门</option>
     </datalist>
+    <span class="cc-name" id="ccName">中国</span>
     <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
       <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
     <div class="out">
@@ -116,6 +147,14 @@
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
 const POLY = 0x23;   // p(t) = t^5 + t + 1
+
+// ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
+const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
+  "FR":"法国","RU":"俄罗斯","KR":"韩国","AU":"澳大利亚","CA":"加拿大","IN":"印度",
+  "BR":"巴西","MX":"墨西哥","IT":"意大利","ES":"西班牙","NL":"荷兰","SE":"瑞典",
+  "CH":"瑞士","NO":"挪威","DK":"丹麦","FI":"芬兰","AT":"奥地利","BE":"比利时",
+  "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
+  "HK":"中国香港","MO":"中国澳门" };
 
 function gfMul(a, b) {
   let r = 0;
@@ -211,6 +250,7 @@ function digitsOf(sn) {
 function refresh() {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim();
+  document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
   const d = digitsOf(org);
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
