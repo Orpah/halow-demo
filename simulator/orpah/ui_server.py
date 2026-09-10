@@ -530,8 +530,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            req.get("name"), req.get("note"))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "remove_person":
-                APP.registry.remove_person(req.get("pid", ""))
-                self._send(200, json.dumps({"ok": True}).encode())
+                pid = req.get("pid", "")
+                if APP.cases.active_case(pid) is not None:
+                    self._send(200, json.dumps({"ok": False,
+                        "err": "该走失者有未结案件，请先在「走失案件」页结案"}).encode())
+                else:
+                    APP.registry.remove_person(pid)
+                    self._send(200, json.dumps({"ok": True}).encode())
             elif action == "set_status":
                 APP.registry.set_status(req.get("sn", ""), req.get("status", ""))
                 self._send(200, json.dumps({"ok": True}).encode())

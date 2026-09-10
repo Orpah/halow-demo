@@ -56,7 +56,8 @@ class CaseManager:
         self.cases = {}
         self._seq = 0
 
-    def _open_for(self, person_id):
+    def active_case(self, person_id):
+        """该走失者当前未结（open/found）案件；无则返回 None。"""
         for c in self.cases.values():
             if c.person_id == person_id and c.status in (CASE_OPEN, CASE_FOUND):
                 return c
@@ -69,7 +70,7 @@ class CaseManager:
           - 名下无设备：case=None；
           - 已有未结案件：返回已有案件，sns=[]，dup=True。
         """
-        old = self._open_for(person_id)
+        old = self.active_case(person_id)
         if old is not None:
             return old, [], True
         devs = registry.devices_of(person_id)
@@ -91,7 +92,7 @@ class CaseManager:
         rec = registry.get(sn)
         if rec is None or not rec.person_id:
             return None
-        c = self._open_for(rec.person_id)
+        c = self.active_case(rec.person_id)
         if c is None:
             return None
         ts = ts if ts is not None else int(time.time())
