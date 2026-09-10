@@ -5,6 +5,8 @@
 <title>定位与轨迹 — ORPAH-over-HaLow</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="style.css?v=20260910f">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   .back { margin-left: 10px; }
   .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
@@ -25,8 +27,10 @@
     font-family: "Cascadia Code", Consolas, monospace;
   }
   .btn.del { padding: 2px 8px; color: var(--red); }
-  #map { background: #0a0d12; border: 1px solid var(--bd); border-radius: 8px;
+  #canvas { background: #0a0d12; border: 1px solid var(--bd); border-radius: 8px;
     margin-top: 12px; display: block; max-width: 100%; }
+  #map { height: 420px; border: 1px solid var(--bd); border-radius: 8px;
+    margin-top: 12px; background: #0a0d12; }
   .stat { margin-top: 10px; font-size: 14px; line-height: 1.9; }
   .stat .k { color: var(--mut); }
   .stat .v-ok { color: var(--grn); }
@@ -41,6 +45,33 @@
     <a class="btn back" href="index.html">← 返回主页</a>
   </div>
 </header>
+
+<section class="card">
+  <h3>地图接口</h3>
+  <div class="row">
+    <label>视图
+      <select id="view">
+        <option value="canvas" selected>画布（本地坐标）</option>
+        <option value="map">地图（真实地理）</option>
+      </select>
+    </label>
+    <label>瓦片源
+      <select id="tileSrc">
+        <option value="osm" selected>OpenStreetMap</option>
+        <option value="opentopo">OpenTopoMap</option>
+        <option value="carto">CartoDB Voyager</option>
+        <option value="esri">Esri World Imagery</option>
+        <option value="custom">自定义</option>
+      </select>
+    </label>
+    <label>自定义瓦片 URL <input id="tileUrl" style="width:340px" placeholder="https://…/{z}/{x}/{y}.png"></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>基点纬度 <input id="baseLat" type="number" step="0.0001" value="39.9042"></label>
+    <label>基点经度 <input id="baseLng" type="number" step="0.0001" value="116.4074"></label>
+    <span class="hint">本地坐标 (0,0) 对应的真实经纬度；地图视图按此锚点 + 米/度换算。地图瓦片需联网。</span>
+  </div>
+</section>
 
 <section class="card">
   <h3>1 · 模拟参数</h3>
@@ -79,7 +110,8 @@
 
 <section class="card">
   <h3>3 · 实时定位与轨迹</h3>
-  <canvas id="map" width="620" height="420"></canvas>
+  <div id="map" style="display:none"></div>
+  <canvas id="canvas" width="620" height="420"></canvas>
   <div class="stat mono">
     <div><span class="k">tick：</span><span id="stTick">0</span></div>
     <div><span class="k">真实位置：</span><span id="stTrue">-</span></div>
@@ -126,7 +158,7 @@ function addRow(x = 30, y = 0) {
     `<td><input class="x" type="number" step="1" value="${x}"></td>` +
     `<td><input class="y" type="number" step="1" value="${y}"></td>` +
     `<td><button class="btn del" title="删除">×</button></td>`;
-  tr.querySelector(".del").onclick = () => { tr.remove(); renumber(); };
+  tr.querySelector(".del").onclick = () => { tr.remove(); renumber(); refreshRouters(); };
   $("anchorBody").appendChild(tr);
 }
 function renumber() {
@@ -210,6 +242,57 @@ function stepOnce() {
   updateStat(est);
 }
 
+/* ---- 地图（Leaflet，用户指定瓦片源）---- */
+const TILE_PROVIDERS = {
+  osm: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attr: "© OpenStreetMap contributors" },
+  opentopo: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", attr: "© OpenTopoMap (CC-BY-SA)" },
+  carto: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", attr: "© OpenStreetMap © CARTO" },
+  esri: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr: "© Esri" },
+  custom: { url: "", attr: "" },
+};
+let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
+
+function baseLat() { return parseFloat($("baseLat").value); }
+function baseLng() { return parseFloat($("baseLng").value); }
+function toLatLng(x, y) {
+  const lat0 = baseLat();
+  const mLat = 110540, mLng = 111320 * Math.cos(lat0 * Math.PI / 180);
+  return [lat0 + y / mLat, baseLng() + x / mLng];
+}
+function currentTileUrl() {
+  const key = $("tileSrc").value;
+  return key === "custom" ? $("tileUrl").value.trim() : TILE_PROVIDERS[key].url;
+}
+function refreshRouters() {
+  if (!lmap) return;
+  lRouters.forEach(m => m.remove());
+  lRouters = [];
+  for (const a of readAnchors()) {
+    lRouters.push(L.circleMarker(toLatLng(a.x, a.y), {
+      color: "#58a6ff", radius: 6, fillColor: "#58a6ff", fillOpacity: 0.85,
+    }).addTo(lmap).bindTooltip(`${a.x}, ${a.y}`));
+  }
+}
+function ensureMap() {
+  if (lmap) return;
+  lmap = L.map("map").setView([baseLat(), baseLng()], 16);
+  const prov = TILE_PROVIDERS[$("tileSrc").value];
+  L.tileLayer(currentTileUrl(), { attribution: prov.attr || "", maxZoom: 19 }).addTo(lmap);
+  lTruePath = L.polyline([], { color: "#3fb950", weight: 2 }).addTo(lmap);
+  lEstPath = L.polyline([], { color: "#f85149", weight: 2 }).addTo(lmap);
+  lTrueMarker = L.marker([0, 0]).addTo(lmap);
+  lEstMarker = L.marker([0, 0]).addTo(lmap);
+  refreshRouters();
+}
+function drawMap() {
+  ensureMap();
+  if ($("showTrue").checked) lTruePath.setLatLngs(trueHist.map(p => toLatLng(p.x, p.y)));
+  lEstPath.setLatLngs(estHist.map(p => toLatLng(p.x, p.y)));
+  const lt = trueHist[trueHist.length - 1], le = estHist[estHist.length - 1];
+  if (lt) lTrueMarker.setLatLng(toLatLng(lt.x, lt.y));
+  if (le) lEstMarker.setLatLng(toLatLng(le.x, le.y));
+}
+
 /* ---- 画布 ---- */
 function cross(ctx, x, y, color) {
   ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -226,7 +309,8 @@ function polyline(ctx, pts, color) {
   ctx.stroke();
 }
 function draw() {
-  const c = $("map"), ctx = c.getContext("2d");
+  if ($("view").value === "map") { drawMap(); return; }
+  const c = $("canvas"), ctx = c.getContext("2d");
   const W = c.width, H = c.height, cx = 310, cy = 210;
   ctx.clearRect(0, 0, W, H);
   ctx.strokeStyle = "#1c2128"; ctx.lineWidth = 1;
@@ -284,8 +368,20 @@ $("btnAdd").onclick = () => {
   const n = document.querySelectorAll("#anchorBody tr").length;
   const ang = (n * 90) * Math.PI / 180;
   addRow(Math.round(30 * Math.cos(ang)), Math.round(30 * Math.sin(ang)));
+  refreshRouters();
 };
 $("pathType").onchange = () => { client = { x: 0, y: 0 }; heading = 0; trueHist.length = 0; estHist.length = 0; draw(); };
+
+/* 视图/瓦片/基点切换 */
+$("view").onchange = () => {
+  $("map").style.display = $("view").value === "map" ? "block" : "none";
+  $("canvas").style.display = $("view").value === "map" ? "none" : "block";
+  if ($("view").value === "map") { ensureMap(); draw(); }
+};
+$("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; } if ($("view").value === "map") ensureMap(); };
+$("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; } if ($("view").value === "map") ensureMap(); };
+$("baseLat").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
+$("baseLng").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
