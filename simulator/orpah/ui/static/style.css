@@ -41,6 +41,7 @@ header {
 }
 .btn:hover { background: #30363d; }
 .btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+a.btn { text-decoration: none; display: inline-block; }
 .card {
   background: var(--card); border: 1px solid var(--bd); border-radius: 8px;
   margin: 14px 18px; padding: 14px 18px;

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Damm32 构造 / 验证工具 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260910b">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .formula {
+    background: #0d1117; border: 1px solid var(--bd); border-radius: 6px;
+    padding: 12px 16px; margin: 10px 0; font-size: 14px; line-height: 1.9;
+  }
+  .formula code { color: var(--acc); }
+  .prop-row { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0; }
+  .prop { flex: 0 0 auto; }
+  .prop .k { color: var(--mut); font-size: 12px; }
+  .prop .v { font-weight: 600; font-size: 15px; }
+  .v.ok { color: var(--grn); }
+  .v.bad { color: var(--red); }
+  .tablewrap { max-height: 420px; overflow: auto; border: 1px solid var(--bd); border-radius: 6px; }
+  table.t32 { border-collapse: collapse; font-size: 11px; }
+  table.t32 th, table.t32 td {
+    padding: 0 4px; text-align: center; min-width: 22px; height: 18px;
+  }
+  table.t32 th { position: sticky; background: #1c2128; color: var(--mut); }
+  table.t32 th.row { left: 0; z-index: 2; }
+  table.t32 thead th { top: 0; z-index: 3; }
+  table.t32 th.corner { left: 0; top: 0; z-index: 4; }
+  table.t32 td.diag { background: #1a2333; color: var(--acc); font-weight: 600; }
+  table.t32 td.row0 { color: var(--org); }
+  .io { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .io input {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 6px 10px; font-size: 14px; width: 260px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .io .out { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; }
+  .demo-grid { display: grid; grid-template-columns: auto auto; gap: 4px 14px; margin: 10px 0; }
+  .demo-grid .k { color: var(--mut); }
+  .log { background: #0d1117; border: 1px solid var(--bd); border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; line-height: 1.8; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-name">Damm32 构造 / 验证</span>
+    <span class="sub">ORPAH ID · 序列号校验码（Crockford Base32）</span>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>1 · 构造算法</h3>
+  <div class="formula">
+    Damm32 拟群定义在有限域 <b>GF(2⁵)</b> 上，不可约多项式
+    <code>p(t) = t⁵ + t + 1</code>（系数 <code>0x23</code>）：<br>
+    &nbsp;&nbsp;<code>T[x][y] = 2 · (x ⊕ y)</code>　
+    （<code>·</code> = GF(2⁵) 乘法，<code>2</code> = 域元素 <code>t</code>，<code>⊕</code> = 域加法 = 按位异或）<br>
+    该拟群是「弱全反对称拟群」（weak totally anti-symmetric quasigroup），满足 Damm 算法
+    检出<b>所有单字符替换 + 所有相邻换位</b>的充要条件：
+  </div>
+  <ul>
+    <li><b>拉丁方</b>：每行 / 每列都是 0..31 的一个排列（运算符 <code>⊙</code> 构成拟群）；</li>
+    <li><b>主对角线全 0</b>：<code>T[x][x] = 0</code>，校验位闭合；</li>
+    <li><b>相邻换位条件</b>：<code>(c⊙x)⊙y = (c⊙y)⊙x ⟹ x = y</code>（对任意 c、x≠y 不成立）。</li>
+  </ul>
+  <p class="hint">GF(2⁵) 特征为 2：<code>2·a = 0 ⟺ a = 0</code>，故不存在 Z₃₂ 里那种
+  「<code>a</code> 与 <code>a+16</code> 互为反极点」破坏换位条件的元素对 —— 这正是 32 阶可构造而模 32 加法不可行的原因。
+  与 base-10 Damm 表（同为弱全反对称拟群）性质一致，并已穷举验证。</p>
+</section>
+
+<section class="card">
+  <h3>2 · 拟群性质验证（浏览器内实时计算）</h3>
+  <div class="prop-row" id="propRow"></div>
+  <div class="config-row">
+    <button class="btn" id="btnBrute" data-run="3">全量穷举验证（长度 ≤ 3 全部串）</button>
+    <span class="hint" id="bruteHint">点击后穷举 32¹ + 32² + 32³ = 33824 个串，逐一检查单字符替换与相邻换位是否都被检出。</span>
+  </div>
+  <div class="log mono" id="bruteLog"></div>
+</section>
+
+<section class="card">
+  <h3>3 · 生成的 32×32 表（<code>T[x][y] = 2·(x⊕y)</code>）</h3>
+  <p class="hint">对角线上为 0（蓝色）；第 0 行 <code>T[0][y] = 2y</code>（橙色）= GF(2⁵) 中乘 <code>t</code>。</p>
+  <div class="tablewrap"><table class="t32" id="t32"></table></div>
+</section>
+
+<section class="card">
+  <h3>4 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
+  <div class="io">
+    <label><span class="hint">SN 核心（CC-ORG-UNIQUE，Crockford）</span><br>
+      <input id="snCore" value="CN-WH01-9AF3C1D2" spellcheck="false"></label>
+    <div class="out">
+      <div>校验位：<b id="checkOut">-</b></div>
+      <div>整串：<code id="fullOut">-</code></div>
+      <div>校验：<b id="verifyOut">-</b></div>
+    </div>
+  </div>
+  <div class="config-row" style="margin-top:12px">
+    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
+    <span class="hint">对整串改动一位（最后一个数据字符取反），校验应失败。</span>
+  </div>
+  <div class="log mono" id="demoLog"></div>
+</section>
+
+<script>
+"use strict";
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
+const POLY = 0x23;   // p(t) = t^5 + t + 1
+
+function gfMul(a, b) {
+  let r = 0;
+  for (let i = 0; i < 5; i++) {
+    if (b & 1) r ^= a;
+    b >>= 1;
+    a <<= 1;
+    if (a & 0x20) a ^= POLY;
+  }
+  return r & 0x1F;
+}
+
+function buildTable() {
+  const T = [];
+  for (let x = 0; x < 32; x++) {
+    const row = [];
+    for (let y = 0; y < 32; y++) row.push(gfMul(2, x ^ y));
+    T.push(row);
+  }
+  return T;
+}
+const T = buildTable();
+
+function isLatin() {
+  for (let i = 0; i < 32; i++) {
+    const r = new Set(T[i]), c = new Set();
+    for (let j = 0; j < 32; j++) c.add(T[j][i]);
+    if (r.size !== 32 || c.size !== 32) return false;
+    for (let v = 0; v < 32; v++) if (!r.has(v) || !c.has(v)) return false;
+  }
+  return true;
+}
+function diagZero() { for (let i = 0; i < 32; i++) if (T[i][i] !== 0) return false; return true; }
+function adjcond() {
+  for (let s = 0; s < 32; s++)
+    for (let d = 0; d < 32; d++)
+      for (let e = 0; e < 32; e++)
+        if (d !== e && T[T[s][d]][e] === T[T[s][e]][d]) return false;
+  return true;
+}
+
+function checkDigit(digits) {
+  let s = 0;
+  for (const d of digits) s = T[s][d];
+  return T[s].indexOf(0);
+}
+function validate(digits) {
+  let s = 0;
+  for (const d of digits) s = T[s][d];
+  return s === 0;
+}
+
+function digitsOf(sn) {
+  const out = [];
+  for (const ch of sn) {
+    if (ch === "-") continue;
+    const u = ch.toUpperCase();
+    if (!(u in CI)) return null;
+    out.push(CI[u]);
+  }
+  return out;
+}
+
+/* ---- 性质卡片 ---- */
+(function renderProps() {
+  const latin = isLatin(), diag = diagZero(), adj = adjcond();
+  const items = [["拉丁方（行/列皆排列）", latin],
+                 ["主对角线全 0", diag],
+                 ["相邻换位检出条件", adj],
+                 ["综合（弱全反对称拟群）", latin && diag && adj]];
+  document.getElementById("propRow").innerHTML = items.map(([k, v]) =>
+    `<div class="prop"><div class="k">${k}</div><div class="v ${v ? "ok" : "bad"}">${v ? "✓ 通过" : "✗ 失败"}</div></div>`).join("");
+})();
+
+/* ---- 表格 ---- */
+(function renderTable() {
+  const el = document.getElementById("t32");
+  let h = "<thead><tr><th class=\"corner\">x\\y</th>";
+  for (let y = 0; y < 32; y++) h += `<th>${y}</th>`;
+  h += "</tr></thead><tbody>";
+  for (let x = 0; x < 32; x++) {
+    h += `<tr><th class="row">${x}</th>`;
+    for (let y = 0; y < 32; y++) {
+      const cls = (x === y) ? "diag" : (x === 0 ? "row0" : "");
+      h += `<td class="${cls}">${T[x][y]}</td>`;
+    }
+    h += "</tr>";
+  }
+  el.innerHTML = h + "</tbody>";
+})();
+
+/* ---- 校验位 ---- */
+function refresh() {
+  const core = document.getElementById("snCore").value.trim();
+  const d = digitsOf(core);
+  const out = document.getElementById("checkOut"),
+        full = document.getElementById("fullOut"),
+        ver = document.getElementById("verifyOut");
+  if (!d || d.length === 0) {
+    out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
+    return;
+  }
+  const c = checkDigit(d);
+  const ch = CROCKFORD[c];
+  out.textContent = ch;
+  full.textContent = core + "-" + ch;
+  const ok = validate(d.concat([c]));
+  ver.textContent = ok ? "✓ 通过" : "✗ 失败";
+  ver.className = ok ? "ok" : "bad";
+}
+document.getElementById("snCore").addEventListener("input", refresh);
+refresh();
+
+/* ---- 单字符替换演示 ---- */
+document.getElementById("btnDemo").addEventListener("click", () => {
+  const core = document.getElementById("snCore").value.trim();
+  const d = digitsOf(core);
+  const log = document.getElementById("demoLog");
+  if (!d || d.length === 0) { log.textContent = "非法输入"; return; }
+  const c = checkDigit(d);
+  const ch = CROCKFORD[c];
+  const last = d.length - 1;
+  const flipped = CROCKFORD[(d[last] + 1) % 32];
+  const badCore = core.slice(0, -1) + flipped;
+  const badD = digitsOf(badCore);
+  const badOk = validate(badD.concat([c]));
+  log.textContent =
+    `原始  ${core}-${ch}   → 校验 ${validate(d.concat([c])) ? "通过" : "失败"}\n` +
+    `改一位 ${badCore}-${ch} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+});
+
+/* ---- 全量穷举 ---- */
+document.getElementById("btnBrute").addEventListener("click", async function () {
+  const log = document.getElementById("bruteLog");
+  const hint = document.getElementById("bruteHint");
+  this.disabled = true;
+  const maxlen = parseInt(this.dataset.run, 10);
+  log.textContent = "正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个串，可能需数秒）";
+  hint.textContent = "运行中…";
+  await new Promise(r => setTimeout(r, 30));   // 让 UI 先刷新
+  const t0 = performance.now();
+  let misses = null, count = 0;
+  outer:
+  for (let L = 1; L <= maxlen; L++) {
+    const digits = new Array(L).fill(0);
+    const total = Math.pow(32, L);
+    for (let idx = 0; idx < total; idx++) {
+      count++;
+      const c = checkDigit(digits);
+      for (let p = 0; p < L; p++) {
+        const orig = digits[p];
+        for (let v = 0; v < 32; v++) {
+          if (v === orig) continue;
+          digits[p] = v;
+          if (checkDigit(digits) === c) { misses = ["single", digits.slice(), p, v]; break outer; }
+        }
+        digits[p] = orig;
+      }
+      for (let p = 0; p < L - 1; p++) {
+        if (digits[p] === digits[p + 1]) continue;
+        [digits[p], digits[p + 1]] = [digits[p + 1], digits[p]];
+        if (checkDigit(digits) === c) { misses = ["transposition", digits.slice(), p]; break outer; }
+        [digits[p], digits[p + 1]] = [digits[p + 1], digits[p]];
+      }
+      // 递增到下一串（32 进制）
+      for (let p = L - 1; p >= 0; p--) {
+        if (++digits[p] < 32) break;
+        digits[p] = 0;
+      }
+    }
+  }
+  const ms = (performance.now() - t0).toFixed(0);
+  if (misses) {
+    log.textContent = `发现漏检：${JSON.stringify(misses)}（耗时 ${ms} ms）—— 该拟群不满足 Damm 检出条件！`;
+  } else {
+    log.textContent = `✓ 穷举 ${count} 个串（长度 ≤ ${maxlen}）完毕：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${ms} ms）`;
+  }
+  hint.textContent = "已完成。";
+  this.disabled = false;
+});
+</script>
+</body>
+</html>
