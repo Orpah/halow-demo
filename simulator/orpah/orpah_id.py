@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.15）
+orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.16）
 ====================================================================
 本模块是 Orpah ID「身份与真实性层」的权威参考实现（纯 Python，独立成层，
 不依赖 orpah 既有业务报文；现有 L1–L4 的 ORPAH-REPORT 等业务流不动）。
@@ -155,7 +155,7 @@ def _mod97(s):
 
 
 def compute_check_mod97(org_unique):
-    """org_unique = ORG-UNIQUE（不含 CC）→ 2 位十进制校验码（IBAN 思路，输出 00–96）。"""
+    """org_unique = ORG-UNIQUE（不含 CC）→ 2 位十进制校验码（IBAN 思路，输出 02–98）。"""
     return "%02d" % (98 - _mod97(org_unique + "00"))
 
 
