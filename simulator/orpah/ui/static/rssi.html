@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RSSI 定位工具 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260910e">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row label { display: flex; align-items: center; gap: 6px; }
+  .row input {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 8px; font-size: 13px; width: 80px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  table.anchors { border-collapse: collapse; margin-top: 10px; }
+  table.anchors th, table.anchors td { padding: 4px 8px; text-align: left; }
+  table.anchors th { color: var(--mut); font-size: 12px; font-weight: 400; }
+  table.anchors td { font-size: 13px; }
+  table.anchors input {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 84px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .btn.del { padding: 2px 8px; color: var(--red); }
+  #map { background: #0a0d12; border: 1px solid var(--bd); border-radius: 8px;
+    margin-top: 12px; display: block; max-width: 100%; }
+  .locate-out { font-size: 14px; }
+  .locate-out.ok { color: var(--grn); }
+  .locate-out.bad { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-name">RSSI 定位工具</span>
+    <span class="sub">Orpah ID · RSSI → 距离 → 2/3/多点定位（无人机悬停取 RSSI）</span>
+    <a class="btn back" href="sig.html">签名工具</a>
+    <a class="btn back" href="index.html">← 返回主页</a>
+  </div>
+</header>
+
+<section class="card">
+  <h3>1 · 路径损耗模型</h3>
+  <div class="row">
+    <label>A（1m 处 RSSI）<input id="plA" type="number" step="0.1" value="-40"> dBm</label>
+    <label>n（路径损耗指数）<input id="plN" type="number" step="0.1" value="2.5"></label>
+    <label>仿真噪声 ±<input id="noise" type="number" step="0.5" value="2"> dBm</label>
+  </div>
+  <p class="hint">距离估算：<code>d = 10^((A − RSSI) / (10·n))</code>；RSSI 越小（越负）距离越远。
+  n=2 自由空间、2.5–4 户外/遮挡；HaLow 900MHz 户外通常 2.5–3。</p>
+</section>
+
+<section class="card">
+  <h3>2 · 测点（路由器 / 无人机悬停点）</h3>
+  <div class="row">
+    <label>真实位置 x <input id="trueX" type="number" step="1" value="0"></label>
+    <label>y <input id="trueY" type="number" step="1" value="0"></label>
+    <button class="btn" id="btnSim">仿真生成 RSSI</button>
+    <button class="btn" id="btnAdd">添加测点</button>
+  </div>
+  <table class="anchors">
+    <thead><tr><th>#</th><th>x (m)</th><th>y (m)</th><th>RSSI (dBm)</th><th></th></tr></thead>
+    <tbody id="anchorBody"></tbody>
+  </table>
+  <p class="hint">每个测点 = 无人机在某位置悬停测得该客户端的 RSSI（可手动改，或「仿真」按真实位置 + 噪声反推）。
+  2 个测点 → 两圆交点（二义）；3 个测点 → 唯一交点；≥4 → 最小二乘拟合。</p>
+</section>
+
+<section class="card">
+  <h3>3 · 定位结果</h3>
+  <div class="row">
+    <button class="btn primary" id="btnLocate">定位</button>
+    <span class="locate-out" id="locateOut"></span>
+  </div>
+  <canvas id="map" width="620" height="420"></canvas>
+  <p class="hint">蓝方块=测点（标注 x,y）、橙圈=按 RSSI 估算的距离圆、绿叉=真实位置、红叉=定位结果。</p>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const SCALE = 6;   // 画布：每米多少像素
+
+function plA() { return parseFloat($("plA").value); }
+function plN() { return parseFloat($("plN").value); }
+
+function distFromRssi(rssi, A, n) {
+  return Math.pow(10, (A - rssi) / (10 * n));
+}
+function rssiFromDist(d, A, n) {
+  return A - 10 * n * Math.log10(Math.max(d, 0.01));
+}
+
+/* ---- 测点表格 ---- */
+function readAnchors() {
+  const out = [];
+  for (const tr of document.querySelectorAll("#anchorBody tr")) {
+    const x = parseFloat(tr.querySelector(".x").value);
+    const y = parseFloat(tr.querySelector(".y").value);
+    const rssi = parseFloat(tr.querySelector(".rssi").value);
+    if (!isNaN(x) && !isNaN(y) && !isNaN(rssi)) out.push({ x, y, rssi });
+  }
+  return out;
+}
+
+function renumber() {
+  document.querySelectorAll("#anchorBody tr").forEach((tr, i) => {
+    tr.children[0].textContent = i + 1;
+  });
+}
+
+function addRow(x = 30, y = 0, rssi = "") {
+  const tr = document.createElement("tr");
+  const idx = document.querySelectorAll("#anchorBody tr").length + 1;
+  tr.innerHTML =
+    `<td>${idx}</td>` +
+    `<td><input class="x" type="number" step="1" value="${x}"></td>` +
+    `<td><input class="y" type="number" step="1" value="${y}"></td>` +
+    `<td><input class="rssi" type="number" step="0.1" value="${rssi}"></td>` +
+    `<td><button class="btn del" title="删除">×</button></td>`;
+  tr.querySelector(".del").onclick = () => { tr.remove(); renumber(); };
+  $("anchorBody").appendChild(tr);
+}
+
+function simulate() {
+  const tx = parseFloat($("trueX").value), ty = parseFloat($("trueY").value);
+  const A = plA(), n = plN();
+  const noise = parseFloat($("noise").value) || 0;
+  for (const tr of document.querySelectorAll("#anchorBody tr")) {
+    const x = parseFloat(tr.querySelector(".x").value);
+    const y = parseFloat(tr.querySelector(".y").value);
+    if (isNaN(x) || isNaN(y)) continue;
+    const d = Math.hypot(x - tx, y - ty);
+    const r = rssiFromDist(d, A, n) + (Math.random() * 2 - 1) * noise;
+    tr.querySelector(".rssi").value = r.toFixed(1);
+  }
+}
+
+/* ---- 定位算法 ---- */
+function circleIntersect(x0, y0, r0, x1, y1, r1) {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  if (d > r0 + r1 || d < Math.abs(r0 - r1) || d < 1e-9) return [];
+  const a = (r0 * r0 - r1 * r1 + d * d) / (2 * d);
+  const h2 = r0 * r0 - a * a;
+  if (h2 < 0) return [];
+  const h = Math.sqrt(h2);
+  const x2 = x0 + a * (x1 - x0) / d, y2 = y0 + a * (y1 - y0) / d;
+  return [
+    { x: x2 + h * (y1 - y0) / d, y: y2 - h * (x1 - x0) / d },
+    { x: x2 - h * (y1 - y0) / d, y: y2 + h * (x1 - x0) / d },
+  ];
+}
+
+function trilaterate(anchors, dists) {
+  const n = anchors.length;
+  if (n === 1) return { points: [] };
+  if (n === 2) {
+    return { points: circleIntersect(anchors[0].x, anchors[0].y, dists[0],
+                                     anchors[1].x, anchors[1].y, dists[1]) };
+  }
+  // n ≥ 3：线性化最小二乘（以第 0 个为参考，消去二次项）
+  const [x0, y0] = [anchors[0].x, anchors[0].y];
+  const d0 = dists[0];
+  let a00 = 0, a01 = 0, a11 = 0, b0 = 0, b1 = 0;
+  for (let j = 1; j < n; j++) {
+    const [xj, yj] = [anchors[j].x, anchors[j].y];
+    const dj = dists[j];
+    const ax = 2 * (xj - x0), ay = 2 * (yj - y0);
+    const bb = d0 * d0 - dj * dj - (x0 * x0 + y0 * y0) + (xj * xj + yj * yj);
+    a00 += ax * ax; a01 += ax * ay; a11 += ay * ay;
+    b0 += ax * bb; b1 += ay * bb;
+  }
+  const det = a00 * a11 - a01 * a01;
+  if (Math.abs(det) < 1e-12) return { points: [] };
+  return { points: [{ x: (a11 * b0 - a01 * b1) / det, y: (a00 * b1 - a01 * b0) / det }] };
+}
+
+/* ---- 画布 ---- */
+function cross(ctx, x, y, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y);
+  ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6);
+  ctx.stroke();
+}
+
+function draw(anchors, dists, res, tru) {
+  const c = $("map"), ctx = c.getContext("2d");
+  const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#1c2128";
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx <= W; gx += 50) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+  for (let gy = 0; gy <= H; gy += 50) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  ctx.strokeStyle = "#30363d";
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+
+  anchors.forEach((a, i) => {
+    const sx = cx + a.x * SCALE, sy = cy - a.y * SCALE;
+    ctx.beginPath();
+    ctx.arc(sx, sy, dists[i] * SCALE, 0, 2 * Math.PI);
+    ctx.strokeStyle = "rgba(210,153,34,.55)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(sx - 4, sy - 4, 8, 8);
+    ctx.fillStyle = "#c9d1d9";
+    ctx.font = "11px monospace";
+    ctx.fillText(`${a.x},${a.y}`, sx + 7, sy - 7);
+  });
+
+  if (tru) {
+    const sx = cx + tru.x * SCALE, sy = cy - tru.y * SCALE;
+    cross(ctx, sx, sy, "#3fb950");
+    ctx.fillStyle = "#3fb950";
+    ctx.font = "11px monospace";
+    ctx.fillText("真实", sx + 8, sy - 8);
+  }
+  res.points.forEach((p, i) => {
+    const sx = cx + p.x * SCALE, sy = cy - p.y * SCALE;
+    cross(ctx, sx, sy, "#f85149");
+    ctx.fillStyle = "#f85149";
+    ctx.font = "11px monospace";
+    ctx.fillText(anchors.length === 2 ? `交点${i + 1}` : "定位", sx + 8, sy - 8);
+  });
+}
+
+/* ---- 定位 ---- */
+function locate() {
+  const anchors = readAnchors();
+  const A = plA(), n = plN();
+  const dists = anchors.map(a => distFromRssi(a.rssi, A, n));
+  const tx = parseFloat($("trueX").value), ty = parseFloat($("trueY").value);
+  const hasTrue = !isNaN(tx) && !isNaN(ty);
+  const res = trilaterate(anchors, dists);
+  draw(anchors, dists, res, hasTrue ? { x: tx, y: ty } : null);
+
+  const out = $("locateOut");
+  out.className = "locate-out";
+  if (anchors.length < 2) {
+    out.textContent = "至少需要 2 个测点";
+    out.className = "locate-out bad";
+    return;
+  }
+  if (res.points.length === 0) {
+    out.textContent = "无法定位（距离圆无交点）——检查 RSSI / 参数是否合理";
+    out.className = "locate-out bad";
+    return;
+  }
+  if (anchors.length === 2) {
+    const [p, q] = res.points;
+    out.textContent = `两圆交点：( ${p.x.toFixed(1)}, ${p.y.toFixed(1)} ) 与 ( ${q.x.toFixed(1)}, ${q.y.toFixed(1)} )，需第 3 点消歧`;
+    return;
+  }
+  const p = res.points[0];
+  let s = `定位结果：( ${p.x.toFixed(1)}, ${p.y.toFixed(1)} )`;
+  if (hasTrue) s += `，误差 ${Math.hypot(p.x - tx, p.y - ty).toFixed(1)} m`;
+  out.textContent = s;
+  out.className = "locate-out ok";
+}
+
+$("btnAdd").onclick = () => {
+  // 新测点放在半径 30 的圆上、按当前数量错开 90°，避免与已有测点重叠
+  const n = document.querySelectorAll("#anchorBody tr").length;
+  const ang = (n * 90) * Math.PI / 180;
+  addRow(Math.round(30 * Math.cos(ang)), Math.round(30 * Math.sin(ang)), "");
+  locate();
+};
+$("btnSim").onclick = simulate;
+$("btnLocate").onclick = locate;
+
+/* 默认演示：3 个测点绕真实位置 (0,0) 悬停 + 仿真 + 定位 */
+addRow(30, 0);
+addRow(-15, 26);
+addRow(-15, -26);
+simulate();
+locate();
+</script>
+</body>
+</html>
