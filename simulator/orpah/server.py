@@ -261,7 +261,7 @@ class OrpahServer:
             "sn": payload.get("sn") or msg.get("sn"),
             "alg": hdr.get("alg", "-"),
             "level": hdr.get("level", "-"),
-            "trust": v.get("trust"),
+            "trust": v.get("trust") if v.get("accepted") else "-",
             "accepted": bool(v.get("accepted")),
             "error": v.get("error"),
             "sig": sig[:36] + ("…" if len(sig) > 36 else ""),

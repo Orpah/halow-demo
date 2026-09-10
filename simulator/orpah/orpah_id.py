@@ -355,6 +355,10 @@ class KeyStore:
     def revoke(self, sn):
         self._revoked.add(sn)
 
+    def unrevoke(self, sn):
+        """撤销的逆操作（仅演示用；真实部署撤销不可逆，见规范 §6.3.2）。"""
+        self._revoked.discard(sn)
+
     def is_revoked(self, sn):
         return sn in self._revoked
 

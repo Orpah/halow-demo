@@ -6,6 +6,7 @@
 const $ = id => document.getElementById(id);
 const T = key => OrpahI18n.t(key);          // 取文案
 let paused = false;
+let idRevoked = false;
 
 const STAGE_NODE = {
   client: "nodeClient", router: "nodeRouter", server: "nodeServer",
@@ -217,7 +218,10 @@ function renderId(d) {
   $("idLevel").textContent = d.level != null ? d.level : "-";
   const t = $("idTrust");
   const ok = d.accepted;
-  t.textContent = (ok ? T("id_ok") : T("id_bad")) + " · " + T("trust_" + d.trust);
+  const trustTxt = d.trust && d.trust !== "-" ? " · " + T("trust_" + d.trust) : "";
+  t.textContent = ok
+    ? T("id_ok") + trustTxt
+    : T("id_bad") + (d.error ? " · " + d.error : "");
   t.className = ok ? "ok" : "bad";
   $("idSig").textContent = d.sig || "-";
   $("idNonce").textContent = d.nonce || "-";
@@ -236,11 +240,12 @@ function renderIdReports(list) {
   }
   arr.slice(0, 10).forEach(r => {
     const tr = document.createElement("tr");
+    const trustTxt = r.trust && r.trust !== "-" ? T("trust_" + r.trust) : "-";
     tr.innerHTML =
       `<td>${esc(r.t)}</td><td>${esc(r.sn)}</td>` +
       `<td>${esc(r.alg)}</td><td>${esc(r.level)}</td>` +
-      `<td>${esc(T("trust_" + r.trust))}</td>` +
-      `<td class="${r.accepted ? "yes" : "no"}">${r.accepted ? "✓" : "✗"}</td>`;
+      `<td>${esc(trustTxt)}</td>` +
+      `<td class="${r.accepted ? "yes" : "no"}">${r.accepted ? "✓" : "✗ " + esc(r.error || "")}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -292,6 +297,9 @@ async function refresh() {
     renderFounds(s.founds || []);
     renderId(s.id_demo || {});
     renderIdReports(s.id_reports || []);
+    idRevoked = !!s.id_revoked;
+    const btnRev = $("btnIdRevoke");
+    if (btnRev) btnRev.textContent = T(idRevoked ? "btn_unrevoke" : "btn_revoke");
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;
@@ -330,6 +338,15 @@ $("btnMark").onclick = async () => {
 $("btnUntrack").onclick = async () => {
   const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";
   await postCtl({ action: "untrack", sn });
+};
+$("btnIdRevoke").onclick = async () => {
+  await postCtl({ action: idRevoked ? "unrevoke" : "revoke" });
+};
+$("btnIdReplay").onclick = async () => {
+  await postCtl({ action: "replay" });
+};
+$("btnIdStale").onclick = async () => {
+  await postCtl({ action: "stale" });
 };
 
 applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，直接应用

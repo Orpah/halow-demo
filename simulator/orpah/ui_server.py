@@ -86,6 +86,7 @@ class OrpahApp:
         self.id_demo = {}
         self.id_reports = []
         self.id_report_total = 0
+        self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
         # 组件
         self.cores = []
         self.srv = None
@@ -268,17 +269,23 @@ class OrpahApp:
                             firmware="1.0.3")
 
     def _id_tick(self):
-        """Client 生成真实签名的 orpah-id-report 并经既有链路上行（Server 验签）。"""
+        """周期生成真实签名的 orpah-id-report 并经既有链路上行（Server 验签）。"""
         try:
-            self._ensure_id_device()
-            r = self.id_dev.report(
-                level=0,
-                seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
-                               "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
-                battery_mv=3700, firmware="1.0.3")
-            self.client.send_id_report(r)
+            self._send_id_report()
         except Exception as e:  # 无 cryptography 时退化为错误展示
             self.id_demo = {"t": time.strftime("%H:%M:%S"), "err": str(e)}
+
+    def _send_id_report(self, ts=None):
+        """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
+        self._ensure_id_device()
+        r = self.id_dev.report(
+            level=0, ts=ts,
+            seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
+                           "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
+            battery_mv=3700, firmware="1.0.3")
+        self._last_id_report = r
+        self.client.send_id_report(r)
+        return r
 
     def _on_id_report(self, rec):
         """Server 验签结果回调：更新卡片 + 签名上报流（带 trust）。"""
@@ -286,7 +293,7 @@ class OrpahApp:
             "t": rec["t"], "sn": rec["sn"], "alg": rec["alg"],
             "level": rec["level"], "trust": rec["trust"],
             "accepted": rec["accepted"], "sig": rec.get("sig", ""),
-            "nonce": rec.get("nonce", ""),
+            "nonce": rec.get("nonce", ""), "error": rec.get("error"),
         }
         self.id_report_total += 1
         self.id_reports.insert(0, rec)
@@ -334,6 +341,8 @@ class OrpahApp:
             "id_demo": self.id_demo,
             "id_reports": list(self.id_reports),
             "id_report_total": self.id_report_total,
+            "id_revoked": (self.id_ks.is_revoked(self.client.sn)
+                           if self.client else False),
         }
 
     def cmd(self, action, sn=None, every=None, note=""):
@@ -350,6 +359,14 @@ class OrpahApp:
             self.srv.mark_tracked(sn, note=note or "ui")
         elif action == "untrack" and sn and self.srv:
             self.srv.untrack(sn)
+        elif action == "revoke" and self.client:
+            self.id_ks.revoke(self.client.sn)
+        elif action == "unrevoke" and self.client:
+            self.id_ks.unrevoke(self.client.sn)
+        elif action == "replay" and self._last_id_report:
+            self.client.send_id_report(self._last_id_report)
+        elif action == "stale":
+            self._send_id_report(ts=int(time.time()) - 3600)
         return {"ok": True}
 
     def stop_all(self):

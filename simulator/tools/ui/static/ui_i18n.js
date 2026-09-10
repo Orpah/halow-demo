@@ -110,6 +110,11 @@
       "id_stream_title": "Orpah ID 签名上报流（服务器验签）",
       "id_stream_empty": "（暂无签名上报）",
       "th_result": "结果",
+      "btn_revoke": "撤销设备",
+      "btn_unrevoke": "恢复设备",
+      "btn_replay": "重放上一条",
+      "btn_stale": "超窗上报",
+      "id_ctl_hint": "演示：撤销→上报被拒；重放→nonce 去重；超窗→时间窗口拒绝。",
     },
     en: {
       "conn_CONNECTED": "Connected",
@@ -202,6 +207,11 @@
       "id_stream_title": "Orpah ID signed report stream (server verified)",
       "id_stream_empty": "(no signed report yet)",
       "th_result": "Result",
+      "btn_revoke": "Revoke device",
+      "btn_unrevoke": "Unrevoke device",
+      "btn_replay": "Replay last",
+      "btn_stale": "Send stale",
+      "id_ctl_hint": "Demo: revoke\u2192rejected; replay\u2192nonce dedup; stale\u2192time-window rejected.",
     },
   };
 

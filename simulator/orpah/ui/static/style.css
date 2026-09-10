@@ -129,4 +129,5 @@ tr.new { animation: rowin .4s; }
   border-radius: 4px; padding: 2px 6px; overflow-wrap: anywhere;
 }
 .id-stream { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--bd); }
+.id-ctl { margin-top: 10px; }
 
