@@ -68,7 +68,8 @@ class OrpahServer:
         self.founds = []                    # 最近 FOUND（内存缓冲）
         # Orpah ID 验签（§9.3）：keystore + nonce 去重 + 验签结果回调
         self.keystore = keystore
-        self.id_nonces = id_nonces
+        # 独立运行（未传入）也默认启用 nonce 去重（防重放）；UI 传入共享缓存
+        self.id_nonces = id_nonces if id_nonces is not None else oid.NonceCache()
         self.on_id_report = on_id_report
         self.id_report_total = 0
         self.id_reports = []
