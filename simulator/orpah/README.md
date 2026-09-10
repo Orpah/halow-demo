@@ -109,6 +109,14 @@ Router 主动拉表已在 **L3b** 落地（见下）。
 - 依赖 `cryptography`（ES256/HS256 需要；缺失时仅 L3 none 可用）。
 - **验收**：`python demo_id.py`（22 用例：四级降级签名验签 + 篡改/重放/超窗/坏 CHECK/
   未知设备/撤销/xport 全 PASS）。
+- **独立跑 `server.py` 注意**：Orpah ID 验签需要密钥库。UI（`ui_server.py`）在进程内
+  自动注册设备；独立 `python server.py` 缺省**未配置密钥库** → 所有 `ORPAH-ID-REPORT`
+  判 `unknown_device`（业务报文 L1/L2 不受影响）。要独立验签：先用 `KeyStore.save()`
+  导出一份密钥库 JSON，再 `python server.py --keystore-file <json>` 加载：
+  ```bash
+  python -c "import orpah_id as o; ks=o.KeyStore(); ks.register(o.Device(sn='CN-WH01-9AF3C1D2')); ks.save('keystore.json')"
+  python server.py --keystore-file keystore.json
+  ```
 
 ## 快速开始（零硬件）
 

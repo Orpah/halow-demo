@@ -30,6 +30,7 @@ try:
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives import hmac as _chmac
+    from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.utils import (
         encode_dss_signature, decode_dss_signature)
     _CRYPTO_OK = True
@@ -288,6 +289,22 @@ def _verify_hs256(hmac_key, preimage, sig):
     return _hmac_stdlib.compare_digest(h.finalize(), expected)
 
 
+def pubkey_to_pem(pubkey):
+    """ECDSA 公钥 → PEM 字符串（SubjectPublicKeyInfo）。"""
+    if not _CRYPTO_OK:
+        raise RuntimeError("pubkey_to_pem 需要 cryptography 库")
+    return pubkey.public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii")
+
+
+def pubkey_from_pem(pem):
+    """PEM 字符串 → ECDSA 公钥对象。"""
+    if not _CRYPTO_OK:
+        raise RuntimeError("pubkey_from_pem 需要 cryptography 库")
+    return serialization.load_pem_public_key(pem.encode("ascii"))
+
+
 # ---------------------------------------------------------------------------
 # 设备 / 密钥库 / nonce 缓存
 # ---------------------------------------------------------------------------
@@ -361,6 +378,30 @@ class KeyStore:
 
     def is_revoked(self, sn):
         return sn in self._revoked
+
+    def save(self, path):
+        """导出密钥库为 JSON 文件（供 server.py --keystore-file 加载）。"""
+        recs = []
+        for sn, r in self._records.items():
+            recs.append({
+                "sn": sn,
+                "pubkey_pem": pubkey_to_pem(r["pubkey"]),
+                "hmac_key_b64": b64url_encode(r["hmac_key"]),
+                "se_sn": r.get("se_sn"),
+            })
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"devices": recs}, f, ensure_ascii=False, indent=2)
+
+    def load(self, path):
+        """从 JSON 文件加载设备并注册（server.py --keystore-file）。"""
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        for d in data.get("devices", []):
+            self._records[d["sn"]] = {
+                "pubkey": pubkey_from_pem(d["pubkey_pem"]),
+                "hmac_key": b64url_decode(d["hmac_key_b64"]),
+                "se_sn": d.get("se_sn"),
+            }
 
 
 class NonceCache:

@@ -140,6 +140,9 @@ class OrpahServer:
         self.sock.settimeout(0.5)
         threading.Thread(target=self._loop, daemon=True).start()
         log(f"监听 127.0.0.1:{self.port} (UDP)，等待 ORPAH 报文…")
+        if self.keystore is None:
+            log("（未配置 Orpah ID 密钥库：ORPAH-ID-REPORT 一律判 unknown_device；"
+                "可用 --keystore-file 加载）")
         return self
 
     def _loop(self):
@@ -250,6 +253,11 @@ class OrpahServer:
         report = msg.get("report") if isinstance(msg, dict) else None
         hdr = (report or {}).get("hdr") or {}
         payload = (report or {}).get("payload") or {}
+        sn = payload.get("sn") or msg.get("sn")
+        # 前置 SN 格式校验（与 _on_report 一致，早日志；最终仍由 verify_report 裁决）
+        reason = sn_err(sn)
+        if reason:
+            log(f"ORPAH-ID-REPORT SN 校验失败 sn={sn!r} ({reason})")
         if not isinstance(report, dict):
             v = {"accepted": False, "error": "bad_format", "trust": "none"}
         else:
@@ -258,7 +266,7 @@ class OrpahServer:
         sig = (report or {}).get("sig") or ""
         rec = {
             "t": time.strftime("%H:%M:%S"),
-            "sn": payload.get("sn") or msg.get("sn"),
+            "sn": sn or "-",
             "alg": hdr.get("alg", "-"),
             "level": hdr.get("level", "-"),
             "trust": v.get("trust") if v.get("accepted") else "-",
@@ -327,9 +335,17 @@ def main():
                     help="启动即标记为走失的 sn（可多次，如 --mark CN-WH01-9AF3C1D2）")
     ap.add_argument("--timeout", type=float, default=30,
                     help="空闲退出前秒数（默认 30；<=0 一直跑）")
+    ap.add_argument("--keystore-file", default=None,
+                    help="Orpah ID 密钥库 JSON（含 pubkey/hmac_key，KeyStore.save 导出）；"
+                         "缺省不启用 Orpah ID 验签")
     args = ap.parse_args()
 
-    srv = OrpahServer(port=args.port)
+    ks = None
+    if args.keystore_file:
+        ks = oid.KeyStore()
+        ks.load(args.keystore_file)
+        log(f"已加载 Orpah ID 密钥库 {args.keystore_file}")
+    srv = OrpahServer(port=args.port, keystore=ks)
     srv.start()
     for sn in args.mark:
         srv.mark_tracked(sn)
