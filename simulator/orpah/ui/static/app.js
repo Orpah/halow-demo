@@ -313,7 +313,7 @@ function postCtl(body) {
   return fetch("/api/ctl", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }).catch(e => console.error("postCtl 请求失败:", e));
 }
 
 $("btnPause").onclick = async () => {
