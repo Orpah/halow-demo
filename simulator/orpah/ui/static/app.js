@@ -223,6 +223,28 @@ function renderId(d) {
   $("idNonce").textContent = d.nonce || "-";
 }
 
+function renderIdReports(list) {
+  const tbody = $("idReportList");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const arr = list || [];
+  if (!arr.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" class="pub-empty">${esc(T("id_stream_empty"))}</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+  arr.slice(0, 10).forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${esc(r.t)}</td><td>${esc(r.sn)}</td>` +
+      `<td>${esc(r.alg)}</td><td>${esc(r.level)}</td>` +
+      `<td>${esc(T("trust_" + r.trust))}</td>` +
+      `<td class="${r.accepted ? "yes" : "no"}">${r.accepted ? "✓" : "✗"}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
 async function refresh() {
   try {
     const r = await fetch("/api/status");
@@ -269,6 +291,7 @@ async function refresh() {
     renderPublishes(s.publishes || []);
     renderFounds(s.founds || []);
     renderId(s.id_demo || {});
+    renderIdReports(s.id_reports || []);
     // 控制面板回显
     if (!document.activeElement || document.activeElement.id !== "ctlSn")
       $("ctlSn").value = s.sn;

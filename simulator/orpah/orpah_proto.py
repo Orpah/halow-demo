@@ -47,10 +47,11 @@ MSG_ERROR = "ORPAH-ERROR"                  # 任→任 错误
 MSG_LOST_TABLE = "ORPAH-LOST-TABLE"        # S→R 走失表下发/更新
 MSG_LOST_TABLE_REQ = "ORPAH-LOST-TABLE-REQ"   # R→S 请求当前走失表（Router 主动拉取）
 MSG_FOUND = "ORPAH-FOUND"                  # R→S 发现走失（业务告警：命中走失表）
+MSG_ID_REPORT = "ORPAH-ID-REPORT"          # C→R→S 已签 orpah-id-report（《Orpah ID 协议规范》）
 
 MSG_TYPES = {MSG_REQ_CONNECT, MSG_ACCESS_INFO, MSG_REPORT,
              MSG_TRACKING_STATUS, MSG_ERROR, MSG_LOST_TABLE,
-             MSG_LOST_TABLE_REQ, MSG_FOUND}
+             MSG_LOST_TABLE_REQ, MSG_FOUND, MSG_ID_REPORT}
 
 # 跟踪状态码（TRACKING-STATUS 的 status 字段；ERROR 的 code 复用部分）
 ST_NOT_TRACKED = "NOT-TRACKED"      # 走失库中无该 sn（未在跟踪）
@@ -221,6 +222,18 @@ def build_found(sn, ts=None):
     上报（每次命中都发，供业务端记录/告警）。Server 记录并可用于 UI「发现记录」。
     """
     return _base(MSG_FOUND, sn, ts)
+
+
+def build_id_report(signed_report, ts=None):
+    """C→R→S ORPAH-ID-REPORT：把已签的 orpah-id-report（{hdr,payload,sig}）
+    包一层既有链路报文（公共头 v/type/sn/ts + report 字段）走原数据通路。
+
+    签名的校验在 Server 侧按《Orpah ID 协议规范》§9.3 进行（见 server.py）。
+    """
+    payload = (signed_report or {}).get("payload") or {}
+    msg = _base(MSG_ID_REPORT, payload.get("sn"), ts)
+    msg["report"] = signed_report
+    return msg
 
 
 # ---------------------------------------------------------------------------

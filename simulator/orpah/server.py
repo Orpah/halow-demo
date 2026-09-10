@@ -34,11 +34,12 @@ for _s in (sys.stdout, sys.stderr):
 
 from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          MSG_TRACKING_STATUS, MSG_LOST_TABLE,
-                         MSG_LOST_TABLE_REQ, MSG_FOUND,
+                         MSG_LOST_TABLE_REQ, MSG_FOUND, MSG_ID_REPORT,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
                          ERR_FORMAT, ERR_LOG, sn_err)
+import orpah_id as oid                     # Orpah ID 验签（§9.3）
 
 LOG = True
 
@@ -52,7 +53,8 @@ class OrpahServer:
     """UDP 服务器：收 ORPAH 报文 + 权威走失库 + 应答/LOST-TABLE 下发。"""
 
     def __init__(self, port=ORPAH_UDP_PORT, on_report=None, on_down=None,
-                 on_lost=None, on_push=None, on_found=None):
+                 on_lost=None, on_push=None, on_found=None,
+                 keystore=None, id_nonces=None, on_id_report=None):
         self.port = port
         self.on_report = on_report          # callable(msg) or None（收到 REPORT）
         self.on_down = on_down              # callable(msg, router_addr) 下行应答
@@ -64,6 +66,12 @@ class OrpahServer:
         self.down_count = 0                 # 已下发的应答数
         self.found_count = 0                # 收到 Router 发现走失上报（ORPAH-FOUND）次数
         self.founds = []                    # 最近 FOUND（内存缓冲）
+        # Orpah ID 验签（§9.3）：keystore + nonce 去重 + 验签结果回调
+        self.keystore = keystore
+        self.id_nonces = id_nonces
+        self.on_id_report = on_id_report
+        self.id_report_total = 0
+        self.id_reports = []
         self._stop = threading.Event()
         self.sock = None
         # 权威走失库：sn -> {"tracked": bool, "note": str, "since": ts}
@@ -179,6 +187,9 @@ class OrpahServer:
                 f"上报发现走失 sn={sn}")
             if self.on_found:
                 self.on_found(msg, addr)
+        elif mtype == MSG_ID_REPORT:
+            # R→S 已签 orpah-id-report → 验签（§9.3）并记录 trust
+            self._on_id_report(msg, addr)
         else:
             log(f"收到未处理类型 {mtype}（来自 {addr}），忽略")
 
@@ -233,6 +244,37 @@ class OrpahServer:
         self._reply(addr, status)
         if self.on_report:
             self.on_report(msg)
+
+    def _on_id_report(self, msg, addr):
+        """R→S ORPAH-ID-REPORT：验签已签 orpah-id-report（§9.3），记录 trust。"""
+        report = msg.get("report") if isinstance(msg, dict) else None
+        hdr = (report or {}).get("hdr") or {}
+        payload = (report or {}).get("payload") or {}
+        if not isinstance(report, dict):
+            v = {"accepted": False, "error": "bad_format", "trust": "none"}
+        else:
+            v = oid.verify_report(report, self.keystore,
+                                  used_nonces=self.id_nonces)
+        sig = (report or {}).get("sig") or ""
+        rec = {
+            "t": time.strftime("%H:%M:%S"),
+            "sn": payload.get("sn") or msg.get("sn"),
+            "alg": hdr.get("alg", "-"),
+            "level": hdr.get("level", "-"),
+            "trust": v.get("trust"),
+            "accepted": bool(v.get("accepted")),
+            "error": v.get("error"),
+            "sig": sig[:36] + ("…" if len(sig) > 36 else ""),
+            "nonce": payload.get("nonce", ""),
+        }
+        self.id_report_total += 1
+        self.id_reports.insert(0, rec)
+        del self.id_reports[20:]
+        log(f"[id {self.id_report_total}] ORPAH-ID-REPORT <- {addr[0]}:{addr[1]}: "
+            f"sn={rec['sn']} alg={rec['alg']} level={rec['level']} "
+            f"trust={rec['trust']} accepted={rec['accepted']}")
+        if self.on_id_report:
+            self.on_id_report(rec)
 
     def _note_router(self, addr):
         """记录一台 Router 地址；首次见到 → 若已有走失表立即推全量（新 Router 追平）。"""

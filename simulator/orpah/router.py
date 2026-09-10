@@ -39,7 +39,8 @@ for _s in (sys.stdout, sys.stderr):
 from host_bus import HostBus
 from orpah_proto import (ORPAH_UDP_PORT, MAC_BCAST, MSG_REQ_CONNECT,
                          MSG_REPORT, MSG_TRACKING_STATUS, MSG_LOST_TABLE,
-                         MSG_ERROR, parse_eth_frame, decode_msg, encode_msg,
+                         MSG_ERROR, MSG_ID_REPORT,
+                         parse_eth_frame, decode_msg, encode_msg,
                          build_access_info, build_eth_frame,
                          build_lost_table_req, build_found,
                          ST_NOT_TRACKED)
@@ -144,6 +145,17 @@ class RouterBridge:
                 f"seq={msg.get('seq')} -> {self.server_addr[0]}:{self.server_addr[1]}")
             if self.on_up:
                 self.on_up(msg)
+            return
+        if mtype == MSG_ID_REPORT:
+            # 已签 orpah-id-report：Router 只透传（不改 hdr/payload/sig），
+            # Server 侧验签（§9.3）。不占 REPORT 上行计数。
+            try:
+                self.udp.sendto(encode_msg(msg), self.server_addr)
+            except OSError as e:
+                log(f"转发 Server 失败: {e}")
+                return
+            log(f"上行 ORPAH-ID-REPORT sn={sn} -> "
+                f"{self.server_addr[0]}:{self.server_addr[1]}")
             return
         # 其它类型（一般不会经 Router 上行）——记录
         log(f"收到上行类型 {mtype} sn={sn}，忽略")

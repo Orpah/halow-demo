@@ -32,8 +32,9 @@ for _s in (sys.stdout, sys.stderr):
 from host_bus import HostBus
 from orpah_proto import (MAC_BCAST, MSG_REQ_CONNECT, MSG_REPORT,
                          MSG_ACCESS_INFO, MSG_TRACKING_STATUS, MSG_ERROR,
-                         build_req_connect, build_report, encode_msg,
-                         parse_eth_frame, decode_msg, build_eth_frame)
+                         build_req_connect, build_report, build_id_report,
+                         encode_msg, parse_eth_frame, decode_msg,
+                         build_eth_frame)
 
 LOG = True
 
@@ -74,13 +75,13 @@ class ClientHost:
         self.sta.close()
 
     # ---------------- 注入（DATA_TX，host → STA） ----------------
-    def _inject(self, msg):
+    def _inject(self, msg, notify=True):
         payload = encode_msg(msg)
         eth = build_eth_frame(payload, src_mac=self.mac, dst_mac=MAC_BCAST)
         if not self.sta.send_frame(eth):
             log("注入失败（STA 未连接？）")
             return -1
-        if self.on_sent:
+        if notify and self.on_sent:
             self.on_sent(msg, len(eth))
         return len(eth)
 
@@ -102,6 +103,18 @@ class ClientHost:
             self.sent += 1
             log(f"[{self.seq}] 注入 ORPAH-REPORT sn={self.sn} "
                 f"rssi={self.rssi} ({n}B)")
+        return n
+
+    def send_id_report(self, signed_report):
+        """注入一条 ORPAH-ID-REPORT（已签 orpah-id-report 包一层走既有链路）。
+
+        与 report_once 不同：不动 seq/sent 计数、不触发 on_sent 三阶段点亮；
+        Server 验签结果由 OrpahApp._on_id_report 单独展示（见 ui_server.py）。
+        """
+        msg = build_id_report(signed_report)
+        n = self._inject(msg, notify=False)
+        if n > 0:
+            log(f"注入 ORPAH-ID-REPORT sn={msg.get('sn')} ({n}B)")
         return n
 
     # ---------------- 下行读（DATA_RX，STA → host） ----------------

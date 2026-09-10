@@ -107,6 +107,9 @@
       "trust_medium": "中 · HMAC(L1)",
       "trust_low": "低 · HMAC(L2)",
       "trust_none": "无签名 · 覆盖发现",
+      "id_stream_title": "Orpah ID 签名上报流（服务器验签）",
+      "id_stream_empty": "（暂无签名上报）",
+      "th_result": "结果",
     },
     en: {
       "conn_CONNECTED": "Connected",
@@ -196,6 +199,9 @@
       "trust_medium": "Medium \u00b7 HMAC(L1)",
       "trust_low": "Low \u00b7 HMAC(L2)",
       "trust_none": "Unsigned \u00b7 coverage",
+      "id_stream_title": "Orpah ID signed report stream (server verified)",
+      "id_stream_empty": "(no signed report yet)",
+      "th_result": "Result",
     },
   };
 

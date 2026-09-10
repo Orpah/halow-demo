@@ -79,13 +79,13 @@ class OrpahApp:
         self.publish_total = 0             # 服务器发布走失表总次数（单调累加）
         # 发现记录（Router 命中走失表 → ORPAH-FOUND，最新在前）
         self.founds = []
-        # Orpah ID 层演示（只读展示）：独立设备 + 密钥库 + nonce 缓存
+        # Orpah ID 层演示：设备 + 密钥库 + nonce 缓存（设备按 Client SN 创建，懒初始化）
         self.id_ks = oid.KeyStore()
-        self.id_dev = oid.Device()
-        self.id_ks.register(self.id_dev, model="CH32V203+TX-AH+ATECC608B",
-                            firmware="1.0.3")
+        self.id_dev = None
         self.id_used = oid.NonceCache()
         self.id_demo = {}
+        self.id_reports = []
+        self.id_report_total = 0
         # 组件
         self.cores = []
         self.srv = None
@@ -208,7 +208,9 @@ class OrpahApp:
         # 2) Server（真实 UDP，权威走失库）
         self.srv = OrpahServer(port=UDP_SRV, on_report=self._on_report,
                                on_lost=self._on_lost, on_push=self._on_publish,
-                               on_found=self._on_found_server)
+                               on_found=self._on_found_server,
+                               keystore=self.id_ks, id_nonces=self.id_used,
+                               on_id_report=self._on_id_report)
         self.srv.start()
 
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
@@ -256,27 +258,40 @@ class OrpahApp:
                 self._id_tick()
             time.sleep(self.every)
 
+    def _ensure_id_device(self):
+        """让 Orpah ID 演示设备与当前 Client SN 一致（SN 变更时重建+重注册）。"""
+        sn = self.client.sn if self.client else self.sn
+        if self.id_dev is not None and self.id_dev.sn == sn:
+            return
+        self.id_dev = oid.Device(sn=sn, se_sn="ATECC608B-DEMO")
+        self.id_ks.register(self.id_dev, model="CH32V203+TX-AH+ATECC608B",
+                            firmware="1.0.3")
+
     def _id_tick(self):
-        """生成一条真实签名的 orpah-id-report 并验签（只读展示，不参与业务流）。"""
+        """Client 生成真实签名的 orpah-id-report 并经既有链路上行（Server 验签）。"""
         try:
+            self._ensure_id_device()
             r = self.id_dev.report(
                 level=0,
                 seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
                                "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
                 battery_mv=3700, firmware="1.0.3")
-            v = oid.verify_report(r, self.id_ks, used_nonces=self.id_used)
-            self.id_demo = {
-                "t": time.strftime("%H:%M:%S"),
-                "sn": self.id_dev.sn,
-                "alg": r["hdr"]["alg"],
-                "level": r["hdr"]["level"],
-                "trust": v["trust"],
-                "accepted": v["accepted"],
-                "sig": r["sig"][:36] + "…",
-                "nonce": r["payload"]["nonce"],
-            }
+            self.client.send_id_report(r)
         except Exception as e:  # 无 cryptography 时退化为错误展示
             self.id_demo = {"t": time.strftime("%H:%M:%S"), "err": str(e)}
+
+    def _on_id_report(self, rec):
+        """Server 验签结果回调：更新卡片 + 签名上报流（带 trust）。"""
+        self.id_demo = {
+            "t": rec["t"], "sn": rec["sn"], "alg": rec["alg"],
+            "level": rec["level"], "trust": rec["trust"],
+            "accepted": rec["accepted"], "sig": rec.get("sig", ""),
+            "nonce": rec.get("nonce", ""),
+        }
+        self.id_report_total += 1
+        self.id_reports.insert(0, rec)
+        del self.id_reports[20:]
+        self._emit("id_report", rec)
 
     # ---------------- 控制（前端按钮） ----------------
     def status(self):
@@ -317,6 +332,8 @@ class OrpahApp:
             "found_total": self.router.found_count if self.router else 0,
             "found_recv": self.srv.found_count if self.srv else 0,
             "id_demo": self.id_demo,
+            "id_reports": list(self.id_reports),
+            "id_report_total": self.id_report_total,
         }
 
     def cmd(self, action, sn=None, every=None, note=""):
