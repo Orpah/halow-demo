@@ -24,6 +24,7 @@ import socket
 import sys
 import threading
 import time
+from collections import deque
 
 # Windows 控制台默认代码页 GBK/cp936：强制 stdout/stderr 用 UTF-8 编码
 for _s in (sys.stdout, sys.stderr):
@@ -72,7 +73,7 @@ class OrpahServer:
         self.id_nonces = id_nonces if id_nonces is not None else oid.NonceCache()
         self.on_id_report = on_id_report
         self.id_report_total = 0
-        self.id_reports = []
+        self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self._stop = threading.Event()
         self.sock = None
         # 权威走失库：sn -> {"tracked": bool, "note": str, "since": ts}
@@ -277,8 +278,7 @@ class OrpahServer:
             "nonce": payload.get("nonce", ""),
         }
         self.id_report_total += 1
-        self.id_reports.insert(0, rec)
-        del self.id_reports[20:]
+        self.id_reports.appendleft(rec)
         log(f"[id {self.id_report_total}] ORPAH-ID-REPORT <- {addr[0]}:{addr[1]}: "
             f"sn={rec['sn']} alg={rec['alg']} level={rec['level']} "
             f"trust={rec['trust']} accepted={rec['accepted']}")

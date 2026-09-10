@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections import deque
 
 # Windows 控制台默认代码页 GBK/cp936：强制 stdout/stderr 用 UTF-8 编码
 for _s in (sys.stdout, sys.stderr):
@@ -84,7 +85,7 @@ class OrpahApp:
         self.id_dev = None
         self.id_used = oid.NonceCache()
         self.id_demo = {}
-        self.id_reports = []
+        self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
         # 组件
@@ -296,8 +297,7 @@ class OrpahApp:
             "nonce": rec.get("nonce", ""), "error": rec.get("error"),
         }
         self.id_report_total += 1
-        self.id_reports.insert(0, rec)
-        del self.id_reports[20:]
+        self.id_reports.appendleft(rec)
         self._emit("id_report", rec)
 
     # ---------------- 控制（前端按钮） ----------------
