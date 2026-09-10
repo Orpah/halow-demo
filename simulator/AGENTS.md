@@ -39,7 +39,8 @@
      的 check 函数输入一律是 ORG-UNIQUE（或 ORG-UNIQUE-CHECK），不含 CC；
   ③ **所有文档与代码样例的 CC 只用 `CN`（中国）**，不使用其它国家——测试向量、黄金样本、
      UI 默认值、自检输出统一 `CN`（黄金样本 `WH01-9AF3C1D2 → B`，整串 `CN-WH01-9AF3C1D2-B`）；
-  ④ 工具页（主页头部入口）：`rssi.html`（RSSI→距离→2/3/多点定位，canvas 可视化）、
+  ④ 工具页（主页头部入口）：`track.html`（定位与轨迹：多路由器持续测 RSSI → 实时定位 +
+     轨迹绘制，纯前端模拟）、`rssi.html`（RSSI→距离→2/3/多点定位，canvas 可视化）、
      `sig.html`（ES256/HS256/none 签名验签，后端 `/api/sig`）、
      `checksum.html`（SN 校验码，Damm32/Luhn32/Mod97 三 tab）、
      `damm32.html`（Damm32 构造/验证，计算器在最顶端）。
