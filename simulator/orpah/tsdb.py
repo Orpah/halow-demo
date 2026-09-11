@@ -96,9 +96,10 @@ class Tsdb:
             return False
         try:
             with self._lock:
-                self.session.insert_str_record(
+                self.session.insert_record(
                     "root.orpah.events", int(time.time() * 1000),
                     ["etype", "sn", "detail"],
+                    [TSDataType.TEXT, TSDataType.TEXT, TSDataType.TEXT],
                     [etype, sn or "", detail or ""])
             return True
         except Exception:

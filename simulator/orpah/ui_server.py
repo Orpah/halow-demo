@@ -507,9 +507,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "css": "text/css", "png": "image/png", "jpg": "image/jpeg",
                  "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
                  "svg": "image/svg+xml"}.get(p.rsplit(".", 1)[-1], "text/plain")
+        cache = ("public, max-age=86400, immutable"
+                 if rel.startswith("uploads/") else "no-store")
         with open(p, "rb") as f:
             self._send(200, f.read(), ctype,
-                       headers={"Cache-Control": "no-store"})
+                       headers={"Cache-Control": cache})
 
     def _sse(self):
         self.send_response(200)
@@ -605,12 +607,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         校验扩展名 + 5MB 上限；uuid 重命名防注入/重名；存 static/uploads/。
         """
+        from urllib.parse import unquote
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         name = ""
         for kv in qs.split("&"):
             k, _, v = kv.partition("=")
             if k == "filename":
-                name = v
+                name = unquote(v)
         ext = os.path.basename(name or "").rsplit(".", 1)[-1].lower()
         ALLOWED = {"jpg", "jpeg", "png", "webp", "gif"}
         if ext not in ALLOWED:
@@ -668,8 +671,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, json.dumps({"ok": True, "dup": dup,
                                                 "case_id": c.case_id}).encode())
             elif action == "close":
+                outcome_val = req.get("outcome", "")
+                if outcome_val not in ("closed", "revoked"):
+                    self._send(200, json.dumps({"ok": False,
+                                                "err": "非法结案方式"}).encode())
+                    return
                 c, sns = APP.cases.close(req.get("case_id", ""), APP.registry,
-                                         req.get("outcome", ""))
+                                         outcome_val)
                 if c is None:
                     self._send(200, json.dumps({"ok": False,
                                                 "err": "案件不存在"}).encode())
@@ -678,7 +686,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if APP.srv:
                             APP.srv.untrack(sn)
                     APP.tsdb.write_event("case_close",
-                                         detail=f"{c.case_id}:{outcome}")
+                                         detail=f"{c.case_id}:{outcome_val}")
                     self._send(200, json.dumps({"ok": True}).encode())
             else:
                 self._send(200, json.dumps({"ok": False,
