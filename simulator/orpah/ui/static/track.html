@@ -104,7 +104,7 @@
         <option value="circle" data-i18n="tk_circle">圆周</option>
       </select>
     </label>
-    <label><span data-i18n="tk_step">步长</span> <input id="step" type="number" step="0.5" value="3"> m/tick</label>
+    <label><span data-i18n="tk_step">步长</span> <input id="step" type="number" step="0.5" value="3"> <span data-i18n="tk_unit_mptick">m/tick</span></label>
     <label><span data-i18n="tk_noise">噪声 ±</span><input id="noise" type="number" step="0.5" value="2"> dBm</label>
   </div>
   <div class="row" style="margin-top:8px">
@@ -114,7 +114,7 @@
   </div>
   <div class="row" style="margin-top:8px" id="rowSimRun">
     <label><input id="showTrue" type="checkbox" checked> <span data-i18n="tk_show_true">显示真实轨迹</span></label>
-    <label>tick <input id="tick" type="number" step="50" value="200" min="50"> ms</label>
+    <label><span data-i18n="tk_per_tick">tick</span> <input id="tick" type="number" step="50" value="200" min="50"> ms</label>
   </div>
 </section>
 
@@ -160,7 +160,7 @@
   <div id="map" style="display:none"></div>
   <canvas id="canvas" width="620" height="420"></canvas>
   <div class="stat mono" id="statSim">
-    <div><span class="k" data-i18n="tk_lab_tick">tick：</span><span id="stTick">0</span></div>
+    <div><span class="k" data-i18n="tk_lab_tick">步数：</span><span id="stTick">0</span></div>
     <div><span class="k" data-i18n="tk_lab_true">真实位置：</span><span id="stTrue">-</span></div>
     <div><span class="k" data-i18n="tk_lab_est">定位估计：</span><span class="v-ok" id="stEst">-</span></div>
     <div><span class="k" data-i18n="tk_lab_err">定位误差：</span><span class="v-err" id="stErr">-</span></div>
