@@ -27,7 +27,7 @@
     font-family: "Cascadia Code", Consolas, monospace;
   }
   .btn.del { padding: 2px 8px; color: var(--red); }
-  #canvas { background: #0a0d12; border: 1px solid var(--bd); border-radius: 8px;
+  #canvas, #canvasLoc { background: #0a0d12; border: 1px solid var(--bd); border-radius: 8px;
     margin-top: 12px; display: block; max-width: 100%; }
   #map { height: 420px; border: 1px solid var(--bd); border-radius: 8px;
     margin-top: 12px; background: #0a0d12; }
@@ -131,6 +131,28 @@
   <p class="hint" data-i18n="tk_anchor_hint">测点坐标即路由器/无人机的悬停位置；客户端在其覆盖范围内移动，每个测点持续测 RSSI。</p>
 </section>
 
+<section class="card" id="cardStations" style="display:none">
+  <h3 data-i18n="tk_sec2r">2 · 定位站位（无人机悬停测点）</h3>
+  <div class="row">
+    <button class="btn" id="stAdd" data-i18n="tk_st_add">添加站位</button>
+    <button class="btn" id="stClear" data-i18n="tk_st_clear">清空</button>
+    <button class="btn" id="stImportBtn" data-i18n="tk_st_import">导入悬停计划 JSON</button>
+    <input type="file" id="stImportFile" accept=".json,application/json" hidden>
+    <span class="hint" id="stMsg"></span>
+  </div>
+  <table class="anchors">
+    <thead><tr>
+      <th>#</th><th data-i18n="tk_st_name">名称</th><th>x (m)</th><th>y (m)</th>
+      <th data-i18n="tk_st_window">观测窗口</th><th data-i18n="tk_st_rssi">观测 RSSI</th>
+      <th data-i18n="tk_st_dist">距离</th><th></th>
+    </tr></thead>
+    <tbody id="stationBody"></tbody>
+  </table>
+  <p class="hint" data-i18n="tk_st_hint">打点 = 此刻无人机在该站位（自动收尾上一个站位的窗口）；窗口内所有 report 的 RSSI 取中位数作为该站位观测。「绑定」把最新一条 report 的 RSSI 直接指派给该站位。至少 2 个站位有观测才能定位。</p>
+  <canvas id="canvasLoc" width="620" height="420"></canvas>
+  <p class="hint" data-i18n="tk_st_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=定位估计、灰点=无观测站位。坐标与上方 A/n 换算共用。</p>
+</section>
+
 <section class="card">
   <h3 id="head3" data-i18n="tk_sec3">3 · 实时定位与轨迹</h3>
   <div id="map" style="display:none"></div>
@@ -148,6 +170,8 @@
     <div><span class="k" data-i18n="tk_lab_dist">距离估计：</span><span id="stDist">-</span></div>
     <div><span class="k" data-i18n="tk_lab_time">最新时间：</span><span id="stTime">-</span></div>
     <div><span class="k" data-i18n="tk_lab_meta">seq / router：</span><span id="stMeta">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_loc">定位估计：</span><span class="v-ok" id="stLoc">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_used">参与定位：</span><span id="stUsed">-</span></div>
   </div>
   <p class="hint" id="hint3" data-i18n="tk_hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
 </section>
@@ -504,7 +528,7 @@ async function loadReal() {
   if (!sn) {
     realSamples = [];
     info.textContent = T("tk_no_dev");
-    updateRealStat(); draw(); return;
+    updateRealStat(); renderStations(); draw(); return;
   }
   const limit = Math.min(5000, Math.max(10, parseInt($("dsLimit").value) || 200));
   try {
@@ -525,6 +549,7 @@ async function loadReal() {
     info.textContent = T("tk_query_fail") + e;
   }
   updateRealStat();
+  renderStations();          // 站位观测 / 定位随新数据刷新
   draw();
 }
 
@@ -546,6 +571,180 @@ function updateRealStat() {
   $("stMeta").textContent = `seq=${p.seq}，router_id=${p.router_id || T("tk_router_none")}`;
 }
 
+/* ---- 真实模式：定位站位（无人机多点悬停）--------------------------------
+   站位 = 一个**已知坐标**的观测点。观测有两条路（写进同一张表、走同一个内核）：
+     · 时间窗：落在 [t0,t1) 内的 report 取 RSSI 中位数（「打点」实时生成窗口）
+     · 手动绑定：把最新一条 report 的 RSSI 直接指派给某站位（不需要窗口）
+   定位复用模拟模式同一个 trilaterate()，避免模拟/真实两套实现。          */
+let stations = [];
+let stMsgTimer = null;
+
+const cssQ = (s) => (window.CSS && CSS.escape)
+  ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
+
+function stMsg(txt, ms = 4000) {
+  $("stMsg").textContent = txt;
+  if (stMsgTimer) clearTimeout(stMsgTimer);
+  if (txt) stMsgTimer = setTimeout(() => { $("stMsg").textContent = ""; }, ms);
+}
+
+async function loadStations() {
+  try {
+    const r = await fetch("/api/stations").then(x => x.json());
+    stations = (r.ok && r.stations) ? r.stations : [];
+  } catch (e) { console.error("stations:", e); stations = []; }
+  renderStations();
+}
+
+async function stApi(body) {
+  try {
+    const r = await fetch("/api/stations", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(x => x.json());
+    if (!r.ok) { stMsg(r.err || T("err_unknown")); return null; }
+    stations = r.stations || [];
+    renderStations();
+    return r;
+  } catch (e) { stMsg(T("tk_st_fail") + e); return null; }
+}
+
+/* 每个站位取一条观测：手动绑定优先，否则时间窗内 RSSI 中位数 */
+function stationObs(s) {
+  if (s.rssi !== null && s.rssi !== undefined) return { rssi: s.rssi, n: 1, src: "bind" };
+  if (s.t0 === null || s.t0 === undefined) return null;
+  const t1 = (s.t1 === null || s.t1 === undefined) ? Infinity : s.t1;
+  const vals = realSamples
+    .filter(p => p.t >= s.t0 && p.t < t1 && typeof p.rssi === "number")
+    .map(p => p.rssi).sort((a, b) => a - b);
+  if (!vals.length) return null;
+  const m = vals.length >> 1;
+  const med = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
+  return { rssi: med, n: vals.length, src: "window" };
+}
+
+/* 汇总观测 → 距离 → 定位（复用 trilaterate） */
+function computeLoc() {
+  const A = plA(), n = plN();
+  const obs = [];
+  for (const s of stations) {
+    const o = stationObs(s);
+    if (o) obs.push({ s, rssi: o.rssi, n: o.n, src: o.src,
+                      dist: distFromRssi(o.rssi, A, n) });
+  }
+  const est = obs.length >= 2
+    ? trilaterate(obs.map(x => ({ x: x.s.x, y: x.s.y })), obs.map(x => x.dist))
+    : null;
+  return { obs, est };
+}
+
+function winText(s) {
+  if (s.t0 === null || s.t0 === undefined) return T("tk_st_no_window");
+  return fmtTime(s.t0) + " → " + (s.t1 ? fmtTime(s.t1) : T("tk_st_now"));
+}
+
+/* 不整表重建（loadReal 每 2s 轮询）：只在站位集合变化时重建行，
+   否则就地改单元格与输入框（用户正在编辑的 input 不覆盖）。 */
+function renderStations() {
+  const tbody = $("stationBody");
+  if (!tbody) return;
+  const { obs, est } = computeLoc();
+  const bySid = {};
+  obs.forEach(o => { bySid[o.s.sid] = o; });
+  const sig = stations.map(s => s.sid).join("|");
+  if (tbody.dataset.sig !== sig) {
+    tbody.dataset.sig = sig;
+    tbody.innerHTML = "";
+    if (!stations.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td colspan="8" class="hint">' + T("tk_st_empty") + "</td>";
+      tbody.appendChild(tr);
+    } else {
+      for (const s of stations) {
+        const tr = document.createElement("tr");
+        tr.dataset.sid = s.sid;
+        tr.innerHTML =
+          '<td class="stno"></td>' +
+          '<td><input class="stname" placeholder="' + T("tk_st_name_ph") + '"></td>' +
+          '<td><input class="stx" type="number" step="1"></td>' +
+          '<td><input class="sty" type="number" step="1"></td>' +
+          '<td class="mono stwin"></td>' +
+          '<td class="mono stobs"></td>' +
+          '<td class="mono stdist"></td>' +
+          '<td><button class="btn sm stpunch"></button> ' +
+          '<button class="btn sm stbind"></button> ' +
+          '<button class="btn sm stunbind"></button> ' +
+          '<button class="btn del stdel">×</button></td>';
+        tbody.appendChild(tr);
+      }
+    }
+  }
+  stations.forEach((s, i) => {
+    const tr = tbody.querySelector('tr[data-sid="' + cssQ(s.sid) + '"]');
+    if (!tr) return;
+    const o = bySid[s.sid];
+    tr.querySelector(".stno").textContent = i + 1;
+    tr.querySelector(".stwin").textContent = winText(s);
+    tr.querySelector(".stobs").textContent = o
+      ? o.rssi.toFixed(1) + " dBm · " +
+        (o.src === "bind" ? T("tk_st_src_bind") : "n=" + o.n)
+      : "—";
+    tr.querySelector(".stdist").textContent = o ? o.dist.toFixed(1) + " m" : "—";
+    const pu = tr.querySelector(".stpunch");
+    pu.textContent = T("tk_st_punch");
+    pu.disabled = (s.t0 !== null && s.t0 !== undefined &&
+                   (s.t1 === null || s.t1 === undefined));
+    tr.querySelector(".stbind").textContent = T("tk_st_bind");
+    const bu = tr.querySelector(".stunbind");
+    bu.textContent = T("tk_st_unbind");
+    bu.style.visibility = (s.rssi === null || s.rssi === undefined) ? "hidden" : "";
+    const setInp = (sel, v) => {
+      const el = tr.querySelector(sel);
+      if (el === document.activeElement) return;      // 正在编辑的不覆盖
+      if (String(el.value) !== String(v)) el.value = v;
+    };
+    setInp(".stname", s.name || "");
+    setInp(".stx", s.x);
+    setInp(".sty", s.y);
+  });
+  drawLoc(obs, est);
+  $("stUsed").textContent = T("tk_st_used_fmt")
+    .replace("{n}", obs.length).replace("{t}", stations.length);
+  $("stLoc").textContent = est
+    ? "( " + est.x.toFixed(1) + ", " + est.y.toFixed(1) + " )"
+    : T("tk_st_need2");
+}
+
+/* 站位 + 距离环 + 定位估计（真实模式专用画布，不碰模拟模式的 draw()） */
+function drawLoc(obs, est) {
+  const c = $("canvasLoc"), ctx = c.getContext("2d");
+  const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#1c2128"; ctx.lineWidth = 1;
+  for (let gx = 0; gx <= W; gx += 50) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+  for (let gy = 0; gy <= H; gy += 50) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  ctx.strokeStyle = "#30363d";
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+  const seen = {};
+  obs.forEach(o => { seen[o.s.sid] = 1; });
+  stations.forEach(s => {                              // 无观测的站位：灰点
+    if (seen[s.sid]) return;
+    ctx.fillStyle = "rgba(139,148,158,.55)";
+    ctx.fillRect(cx + s.x * SCALE - 3, cy - s.y * SCALE - 3, 6, 6);
+  });
+  obs.forEach(o => {                                   // 站位 + 距离环
+    const sx = cx + o.s.x * SCALE, sy = cy - o.s.y * SCALE;
+    ctx.strokeStyle = "rgba(88,166,255,.30)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(sx, sy, o.dist * SCALE, 0, 2 * Math.PI); ctx.stroke();
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(sx - 4, sy - 4, 8, 8);
+    ctx.fillStyle = "#c9d1d9"; ctx.font = "11px monospace";
+    ctx.fillText(o.s.name || o.s.sid, sx + 7, sy - 7);
+  });
+  if (est) cross(ctx, cx + est.x * SCALE, cy - est.y * SCALE, "#f85149");
+}
+
 function applyMode() {
   dsMode = $("dsMode").value;
   const real = dsMode === "real";
@@ -554,6 +753,7 @@ function applyMode() {
   $("head1").textContent = real ? T("tk_sec1_real") : T("tk_sec1");
   $("cardMap").style.display = real ? "none" : "";
   $("cardAnchors").style.display = real ? "none" : "";
+  $("cardStations").style.display = real ? "" : "none";
   $("statSim").style.display = real ? "none" : "";
   $("statReal").style.display = real ? "" : "none";
   $("head3").textContent = real ? T("tk_sec3_real") : T("tk_sec3");
@@ -565,6 +765,7 @@ function applyMode() {
     $("map").style.display = "none";
     $("canvas").style.display = "block";
     refreshSnList().then(loadReal);
+    loadStations();
     if ($("dsAuto").checked) realTimer = setInterval(loadReal, 2000);
   } else {
     draw(); updateStat(null);
@@ -579,8 +780,66 @@ $("dsAuto").onchange = () => {
   if (realTimer) { clearInterval(realTimer); realTimer = null; }
   if (dsMode === "real" && $("dsAuto").checked) realTimer = setInterval(loadReal, 2000);
 };
-$("plA").onchange = () => { if (dsMode === "real") { updateRealStat(); draw(); } };
-$("plN").onchange = () => { if (dsMode === "real") { updateRealStat(); draw(); } };
+$("plA").onchange = () => { if (dsMode === "real") { updateRealStat(); renderStations(); draw(); } };
+$("plN").onchange = () => { if (dsMode === "real") { updateRealStat(); renderStations(); draw(); } };
+
+/* ---- 站位表操作 ---- */
+$("stAdd").onclick = async () => {
+  // 新站位摆在圆周上（均匀分开），避免默认坐标叠在一起
+  const ang = stations.length * 120 * Math.PI / 180;
+  await stApi({ action: "add", name: "",
+                x: Math.round(30 * Math.cos(ang)), y: Math.round(30 * Math.sin(ang)) });
+};
+$("stClear").onclick = async () => {
+  if (!stations.length) return;
+  if (!confirm(T("tk_st_clear_ask"))) return;
+  await stApi({ action: "clear" });
+};
+$("stImportBtn").onclick = () => $("stImportFile").click();
+$("stImportFile").onchange = async () => {
+  const f = $("stImportFile").files[0];
+  $("stImportFile").value = "";              // 清空 → 允许重复导入同一个文件
+  if (!f) return;
+  let data;
+  try {
+    data = JSON.parse(await f.text());
+  } catch (err) {
+    stMsg(T("tk_st_import_bad") + err); return;
+  }
+  const items = Array.isArray(data) ? data : (data && data.stations) || [];
+  const r = await stApi({ action: "import", stations: items });
+  if (r) stMsg(T("tk_st_imported").replace("{n}", r.imported));
+};
+
+/* 行内交互：事件委托（重建与否都不用重绑） */
+$("stationBody").onclick = async (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.sid) return;
+  const sid = tr.dataset.sid;
+  if (e.target.closest(".stpunch")) {
+    await stApi({ action: "punch", sid });
+  } else if (e.target.closest(".stdel")) {
+    await stApi({ action: "remove", sid });
+  } else if (e.target.closest(".stunbind")) {
+    await stApi({ action: "unbind", sid });
+  } else if (e.target.closest(".stbind")) {
+    const p = realSamples[realSamples.length - 1];   // 最新一条上报
+    if (!p) { stMsg(T("tk_st_no_sample")); return; }
+    await stApi({ action: "bind", sid, rssi: p.rssi, t: p.t });
+  }
+};
+$("stationBody").onchange = async (e) => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.sid) return;
+  const sid = tr.dataset.sid;
+  if (e.target.classList.contains("stname")) {
+    await stApi({ action: "update", sid, name: e.target.value });
+  } else if (e.target.classList.contains("stx")) {
+    await stApi({ action: "update", sid, x: parseFloat(e.target.value) || 0 });
+  } else if (e.target.classList.contains("sty")) {
+    await stApi({ action: "update", sid, y: parseFloat(e.target.value) || 0 });
+  }
+};
 
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);

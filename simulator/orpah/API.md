@@ -104,7 +104,7 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   业务事件 `root.orpah.events`（etype/sn/detail）。
 - IoTDB 未启动时写入静默降级、每 10s 重连一次，不影响 SQLite/UI。
 - `track.html` 的「真实上报」模式消费本接口：按时间升序画 RSSI 时序 + 按 A/n 换算距离。
-  单测点只能得「距离环」，需多路由器（各自带 `router_id` + 已知坐标）才可三边定位到点。
+  单测点只能得「距离环」；配上「定位站位表」（已知坐标，见 §7）即可多点三边定位到点。
 - **`query_report` 按时间倒序返回**，前端消费前需自行翻正。
 
 ### `/api/ts/events`（业务事件历史）
@@ -152,4 +152,57 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - `valid` = 用该算法回验 `ORG-UNIQUE-CHECK` 是否通过（`compute` 恒为 `true`，可作自检）。
 - `algo` / `action` 未知 → `{ok:false, err:"..."}`；参数非法一律 `ok:false`，不抛 500。
 - `brute` 在服务端穷举（`maxlen=3` 约 1.05s），前端只负责展示。
+
+---
+
+## 7. `/api/stations`（定位站位 / 悬停计划）
+
+补上「这个 RSSI 是在哪个**已知坐标**测到的」这一维，单台路由器/无人机多点悬停即可定位。
+站位表是**全局一张**（定位属环境配置，与具体设备无关），存 SQLite `stations` 表，重启不丢。
+
+### GET `/api/stations` → `{"ok":true, "stations":[Station]}`
+
+```json
+{"sid":"S1","name":"悬停点A","x":30.0,"y":0.0,
+ "t0":1789100000000,"t1":1789100020000,"rssi":null,"rssi_t":null}
+```
+
+### POST `/api/stations`（body 带 `action`）
+
+每个 action 都回**全量站位表**（`{ok, ..., stations:[…]}`），前端直接重渲染，避免两边状态漂移。
+
+| action | 字段 | 说明 |
+|---|---|---|
+| `add` | `x`, `y`, `name?` | 新增站位，`sid` 自动编号（返回 `sid`） |
+| `update` | `sid` + `x?`/`y?`/`name?`/`t0?`/`t1?` | 未给的字段不动 |
+| `remove` | `sid` | 删除站位 |
+| `clear` | — | 清空（返回 `removed` 条数） |
+| `import` | `stations:[{sid?,name?,x,y,t0?,t1?}]` | **覆盖式**导入悬停计划；也接受裸数组；无 `x`/`y` 的项跳过（返回 `imported` 条数） |
+| `punch` | `sid`, `t?` | **打点**：此刻在该站位（返回 `t0`） |
+| `bind` | `sid`, `rssi`, `t?` | 手动绑定一条观测（优先于时间窗） |
+| `unbind` | `sid` | 取消手动绑定 → 回落到时间窗 |
+
+### 观测归集（前端 `track.html` 真实模式）
+
+每个站位取**一条**观测，优先级：
+
+1. 手动绑定 `rssi`（`bind`）→ 直接用；
+2. 时间窗 `t0` 存在 → 取 `t0 <= t < t1`（`t1` 缺省=至今）内所有 report 的 RSSI **中位数**；
+3. 都没有 → 该站位无观测，不参与定位。
+
+≥2 个站位有观测时调用 `track.html` 现成的三边定位（`trilaterate`，≥3 点为最小二乘）。
+**定位计算放在前端**，与模拟模式共用同一个内核，避免两套实现。
+
+**打点语义**：`punch(S2)` → `S2.t0=now, t1=null`，同时把其它「已打点但未收尾」的站位
+（`t0` 更早、`t1` 为空）视为已离开 → `t1=now`。于是各站位的时间窗 = 两次打点之间的区间。
+对同一站位重复打点 = 该窗口重来。
+
+**悬停计划 JSON**（`stations.example.json` 为示例）：
+
+```json
+{"stations":[{"sid":"S1","name":"悬停点A","x":30,"y":0},
+              {"sid":"S2","name":"悬停点B","x":-15,"y":26}]}
+```
+
+省略 `t0`/`t1` 则由页面「打点」实时生成；脚本预演时可直接把悬停时刻写进 `t0`/`t1`（epoch 毫秒）。
 

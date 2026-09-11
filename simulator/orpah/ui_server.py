@@ -49,6 +49,7 @@ from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
+import stations as sta                     # noqa: E402  定位站位（无人机悬停测点）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 import damm32 as d32                      # noqa: E402  校验算法单一源
 import luhn32 as l32                      # noqa: E402
@@ -124,6 +125,7 @@ class OrpahApp:
         db_path = os.path.join(HERE, "orpah.db")
         self.registry = reg.Registry(db_path)
         self.cases = cases.CaseManager(db_path)
+        self.stations = sta.StationTable(db_path)   # 定位站位（全局一张）
         if not self.registry.persons:
             self._seed_registry()
         # IoTDB 时序库（上报流 + 业务事件；未启动时优雅降级）
@@ -525,6 +527,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/cases":
             self._send(200, json.dumps(APP.cases.to_dict(APP.registry)).encode())
             return
+        if self.path == "/api/stations":
+            self._send(200, json.dumps(APP.stations.to_dict()).encode())
+            return
         if self.path.startswith("/api/ts/query"):
             self._api_ts_query()
             return
@@ -774,6 +779,82 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
+    def _api_stations(self):
+        """定位站位（无人机悬停测点）：增删改 + 打点 + 手动绑定 + 导入悬停计划。
+
+        POST /api/stations
+          {action:"add",    x, y, name?}            → 新增站位（返回 sid）
+          {action:"update", sid, x?, y?, name?, t0?, t1?}
+          {action:"remove", sid}
+          {action:"clear"}                          → 清空
+          {action:"import", stations:[{sid?,name?,x,y,t0?,t1?}]} → 覆盖式导入悬停计划
+          {action:"punch",  sid, t?}                → 打点：此刻在该站位（自动收尾上一个）
+          {action:"bind",   sid, rssi, t?}          → 手动绑定一条观测（优先于时间窗）
+          {action:"unbind", sid}                    → 取消手动绑定 → 回落到时间窗
+
+        每个 action 都回全量站位表，前端直接重渲染，避免两边状态漂移。
+        """
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+            return
+        action = req.get("action")
+        try:
+            if action == "add":
+                st = APP.stations.add(req.get("x", 0), req.get("y", 0),
+                                      req.get("name", ""))
+                resp = {"ok": True, "sid": st.sid}
+            elif action == "update":
+                fields = {k: req[k] for k in ("name", "x", "y", "t0", "t1", "rssi")
+                          if k in req}
+                st = APP.stations.update(req.get("sid"), **fields)
+                if st is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "err": "站位不存在"}).encode())
+                    return
+                resp = {"ok": True}
+            elif action == "remove":
+                resp = {"ok": APP.stations.remove(req.get("sid"))}
+            elif action == "clear":
+                resp = {"ok": True, "removed": APP.stations.clear()}
+            elif action == "import":
+                resp = {"ok": True, "imported": APP.stations.import_config(req)}
+            elif action == "punch":
+                st = APP.stations.punch(req.get("sid"), req.get("t"))
+                if st is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "err": "站位不存在"}).encode())
+                    return
+                resp = {"ok": True, "t0": st.t0}
+            elif action == "bind":
+                if req.get("rssi") is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "err": "缺少 rssi"}).encode())
+                    return
+                st = APP.stations.bind(req.get("sid"), req.get("rssi"), req.get("t"))
+                if st is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "err": "站位不存在"}).encode())
+                    return
+                resp = {"ok": True, "rssi": st.rssi}
+            elif action == "unbind":
+                st = APP.stations.unbind(req.get("sid"))
+                if st is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "err": "站位不存在"}).encode())
+                    return
+                resp = {"ok": True}
+            else:
+                self._send(200, json.dumps({"ok": False,
+                    "err": f"unknown action: {action}"}).encode())
+                return
+            resp["stations"] = [s.to_dict() for s in APP.stations.list()]
+            self._send(200, json.dumps(resp).encode())
+        except Exception as e:
+            self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
+
     def _api_checksum(self):
         """校验码工具：算法单一源（damm32.py / luhn32.py / mod97.py）。
 
@@ -924,6 +1005,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/cases":
             self._api_cases()
+            return
+        if self.path == "/api/stations":
+            self._api_stations()
             return
         if self.path == "/api/sig":
             self._api_sig()
