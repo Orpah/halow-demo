@@ -7,3 +7,9 @@ orpah.db
 orpah.db-journal
 orpah.db-wal
 orpah.db-shm
+
+# 本机临时排障脚本（不进仓库）
+_e2e*.py
+
+# 服务端本机运行日志（仓库里没有任何被跟踪的 .log）
+*.log
