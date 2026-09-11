@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_case">
 <head>
 <meta charset="utf-8">
 <title>走失案件 — ORPAH-over-HaLow</title>
@@ -79,68 +79,78 @@
 <body>
 <header>
   <div class="brand">
-    <a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
-    <span class="brand-name">走失案件</span>
-    <span class="sub">Orpah ID · 以人为单位：立案 → 发现 → 找回/撤销 → 结案</span>
-    <a class="btn back" href="registry.html">设备清册</a>
-    <a class="btn back" href="index.html">← 返回主页</a>
+    <a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
+    <span class="brand-name" data-i18n="nav_case">走失案件</span>
+    <span class="sub" data-i18n="case_sub">Orpah ID · 以人为单位：立案 → 发现 → 找回/撤销 → 结案</span>
+    <a class="btn back" href="registry.html" data-i18n="nav_registry">设备清册</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>1 · 立案</h3>
+  <h3 data-i18n="case_sec1">1 · 立案</h3>
   <div class="row">
-    <label>人员 <input id="personQ" placeholder="搜索编号 / 名称…" spellcheck="false"></label>
-    <span class="hint" id="personSel">未选择人员</span>
+    <label><span data-i18n="case_person">人员</span> <input id="personQ" data-i18n-ph="case_ph_person" placeholder="搜索编号 / 名称…" spellcheck="false"></label>
+    <span class="hint" id="personSel" data-i18n="case_no_person">未选择人员</span>
   </div>
   <div class="presults" id="personResults"></div>
   <div id="personCard" class="pcard"></div>
-  <h4 class="subhead">走失信息（寻人启事要素）</h4>
+  <h4 class="subhead" data-i18n="case_missing_head">走失信息（寻人启事要素）</h4>
   <div class="grid">
-    <label>走失时间 <input id="cMissingAt" placeholder="如 2026-09-11 15:00 左右"></label>
-    <label>走失地点 <input id="cMissingPlace" placeholder="如 XX市XX区XX路"></label>
-    <label>可能去向 <input id="cPossibleTo" placeholder="如 沿XX路向南"></label>
-    <label>衣着描述 <input id="cClothing" placeholder="如 红色外套、蓝色牛仔裤"></label>
-    <label>家属电话 <input id="cPhone" placeholder="如 13800000000"></label>
-    <label>警方联系人 <input id="cPolice" placeholder="如 XX派出所 王警官"></label>
-    <label>案件编号 <input id="cCaseNo" placeholder="如 20260911001"></label>
-    <label>受理单位 <input id="cStation" placeholder="如 XX派出所"></label>
-    <label>携带物品 <input id="cBelongings" placeholder="如 黑色背包"></label>
-    <label>交通工具 <input id="cVehicle" placeholder="如 未携带 / 车牌"></label>
+    <label><span data-i18n="case_f_at">走失时间</span> <input id="cMissingAt" data-i18n-ph="case_ph_at" placeholder="如 2026-09-11 15:00 左右"></label>
+    <label><span data-i18n="case_f_place">走失地点</span> <input id="cMissingPlace" data-i18n-ph="case_ph_place" placeholder="如 XX市XX区XX路"></label>
+    <label><span data-i18n="case_f_to">可能去向</span> <input id="cPossibleTo" data-i18n-ph="case_ph_to" placeholder="如 沿XX路向南"></label>
+    <label><span data-i18n="case_f_cloth">衣着描述</span> <input id="cClothing" data-i18n-ph="case_ph_cloth" placeholder="如 红色外套、蓝色牛仔裤"></label>
+    <label><span data-i18n="case_f_phone">家属电话</span> <input id="cPhone" data-i18n-ph="case_ph_phone" placeholder="如 13800000000"></label>
+    <label><span data-i18n="case_f_police">警方联系人</span> <input id="cPolice" data-i18n-ph="case_ph_police" placeholder="如 XX派出所 王警官"></label>
+    <label><span data-i18n="case_f_caseno">案件编号</span> <input id="cCaseNo" data-i18n-ph="case_ph_caseno" placeholder="如 20260911001"></label>
+    <label><span data-i18n="case_f_station">受理单位</span> <input id="cStation" data-i18n-ph="case_ph_station" placeholder="如 XX派出所"></label>
+    <label><span data-i18n="case_f_belong">携带物品</span> <input id="cBelongings" data-i18n-ph="case_ph_belong" placeholder="如 黑色背包"></label>
+    <label><span data-i18n="case_f_vehicle">交通工具</span> <input id="cVehicle" data-i18n-ph="case_ph_vehicle" placeholder="如 未携带 / 车牌"></label>
   </div>
   <div class="row" style="margin-top:8px">
-    <button class="btn" id="btnMark">标记走失 / 立案</button>
+    <button class="btn" id="btnMark" data-i18n="case_btn_mark">标记走失 / 立案</button>
     <span class="hint" id="markHint"></span>
   </div>
-  <p class="hint">立案后：该人员名下<b>所有设备</b>进入「丢失」态并标记走失；任一台被路由器发现即视为发现该人。</p>
+  <p class="hint"><span data-i18n="case_hint_a">立案后：该人员名下</span><b data-i18n="case_hint_b">所有设备</b><span data-i18n="case_hint_c">进入「丢失」态并标记走失；任一台被路由器发现即视为发现该人。</span></p>
 </section>
 
 <section class="card">
-  <h3>2 · 案件列表</h3>
+  <h3 data-i18n="case_sec2">2 · 案件列表</h3>
   <div class="toolbar">
-    <input id="cq" placeholder="搜索案件号 / 走失者…" spellcheck="false">
+    <input id="cq" data-i18n-ph="case_ph_search" placeholder="搜索案件号 / 走失者…" spellcheck="false">
     <select id="cStatus">
-      <option value="">全部状态</option>
-      <option value="open">走失中</option>
-      <option value="found">已发现</option>
-      <option value="closed">已找回</option>
-      <option value="revoked">已撤销</option>
+      <option value="" data-i18n="case_opt_all">全部状态</option>
+      <option value="open" data-i18n="case_st_open">走失中</option>
+      <option value="found" data-i18n="case_st_found">已发现</option>
+      <option value="closed" data-i18n="case_st_closed">已找回</option>
+      <option value="revoked" data-i18n="case_st_revoked">已撤销</option>
     </select>
   </div>
   <table class="case">
     <thead><tr>
-      <th>案件号</th><th>走失者</th><th>状态</th><th>设备</th><th>事件</th><th>操作</th>
+      <th data-i18n="case_th_id">案件号</th><th data-i18n="case_th_person">走失者</th><th data-i18n="case_th_status">状态</th><th data-i18n="case_th_dev">设备</th><th data-i18n="case_th_ev">事件</th><th data-i18n="case_th_ops">操作</th>
     </tr></thead>
     <tbody id="caseBody"></tbody>
   </table>
-  <p class="hint" id="caseEmpty">暂无案件。选择走失者立案。</p>
+  <p class="hint" id="caseEmpty"></p>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const CASE_ZH = { open: "走失中", found: "已发现", closed: "已找回", revoked: "已撤销" };
-const EV_ZH = { mark: "立案", found: "发现", close: "结案" };
+const T = (k) => OrpahI18n.t(k);
+// 案件状态 / 事件类型展示标签（机器值不变，只翻展示）
+const CASE_LBL = {
+  open: T("case_st_open"), found: T("case_st_found"),
+  closed: T("case_st_closed"), revoked: T("case_st_revoked"),
+};
+const EV_LBL = { mark: T("ev_mark"), found: T("ev_found"), close: T("ev_close") };
+const GL = { "男": T("g_m"), "女": T("g_f") };
+const genderLabel = (v) => GL[v] || v;
+const yrs = (a) => a ? T("case_years").replace("{n}", a) : "";
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -153,8 +163,8 @@ function fmtT(ts) {
   const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   const dayDiff = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (dayDiff <= 0) return hms;
-  if (dayDiff === 1) return `${mmdd} ${hms} · 昨天`;
-  return `${mmdd} ${hms} · ${dayDiff}天前`;
+  if (dayDiff === 1) return `${mmdd} ${hms} · ${T("t_yesterday")}`;
+  return `${mmdd} ${hms} · ${T("t_days_ago").replace("{n}", dayDiff)}`;
 }
 async function api(body) {
   let r;
@@ -166,12 +176,12 @@ async function api(body) {
     r = await resp.json();
   } catch (e) {
     console.error("cases:", e);
-    alert("操作失败：无法连接服务器，请检查网络/服务是否在线");
+    alert(T("err_offline"));
     return { ok: false };
   }
   if (!r.ok) {
     console.error("cases:", r.err);
-    alert("操作失败：" + (r.err || "未知错误"));
+    alert(T("err_prefix") + (r.err || T("err_unknown")));
   }
   return r;
 }
@@ -184,21 +194,24 @@ let selectedPid = null;
 
 function updateSel() {
   const p = registry.persons.find(x => x.pid === selectedPid);
-  $("personSel").textContent = p ? `已选：${p.name}（${p.pid}）` : "未选择人员";
+  $("personSel").textContent = p
+    ? T("case_sel_prefix") + `${p.name}（${p.pid}）`
+    : T("case_no_person");
   const card = $("personCard");
   if (!p) { card.innerHTML = ""; return; }
   const ava = p.photo
     ? `<img class="pbig" src="${esc(p.photo)}" alt="">`
     : `<span class="pbig noimg">${esc((p.name || "?").charAt(0))}</span>`;
   const meta = [
-    ["性别", p.gender], ["年龄", p.age ? p.age + "岁" : ""],
-    ["身高", p.height], ["体重/体型", p.build],
-    ["体貌特征", p.features], ["疾病/健康", p.health],
-    ["精神状态", p.mental], ["沟通能力", p.communicate],
+    [T("f_gender"), p.gender ? genderLabel(p.gender) : ""],
+    [T("f_age"), yrs(p.age)],
+    [T("f_height"), p.height], [T("f_build"), p.build],
+    [T("f_features"), p.features], [T("f_health"), p.health],
+    [T("f_mental"), p.mental], [T("f_comm"), p.communicate],
   ].filter(([, v]) => v).map(([k, v]) => `${k}：${esc(v)}`).join(" · ");
   card.innerHTML = `${ava}<div class="pc-info">
     <span class="person-name">${esc(p.name)} <span class="mono">${esc(p.pid)}</span></span>
-    <span class="pc-meta">${meta || "暂无更多信息"}</span>
+    <span class="pc-meta">${meta || T("case_no_extra")}</span>
   </div>`;
 }
 
@@ -217,46 +230,52 @@ function renderPersonResults() {
         const ava = p.photo
           ? `<img class="pavatar" src="${esc(p.photo)}" alt="">`
           : `<span class="pavatar noimg">${esc((p.name || "?").charAt(0))}</span>`;
-        const meta = [p.gender, p.age ? `${p.age}岁` : ""].filter(Boolean).join(" · ");
+        const meta = [p.gender ? genderLabel(p.gender) : "", yrs(p.age)]
+          .filter(Boolean).join(" · ");
         return `<button class="${cls}" data-pid="${esc(p.pid)}">
           ${ava}
           <span class="person-name">${esc(p.name)}</span>
           <span class="mono">${esc(p.pid)}</span>
           <span class="pmeta">${esc(meta || "")}</span>
-          <span class="pdev">${cnt} 台设备</span>
+          <span class="pdev">${esc(T("case_ndev").replace("{n}", cnt))}</span>
         </button>`;
       }).join("")
-    : '<span class="hint">无匹配人员</span>';
+    : `<span class="hint">${esc(T("case_no_match_person"))}</span>`;
   box.querySelectorAll("button[data-pid]").forEach(b => {
     b.onclick = () => { selectedPid = b.dataset.pid; renderPersonResults(); };
   });
 }
 
 function eventLine(e) {
-  const label = EV_ZH[e.type] || e.type;
-  if (e.type === "mark") return `${fmtT(e.t)} · ${label}（设备 ${esc(e.sn)}）`;
+  const label = EV_LBL[e.type] || e.type;
+  const dev = T("case_ev_device");
+  if (e.type === "mark") return `${fmtT(e.t)} · ${label}（${dev.replace("{sn}", esc(e.sn))}）`;
   if (e.type === "found") return `${fmtT(e.t)} · ${label} SN ${esc(e.sn)}${e.detail ? " · " + esc(e.detail) : ""}`;
-  if (e.type === "close") return `${fmtT(e.t)} · ${label}（${e.detail === "revoked" ? "撤销" : "找回"}，设备 ${esc(e.sn)}）`;
+  if (e.type === "close") {
+    const how = e.detail === "revoked" ? T("case_out_revoked") : T("case_out_recovered");
+    return `${fmtT(e.t)} · ${label}（${how}，${dev.replace("{sn}", esc(e.sn))}）`;
+  }
   return `${fmtT(e.t)} · ${label} ${esc(e.sn || "")}`;
 }
 
 function caseDetailHtml(c) {
   const p = registry.persons.find(x => x.pid === c.person_id);
   const caseFields = [
-    ["走失时间", c.missing_at], ["走失地点", c.missing_place],
-    ["可能去向", c.possible_to], ["衣着描述", c.clothing],
-    ["家属电话", c.contact_phone], ["警方联系人", c.police],
-    ["案件编号", c.police_case_no], ["受理单位", c.police_station],
-    ["携带物品", c.belongings], ["交通工具", c.vehicle],
+    [T("case_f_at"), c.missing_at], [T("case_f_place"), c.missing_place],
+    [T("case_f_to"), c.possible_to], [T("case_f_cloth"), c.clothing],
+    [T("case_f_phone"), c.contact_phone], [T("case_f_police"), c.police],
+    [T("case_f_caseno"), c.police_case_no], [T("case_f_station"), c.police_station],
+    [T("case_f_belong"), c.belongings], [T("case_f_vehicle"), c.vehicle],
   ].filter(([, v]) => v);
   const personFields = p ? [
-    ["身高", p.height], ["体重/体型", p.build], ["体貌特征", p.features],
-    ["疾病/健康", p.health], ["精神状态", p.mental], ["沟通能力", p.communicate],
+    [T("f_height"), p.height], [T("f_build"), p.build],
+    [T("f_features"), p.features],
+    [T("f_health"), p.health], [T("f_mental"), p.mental], [T("f_comm"), p.communicate],
   ].filter(([, v]) => v) : [];
   const dl = arr => arr.map(([k, v]) => `<div class="dv"><b>${esc(k)}</b>${esc(v)}</div>`).join("");
-  const psec = personFields.length ? `<div class="dsec"><h5>人员档案</h5>${dl(personFields)}</div>` : "";
-  const csec = caseFields.length ? `<div class="dsec"><h5>走失信息</h5>${dl(caseFields)}</div>` : "";
-  return `<div class="detail-grid">${psec}${csec}${(!psec && !csec) ? '<span class="hint">无补充信息</span>' : ""}</div>`;
+  const psec = personFields.length ? `<div class="dsec"><h5>${esc(T("case_sec_person"))}</h5>${dl(personFields)}</div>` : "";
+  const csec = caseFields.length ? `<div class="dsec"><h5>${esc(T("case_sec_missing"))}</h5>${dl(caseFields)}</div>` : "";
+  return `<div class="detail-grid">${psec}${csec}${(!psec && !csec) ? `<span class="hint">${esc(T("case_no_extra"))}</span>` : ""}</div>`;
 }
 
 function render() {
@@ -277,8 +296,8 @@ function render() {
     return true;
   });
   const emptyEl = $("caseEmpty");
-  if (!all.length) { emptyEl.textContent = "暂无案件。搜索并选择人员立案。"; emptyEl.style.display = ""; }
-  else if (!cs.length) { emptyEl.textContent = "无匹配案件。"; emptyEl.style.display = ""; }
+  if (!all.length) { emptyEl.textContent = T("case_empty_new2"); emptyEl.style.display = ""; }
+  else if (!cs.length) { emptyEl.textContent = T("case_empty_none"); emptyEl.style.display = ""; }
   else emptyEl.style.display = "none";
 
   tbody.innerHTML = cs.map(c => {
@@ -287,20 +306,20 @@ function render() {
     const evLines = evs.slice(isOpen ? 0 : -8).map(eventLine).join("<br>");
     let evHtml = evLines || "—";
     if (evs.length > 8) {
-      evHtml += `<br><button class="btn sm ev-toggle" data-act="toggle" data-cid="${esc(c.case_id)}">${isOpen ? "收起" : `查看全部（${evs.length} 条）`}</button>`;
+      evHtml += `<br><button class="btn sm ev-toggle" data-act="toggle" data-cid="${esc(c.case_id)}">${isOpen ? esc(T("case_btn_toggle_collapse")) : esc(T("case_btn_toggle_all").replace("{n}", evs.length))}</button>`;
     }
-    let ops = `<button class="btn sm" data-act="detail">${detailExpanded.has(c.case_id) ? "收起详情" : "详情"}</button>`;
+    let ops = `<button class="btn sm" data-act="detail">${esc(detailExpanded.has(c.case_id) ? T("case_btn_detail_hide") : T("case_btn_detail"))}</button>`;
     if (c.status === "open" || c.status === "found") {
-      ops += `<button class="btn sm ok" data-act="close" data-outcome="closed">找回（结案）</button>
-              <button class="btn sm danger" data-act="close" data-outcome="revoked">撤销（误报）</button>`;
+      ops += `<button class="btn sm ok" data-act="close" data-outcome="closed">${esc(T("case_btn_close_found"))}</button>
+              <button class="btn sm danger" data-act="close" data-outcome="revoked">${esc(T("case_btn_close_revoke"))}</button>`;
     } else {
-      ops += `<span class="ev-line">${c.outcome === "revoked" ? "误报撤销" : "已找回"} · ${fmtT(c.closed_at)}</span>`;
+      ops += `<span class="ev-line">${esc(c.outcome === "revoked" ? T("case_out_revoked") : T("case_out_recovered"))} · ${fmtT(c.closed_at)}</span>`;
     }
     const devs = (c.devices || []).map(s => esc(s)).join("<br>") || "—";
     const main = `<tr data-cid="${esc(c.case_id)}">
       <td class="mono">${esc(c.case_id)}</td>
       <td class="person-name">${esc(c.person_name)}</td>
-      <td><span class="badge c-${esc(c.status)}">${CASE_ZH[c.status] || c.status}</span></td>
+      <td><span class="badge c-${esc(c.status)}">${esc(CASE_LBL[c.status] || c.status)}</span></td>
       <td class="mono devs">${devs}</td>
       <td class="ev-line">${evHtml}</td>
       <td>${ops}</td>
@@ -315,8 +334,8 @@ function render() {
     b.onclick = async () => {
       const cid = b.closest("tr").dataset.cid;
       const outcome = b.dataset.outcome;
-      const label = outcome === "revoked" ? "撤销误报" : "找回";
-      if (!confirm(`确认「${label}」该案件？名下设备将恢复启用。`)) return;
+      const label = outcome === "revoked" ? T("case_lbl_revoke") : T("case_lbl_found");
+      if (!confirm(T("case_confirm_close").replace("{label}", label))) return;
       await api({ action: "close", case_id: cid, outcome });
       load();
     };
@@ -358,10 +377,10 @@ async function schedule() {
 $("btnMark").onclick = async () => {
   const pid = selectedPid;
   const hint = $("markHint");
-  if (!pid) { hint.textContent = "请先搜索并选择人员"; hint.className = "hint err"; return; }
+  if (!pid) { hint.textContent = T("case_hint_pick"); hint.className = "hint err"; return; }
   const cnt = registry.devices.filter(d => d.person_id === pid).length;
   if (cnt === 0) {
-    hint.textContent = "该人员名下无绑定设备，无法立案（请先在设备清册绑定设备）";
+    hint.textContent = T("case_hint_nodev");
     hint.className = "hint err";
     return;
   }
@@ -378,7 +397,7 @@ $("btnMark").onclick = async () => {
     belongings: $("cBelongings").value.trim(),
     vehicle: $("cVehicle").value.trim(),
   });
-  if (r.ok && r.dup) alert("该人员已有未结案件");
+  if (r.ok && r.dup) alert(T("case_dup"));
   ["cMissingAt", "cMissingPlace", "cPossibleTo", "cClothing", "cPhone",
    "cPolice", "cCaseNo", "cStation", "cBelongings", "cVehicle"].forEach(id => $(id).value = "");
   load();
@@ -388,6 +407,7 @@ $("cq").oninput = () => render();
 $("cStatus").onchange = () => render();
 $("personQ").oninput = () => renderPersonResults();
 
+OrpahI18n.apply();
 schedule();
 </script>
 </body>

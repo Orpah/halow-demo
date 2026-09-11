@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_track">
 <head>
 <meta charset="utf-8">
 <title>定位与轨迹 — ORPAH-over-HaLow</title>
@@ -39,121 +39,127 @@
 </head>
 <body>
 <header>
-  <div class="brand"><a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name">定位与轨迹</span>
-    <span class="sub">Orpah ID · 多路由器持续测 RSSI → 实时定位 + 运动轨迹</span>
-    <a class="btn back" href="rssi.html">RSSI 定位算法</a>
-    <a class="btn back" href="index.html">← 返回主页</a>
+  <div class="brand"><a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name" data-i18n="nav_track">定位与轨迹</span>
+    <span class="sub" data-i18n="tk_sub">Orpah ID · 多路由器持续测 RSSI → 实时定位 + 运动轨迹</span>
+    <a class="btn back" href="rssi.html" data-i18n="nav_rssi">RSSI 定位算法</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>0 · 数据源</h3>
+  <h3 data-i18n="tk_sec0">0 · 数据源</h3>
   <div class="row">
-    <label>数据源
+    <label><span data-i18n="tk_ds">数据源</span>
       <select id="dsMode">
-        <option value="sim" selected>模拟（本地合成）</option>
-        <option value="real">真实上报（IoTDB 时序）</option>
+        <option value="sim" selected data-i18n="tk_ds_sim">模拟（本地合成）</option>
+        <option value="real" data-i18n="tk_ds_real">真实上报（IoTDB 时序）</option>
       </select>
     </label>
-    <label>设备 SN
+    <label><span data-i18n="tk_dev">设备 SN</span>
       <select id="dsSn" style="min-width:280px"></select>
     </label>
-    <label>最近 <input id="dsLimit" type="number" step="50" value="200" min="10" style="width:80px"> 点</label>
-    <label><input id="dsAuto" type="checkbox" checked> 自动刷新 2s</label>
-    <button class="btn" id="dsLoad">立即拉取</button>
+    <label><span data-i18n="tk_recent_a">最近</span> <input id="dsLimit" type="number" step="50" value="200" min="10" style="width:80px"> <span data-i18n="tk_recent_b">点</span></label>
+    <label><input id="dsAuto" type="checkbox" checked> <span data-i18n="tk_auto">自动刷新 2s</span></label>
+    <button class="btn" id="dsLoad" data-i18n="tk_fetch">立即拉取</button>
   </div>
-  <p class="hint" id="dsInfo">模拟模式：本地合成 RSSI。切到「真实上报」会从 IoTDB 读取该设备真实上报的 RSSI 时序。</p>
+  <p class="hint" id="dsInfo" data-i18n="tk_ds_info_sim">模拟模式：本地合成 RSSI。切到「真实上报」会从 IoTDB 读取该设备真实上报的 RSSI 时序。</p>
 </section>
 
 <section class="card" id="cardMap">
-  <h3>地图接口</h3>
+  <h3 data-i18n="tk_secmap">地图接口</h3>
   <div class="row">
-    <label>视图
+    <label><span data-i18n="tk_view">视图</span>
       <select id="view">
-        <option value="canvas" selected>画布（本地坐标）</option>
-        <option value="map">地图（真实地理）</option>
+        <option value="canvas" selected data-i18n="tk_view_canvas">画布（本地坐标）</option>
+        <option value="map" data-i18n="tk_view_map">地图（真实地理）</option>
       </select>
     </label>
-    <label>瓦片源
+    <label><span data-i18n="tk_tiles">瓦片源</span>
       <select id="tileSrc">
         <option value="osm" selected>OpenStreetMap</option>
         <option value="opentopo">OpenTopoMap</option>
         <option value="carto">CartoDB Voyager</option>
         <option value="esri">Esri World Imagery</option>
-        <option value="custom">自定义</option>
+        <option value="custom" data-i18n="tk_tile_custom">自定义</option>
       </select>
     </label>
-    <label>自定义瓦片 URL <input id="tileUrl" style="width:340px" placeholder="https://…/{z}/{x}/{y}.png"></label>
+    <label><span data-i18n="tk_tile_url">自定义瓦片 URL</span> <input id="tileUrl" style="width:340px" placeholder="https://…/{z}/{x}/{y}.png"></label>
   </div>
   <div class="row" style="margin-top:8px">
-    <label>基点纬度 <input id="baseLat" type="number" step="0.0001" value="39.9042"></label>
-    <label>基点经度 <input id="baseLng" type="number" step="0.0001" value="116.4074"></label>
-    <span class="hint">本地坐标 (0,0) 对应的真实经纬度；地图视图按此锚点 + 米/度换算。地图瓦片需联网。</span>
+    <label><span data-i18n="tk_base_lat">基点纬度</span> <input id="baseLat" type="number" step="0.0001" value="39.9042"></label>
+    <label><span data-i18n="tk_base_lng">基点经度</span> <input id="baseLng" type="number" step="0.0001" value="116.4074"></label>
+    <span class="hint" data-i18n="tk_map_hint">本地坐标 (0,0) 对应的真实经纬度；地图视图按此锚点 + 米/度换算。地图瓦片需联网。</span>
   </div>
 </section>
 
 <section class="card">
-  <h3 id="head1">1 · 模拟参数</h3>
+  <h3 id="head1" data-i18n="tk_sec1">1 · 模拟参数</h3>
   <div class="row" id="rowSimPath">
-    <label>路径
+    <label><span data-i18n="tk_path">路径</span>
       <select id="pathType">
-        <option value="walk" selected>随机游走</option>
-        <option value="line">直线</option>
-        <option value="circle">圆周</option>
+        <option value="walk" selected data-i18n="tk_walk">随机游走</option>
+        <option value="line" data-i18n="tk_line">直线</option>
+        <option value="circle" data-i18n="tk_circle">圆周</option>
       </select>
     </label>
-    <label>步长 <input id="step" type="number" step="0.5" value="3"> m/tick</label>
-    <label>噪声 ±<input id="noise" type="number" step="0.5" value="2"> dBm</label>
+    <label><span data-i18n="tk_step">步长</span> <input id="step" type="number" step="0.5" value="3"> m/tick</label>
+    <label><span data-i18n="tk_noise">噪声 ±</span><input id="noise" type="number" step="0.5" value="2"> dBm</label>
   </div>
   <div class="row" style="margin-top:8px">
     <label>A（1m RSSI）<input id="plA" type="number" step="0.1" value="-40"></label>
     <label>n <input id="plN" type="number" step="0.1" value="2.5"></label>
-    <span class="hint">RSSI ↔ 距离换算参数（模拟 / 真实两种模式共用）。</span>
+    <span class="hint" data-i18n="tk_pl_hint">RSSI ↔ 距离换算参数（模拟 / 真实两种模式共用）。</span>
   </div>
   <div class="row" style="margin-top:8px" id="rowSimRun">
-    <label><input id="showTrue" type="checkbox" checked> 显示真实轨迹</label>
+    <label><input id="showTrue" type="checkbox" checked> <span data-i18n="tk_show_true">显示真实轨迹</span></label>
     <label>tick <input id="tick" type="number" step="50" value="200" min="50"> ms</label>
   </div>
 </section>
 
 <section class="card" id="cardAnchors">
-  <h3>2 · 路由器测点（无人机悬停 / 固定 AP）</h3>
+  <h3 data-i18n="tk_sec2">2 · 路由器测点（无人机悬停 / 固定 AP）</h3>
   <div class="row">
-    <button class="btn" id="btnAdd">添加测点</button>
-    <button class="btn" id="btnReset">重置</button>
-    <button class="btn primary" id="btnRun">开始</button>
+    <button class="btn" id="btnAdd" data-i18n="tk_add">添加测点</button>
+    <button class="btn" id="btnReset" data-i18n="tk_reset">重置</button>
+    <button class="btn primary" id="btnRun" data-i18n="tk_run">开始</button>
   </div>
   <table class="anchors">
     <thead><tr><th>#</th><th>x (m)</th><th>y (m)</th><th></th></tr></thead>
     <tbody id="anchorBody"></tbody>
   </table>
-  <p class="hint">测点坐标即路由器/无人机的悬停位置；客户端在其覆盖范围内移动，每个测点持续测 RSSI。</p>
+  <p class="hint" data-i18n="tk_anchor_hint">测点坐标即路由器/无人机的悬停位置；客户端在其覆盖范围内移动，每个测点持续测 RSSI。</p>
 </section>
 
 <section class="card">
-  <h3 id="head3">3 · 实时定位与轨迹</h3>
+  <h3 id="head3" data-i18n="tk_sec3">3 · 实时定位与轨迹</h3>
   <div id="map" style="display:none"></div>
   <canvas id="canvas" width="620" height="420"></canvas>
   <div class="stat mono" id="statSim">
-    <div><span class="k">tick：</span><span id="stTick">0</span></div>
-    <div><span class="k">真实位置：</span><span id="stTrue">-</span></div>
-    <div><span class="k">定位估计：</span><span class="v-ok" id="stEst">-</span></div>
-    <div><span class="k">定位误差：</span><span class="v-err" id="stErr">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_tick">tick：</span><span id="stTick">0</span></div>
+    <div><span class="k" data-i18n="tk_lab_true">真实位置：</span><span id="stTrue">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_est">定位估计：</span><span class="v-ok" id="stEst">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_err">定位误差：</span><span class="v-err" id="stErr">-</span></div>
   </div>
   <div class="stat mono" id="statReal" style="display:none">
-    <div><span class="k">设备：</span><span id="stSn">-</span></div>
-    <div><span class="k">样本数：</span><span id="stN">0</span></div>
-    <div><span class="k">最新 RSSI：</span><span class="v-ok" id="stRssi">-</span></div>
-    <div><span class="k">距离估计：</span><span id="stDist">-</span></div>
-    <div><span class="k">最新时间：</span><span id="stTime">-</span></div>
-    <div><span class="k">seq / router：</span><span id="stMeta">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_sn">设备：</span><span id="stSn">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_n">样本数：</span><span id="stN">0</span></div>
+    <div><span class="k" data-i18n="tk_lab_rssi">最新 RSSI：</span><span class="v-ok" id="stRssi">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_dist">距离估计：</span><span id="stDist">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_time">最新时间：</span><span id="stTime">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_meta">seq / router：</span><span id="stMeta">-</span></div>
   </div>
-  <p class="hint" id="hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
+  <p class="hint" id="hint3" data-i18n="tk_hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
+// 设备状态展示标签（机器值不变，只翻展示）
+const SL = { active: T("st_active"), disabled: T("st_disabled"),
+             lost: T("st_lost"), scrapped: T("st_scrapped") };
 const SCALE = 6;            // px per meter
 const BOUND = 50;           // 客户端活动范围（±m，超出反弹）
 const MAX_HIST = 800;       // 轨迹最多保留点数
@@ -191,7 +197,7 @@ function addRow(x = 30, y = 0) {
     `<td>${idx}</td>` +
     `<td><input class="x" type="number" step="1" value="${x}"></td>` +
     `<td><input class="y" type="number" step="1" value="${y}"></td>` +
-    `<td><button class="btn del" title="删除">×</button></td>`;
+    `<td><button class="btn del" title="${T("btn_del")}">×</button></td>`;
   tr.querySelector(".del").onclick = () => { tr.remove(); renumber(); refreshRouters(); };
   $("anchorBody").appendChild(tr);
 }
@@ -379,7 +385,7 @@ function updateStat(est) {
     $("stEst").textContent = `( ${est.x.toFixed(1)}, ${est.y.toFixed(1)} )`;
     $("stErr").textContent = `${Math.hypot(est.x - client.x, est.y - client.y).toFixed(1)} m`;
   } else {
-    $("stEst").textContent = "（测点不足）";
+    $("stEst").textContent = T("tk_no_anchor");
     $("stErr").textContent = "-";
   }
 }
@@ -390,12 +396,12 @@ function reset() {
   tick = 0; client = { x: 0, y: 0 }; heading = 0;
   trueHist.length = 0; estHist.length = 0;
   draw(); updateStat(null);
-  $("btnRun").textContent = "开始";
+  $("btnRun").textContent = T("tk_run");
 }
 $("btnRun").onclick = () => {
-  if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = "开始"; return; }
+  if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = T("tk_run"); return; }
   const ms = Math.max(50, parseFloat($("tick").value) || 200);
-  $("btnRun").textContent = "暂停";
+  $("btnRun").textContent = T("tk_pause");
   timer = setInterval(stepOnce, ms);
 };
 $("btnReset").onclick = reset;
@@ -426,12 +432,13 @@ function fmtTime(ms) {
 
 function drawRssi() {
   const c = $("canvas"), ctx = c.getContext("2d");
-  const W = c.width, H = c.height, L = 54, R = 16, T = 16, B = 30;
+  // 注意：布局常量不能叫 T —— 会遮蔽全局 T() 翻译函数
+  const W = c.width, H = c.height, PL = 54, PR = 16, PT = 16, PB = 30;
   ctx.clearRect(0, 0, W, H);
   ctx.font = "13px monospace";
   if (!realSamples.length) {
     ctx.fillStyle = "#8b949e";
-    ctx.fillText("没有真实上报数据（IoTDB 未启动，或该 SN 还没上报）", 20, H / 2);
+    ctx.fillText(T("tk_no_data"), 20, H / 2);
     return;
   }
   const t0 = realSamples[0].t, t1 = realSamples[realSamples.length - 1].t;
@@ -439,26 +446,26 @@ function drawRssi() {
   let lo = Math.min(...rs), hi = Math.max(...rs);
   if (hi - lo < 6) { const m = (hi + lo) / 2; lo = m - 3; hi = m + 3; }
   else { const pad = (hi - lo) * 0.1; lo -= pad; hi += pad; }
-  const X = (t) => L + (t1 > t0 ? (t - t0) / (t1 - t0) : 0.5) * (W - L - R);
-  const Y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
+  const X = (t) => PL + (t1 > t0 ? (t - t0) / (t1 - t0) : 0.5) * (W - PL - PR);
+  const Y = (v) => PT + (hi - v) / (hi - lo) * (H - PT - PB);
 
   ctx.strokeStyle = "#1c2128"; ctx.lineWidth = 1;
   ctx.fillStyle = "#8b949e"; ctx.font = "11px monospace";
   for (let i = 0; i <= 4; i++) {
     const v = lo + (hi - lo) * i / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(W - PR, y); ctx.stroke();
     ctx.fillText(v.toFixed(0), 10, y + 4);
   }
   ctx.strokeStyle = "#30363d";
-  ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, H - B); ctx.lineTo(W - R, H - B); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PL, PT); ctx.lineTo(PL, H - PB); ctx.lineTo(W - PR, H - PB); ctx.stroke();
 
   ctx.fillStyle = "#8b949e";
-  ctx.fillText("dBm", L + 2, T + 10);
-  ctx.fillText(fmtTime(t0), L, H - 10);
+  ctx.fillText("dBm", PL + 2, PT + 10);
+  ctx.fillText(fmtTime(t0), PL, H - 10);
   const tm = fmtTime((t0 + t1) / 2);
-  ctx.fillText(tm, L + (W - L - R - ctx.measureText(tm).width) / 2, H - 10);
+  ctx.fillText(tm, PL + (W - PL - PR - ctx.measureText(tm).width) / 2, H - 10);
   const te = fmtTime(t1);
-  ctx.fillText(te, W - R - ctx.measureText(te).width, H - 10);
+  ctx.fillText(te, W - PR - ctx.measureText(te).width, H - 10);
 
   ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 1.5; ctx.beginPath();
   realSamples.forEach((p, i) => {
@@ -482,8 +489,8 @@ async function refreshSnList() {
     for (const d of (r.devices || [])) {
       const o = document.createElement("option");
       o.value = d.sn;
-      o.textContent = `${d.sn} · ${d.person_id ? (who[d.person_id] || d.person_id) : "未绑定"} · ${d.status}` +
-                      (d.last_seen ? "" : " · 无上报");
+      o.textContent = `${d.sn} · ${d.person_id ? (who[d.person_id] || d.person_id) : T("opt_unbound")} · ${SL[d.status] || d.status}` +
+                      (d.last_seen ? "" : " · " + T("tk_no_report"));
       sel.appendChild(o);
     }
     if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
@@ -496,7 +503,7 @@ async function loadReal() {
   const info = $("dsInfo");
   if (!sn) {
     realSamples = [];
-    info.textContent = "没有可用设备（请先到「设备清册」注册）。";
+    info.textContent = T("tk_no_dev");
     updateRealStat(); draw(); return;
   }
   const limit = Math.min(5000, Math.max(10, parseInt($("dsLimit").value) || 200));
@@ -505,18 +512,17 @@ async function loadReal() {
     if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = (r.ok && r.rows) ? r.rows.slice().reverse() : [];   // IoTDB 按时间倒序返回 → 翻正
     if (!r.ok) {
-      info.textContent = "IoTDB 不可达（服务未启动？）—— 切回模拟模式仍可演示。";
+      info.textContent = T("tk_iotdb_down");
     } else if (!realSamples.length) {
-      info.textContent = `IoTDB：${sn} 还没有上报记录（先让设备发几包，再点「立即拉取」）。`;
+      info.textContent = T("tk_no_report_iotdb").replace("{sn}", sn);
     } else {
-      info.textContent = `IoTDB：${sn} 取到 ${realSamples.length} 个真实上报点。` +
-        `当前演示只有 1 台 Router 且上报里 router_id 为空 → 单测点只能得到「距离」，不足以定位到点；` +
-        `多路由器（各自带 router_id + 已知坐标）上报后才可三边定位。`;
+      info.textContent = T("tk_real_info").replace("{sn}", sn)
+        .replace("{n}", realSamples.length) + T("tk_real_caveat");
     }
   } catch (e) {
     if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = [];
-    info.textContent = "IoTDB 查询失败：" + e;
+    info.textContent = T("tk_query_fail") + e;
   }
   updateRealStat();
   draw();
@@ -534,9 +540,10 @@ function updateRealStat() {
   const p = realSamples[n - 1];
   const d = distFromRssi(p.rssi, plA(), plN());
   $("stRssi").textContent = `${p.rssi.toFixed(1)} dBm`;
-  $("stDist").textContent = `≈ ${d.toFixed(1)} m（A=${plA()}，n=${plN()}）`;
+  $("stDist").textContent = T("tk_dist_fmt")
+    .replace("{d}", d.toFixed(1)).replace("{a}", plA()).replace("{n}", plN());
   $("stTime").textContent = new Date(p.t).toLocaleString();
-  $("stMeta").textContent = `seq=${p.seq}，router_id=${p.router_id || "（空）"}`;
+  $("stMeta").textContent = `seq=${p.seq}，router_id=${p.router_id || T("tk_router_none")}`;
 }
 
 function applyMode() {
@@ -544,18 +551,16 @@ function applyMode() {
   const real = dsMode === "real";
   $("rowSimPath").style.display = real ? "none" : "";
   $("rowSimRun").style.display = real ? "none" : "";
-  $("head1").textContent = real ? "1 · RSSI ↔ 距离换算" : "1 · 模拟参数";
+  $("head1").textContent = real ? T("tk_sec1_real") : T("tk_sec1");
   $("cardMap").style.display = real ? "none" : "";
   $("cardAnchors").style.display = real ? "none" : "";
   $("statSim").style.display = real ? "none" : "";
   $("statReal").style.display = real ? "" : "none";
-  $("head3").textContent = real ? "3 · 真实上报（IoTDB 时序）" : "3 · 实时定位与轨迹";
-  $("hint3").textContent = real
-    ? "蓝线=真实 RSSI 时序（IoTDB）、红点=最新样本；纵轴 dBm、横轴时间。"
-    : "蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。";
+  $("head3").textContent = real ? T("tk_sec3_real") : T("tk_sec3");
+  $("hint3").textContent = real ? T("tk_hint3_real") : T("tk_hint3");
   if (realTimer) { clearInterval(realTimer); realTimer = null; }
   if (real) {
-    if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = "开始"; }
+    if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = T("tk_run"); }
     $("view").value = "canvas";
     $("map").style.display = "none";
     $("canvas").style.display = "block";
@@ -579,6 +584,7 @@ $("plN").onchange = () => { if (dsMode === "real") { updateRealStat(); draw(); }
 
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
+OrpahI18n.apply();
 refreshSnList();
 draw(); updateStat(null);
 </script>
