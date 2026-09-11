@@ -19,6 +19,8 @@
   .row input.sn { width: 220px; }
   .row input.age { width: 60px; }
   .row input.photo { width: 200px; }
+  .row input.mid { width: 160px; }
+  .thumb { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; }
   table.reg { border-collapse: collapse; width: 100%; margin-top: 12px; }
   table.reg th, table.reg td { padding: 6px 10px; text-align: left; font-size: 13px; }
   table.reg th { color: var(--mut); font-weight: 400; border-bottom: 1px solid var(--bd); }
@@ -75,7 +77,18 @@
       </select>
     </label>
     <label>年龄 <input class="age" id="personAge" placeholder="岁"></label>
-    <label>照片URL <input class="photo" id="personPhoto" placeholder="http…（可空）"></label>
+    <label>身高(cm) <input class="age" id="personHeight" placeholder="cm"></label>
+    <label>体重/体型 <input class="mid" id="personBuild" placeholder="如 60kg/偏瘦"></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>体貌特征 <input class="mid" id="personFeatures" placeholder="如 左臂胎记"></label>
+    <label>疾病/健康 <input class="mid" id="personHealth" placeholder="如 阿尔茨海默"></label>
+    <label>精神状态 <input class="mid" id="personMental" placeholder="如 正常/神志不清"></label>
+    <label>沟通能力 <input class="mid" id="personCommunicate" placeholder="如 能说姓名"></label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>照片 <input type="file" id="personPhotoFile" accept="image/*"></label>
+    <img id="personPhotoThumb" class="thumb" hidden alt="缩略图">
     <label>备注 <input class="note" id="personNote" placeholder="备注"></label>
     <button class="btn" id="btnAddPerson">添加人员</button>
   </div>
@@ -182,6 +195,7 @@ async function api(body) {
 let cache = { persons: [], devices: [] };
 let editingPid = null;
 let paused = false;
+let pendingPhoto = "";
 
 function render(r) {
   cache = r;
@@ -354,10 +368,39 @@ $("btnAddPerson").onclick = async () => {
   if (!name) return;
   await api({ action: "add_person", name, note: $("personNote").value.trim(),
               gender: $("personGender").value, age: $("personAge").value.trim(),
-              photo: $("personPhoto").value.trim() });
+              photo: pendingPhoto, height: $("personHeight").value.trim(),
+              build: $("personBuild").value.trim(), features: $("personFeatures").value.trim(),
+              health: $("personHealth").value.trim(), mental: $("personMental").value.trim(),
+              communicate: $("personCommunicate").value.trim() });
   $("personName").value = ""; $("personNote").value = "";
-  $("personGender").value = ""; $("personAge").value = ""; $("personPhoto").value = "";
+  $("personGender").value = ""; $("personAge").value = "";
+  $("personHeight").value = ""; $("personBuild").value = "";
+  $("personFeatures").value = ""; $("personHealth").value = "";
+  $("personMental").value = ""; $("personCommunicate").value = "";
+  pendingPhoto = ""; $("personPhotoFile").value = ""; $("personPhotoThumb").hidden = true;
   load();
+};
+
+$("personPhotoFile").onchange = async () => {
+  const f = $("personPhotoFile").files[0];
+  if (!f) return;
+  try {
+    const resp = await fetch("/api/upload?filename=" + encodeURIComponent(f.name), {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" },
+      body: f,
+    });
+    const r = await resp.json();
+    if (r.ok) {
+      pendingPhoto = r.url;
+      const t = $("personPhotoThumb");
+      t.src = r.url; t.hidden = false;
+    } else {
+      alert("上传失败：" + (r.err || "未知错误"));
+    }
+  } catch (e) {
+    console.error("upload:", e);
+    alert("上传失败，请检查网络/服务");
+  }
 };
 $("btnAddDevice").onclick = async () => {
   const sn = $("deviceSn").value.trim().toUpperCase();

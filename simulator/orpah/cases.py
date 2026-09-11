@@ -34,7 +34,10 @@ MAX_EVENTS = 50
 class Case:
     """一个走失案件：一个走失者（人）的多设备集合。"""
 
-    def __init__(self, case_id, person_id, ts):
+    def __init__(self, case_id, person_id, ts,
+                 missing_at="", missing_place="", possible_to="", clothing="",
+                 contact_phone="", police="", police_case_no="", police_station="",
+                 belongings="", vehicle=""):
         self.case_id = case_id
         self.person_id = person_id
         self.status = CASE_OPEN
@@ -43,6 +46,17 @@ class Case:
         self.closed_at = None
         self.outcome = None          # "found" / "revoked"（结案方式）
         self.events = []             # [{t, type, sn, detail}]
+        # 走失信息（现实寻人启事要素）
+        self.missing_at = missing_at
+        self.missing_place = missing_place
+        self.possible_to = possible_to
+        self.clothing = clothing
+        self.contact_phone = contact_phone
+        self.police = police
+        self.police_case_no = police_case_no
+        self.police_station = police_station
+        self.belongings = belongings
+        self.vehicle = vehicle
 
     def note(self, ts, type_, sn="", detail=""):
         self.events.append({"t": ts, "type": type_, "sn": sn, "detail": detail})
@@ -63,8 +77,11 @@ class CaseManager:
                 return c
         return None
 
-    def mark(self, person_id, registry, ts=None):
-        """立案：该走失者名下所有设备 → 丢失。
+    def mark(self, person_id, registry, ts=None,
+             missing_at="", missing_place="", possible_to="", clothing="",
+             contact_phone="", police="", police_case_no="", police_station="",
+             belongings="", vehicle=""):
+        """立案：该走失者名下所有设备 → 丢失；可选填走失信息。
 
         返回 (case, sns, dup)：
           - 名下无设备：case=None；
@@ -79,7 +96,9 @@ class CaseManager:
         ts = ts if ts is not None else int(time.time())
         self._seq += 1
         cid = f"C{self._seq:03d}"
-        c = Case(cid, person_id, ts)
+        c = Case(cid, person_id, ts, missing_at, missing_place, possible_to,
+                 clothing, contact_phone, police, police_case_no,
+                 police_station, belongings, vehicle)
         self.cases[cid] = c
         sns = [d.sn for d in devs]
         for d in devs:
@@ -140,5 +159,15 @@ class CaseManager:
                 "outcome": c.outcome,
                 "devices": [d.sn for d in devs],
                 "events": list(c.events),
+                "missing_at": c.missing_at,
+                "missing_place": c.missing_place,
+                "possible_to": c.possible_to,
+                "clothing": c.clothing,
+                "contact_phone": c.contact_phone,
+                "police": c.police,
+                "police_case_no": c.police_case_no,
+                "police_station": c.police_station,
+                "belongings": c.belongings,
+                "vehicle": c.vehicle,
             })
         return {"cases": out}

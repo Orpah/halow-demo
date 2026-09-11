@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -107,15 +108,22 @@ class OrpahApp:
     def _seed_registry(self):
         """演示种子：一个走失者绑多台客户端（项链/鞋），另一走失者一台已丢失。"""
         p1 = self.registry.add_person("小明", "演示：被保护对象（项链 + 鞋）",
-                                      gender="男", age="7")
+                                      gender="男", age="7", height="120",
+                                      build="偏瘦", features="左臂小胎记")
         self.registry.register("CN-WH01-9AF3C1D2", person_id=p1, org="WH01", cc="CN")
         self.registry.register("CN-WH01-8K3M2P7Q", person_id=p1, org="WH01", cc="CN")
         p2 = self.registry.add_person("小红", "演示：走失中（手表）",
-                                      gender="女", age="6")
+                                      gender="女", age="6", height="115",
+                                      health="轻度智力障碍", mental="神志清楚",
+                                      communicate="能说出自己姓名")
         self.registry.register("CN-WH02-5T9V1B4C", person_id=p2, org="WH02", cc="CN",
                                status=reg.STATUS_LOST)
-        # 演示：小红已立案走失（open 案件）
-        self.cases.mark(p2, self.registry)
+        # 演示：小红已立案走失（open 案件，含走失信息）
+        self.cases.mark(p2, self.registry,
+                        missing_at="2026-09-10 14:30 左右",
+                        missing_place="XX市XX公园北门",
+                        clothing="粉色连衣裙、白色凉鞋",
+                        contact_phone="13800001234")
 
     # ---------------- 消息流日志 ----------------
     def _push_flow(self, dirn, msg, stage=""):
@@ -476,7 +484,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(404, b"not found", "text/plain")
                 return
         ctype = {"html": "text/html", "js": "application/javascript",
-                 "css": "text/css", "png": "image/png",
+                 "css": "text/css", "png": "image/png", "jpg": "image/jpeg",
+                 "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
                  "svg": "image/svg+xml"}.get(p.rsplit(".", 1)[-1], "text/plain")
         with open(p, "rb") as f:
             self._send(200, f.read(), ctype,
@@ -517,9 +526,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         action = req.get("action")
         try:
             if action == "add_person":
-                pid = APP.registry.add_person(req.get("name", ""), req.get("note", ""),
-                                              req.get("gender", ""), req.get("age", ""),
-                                              req.get("photo", ""))
+                pid = APP.registry.add_person(
+                    req.get("name", ""), req.get("note", ""),
+                    req.get("gender", ""), req.get("age", ""),
+                    req.get("photo", ""), req.get("height", ""),
+                    req.get("build", ""), req.get("features", ""),
+                    req.get("health", ""), req.get("mental", ""),
+                    req.get("communicate", ""))
                 self._send(200, json.dumps({"ok": True, "pid": pid}).encode())
             elif action == "add_device":
                 APP.registry.register(req.get("sn", ""),
@@ -533,7 +546,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 APP.registry.update_person(req.get("pid", ""),
                                            req.get("name"), req.get("note"),
                                            req.get("gender"), req.get("age"),
-                                           req.get("photo"))
+                                           req.get("photo"), req.get("height"),
+                                           req.get("build"), req.get("features"),
+                                           req.get("health"), req.get("mental"),
+                                           req.get("communicate"))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "remove_person":
                 pid = req.get("pid", "")
@@ -555,6 +571,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
+    def _api_upload(self):
+        """照片上传：POST /api/upload?filename=<name>，body 为原始图片字节。"""
+        qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+        name = ""
+        for kv in qs.split("&"):
+            k, _, v = kv.partition("=")
+            if k == "filename":
+                name = v
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(name or ""))
+        if not name or "." not in name:
+            self._send(400, json.dumps({"ok": False, "err": "缺少文件名"}).encode())
+            return
+        up = os.path.join(STATIC_DIR, "uploads")
+        os.makedirs(up, exist_ok=True)
+        n = int(self.headers.get("Content-Length", 0))
+        data = self.rfile.read(n)
+        if not data:
+            self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
+            return
+        with open(os.path.join(up, name), "wb") as f:
+            f.write(data)
+        self._send(200, json.dumps({"ok": True, "url": "/uploads/" + name}).encode())
+
     def _api_cases(self):
         """走失案件：mark 立案 / close 结案（找回或撤销）。"""
         try:
@@ -566,7 +605,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         action = req.get("action")
         try:
             if action == "mark":
-                c, sns, dup = APP.cases.mark(req.get("person_id", ""), APP.registry)
+                c, sns, dup = APP.cases.mark(
+                    req.get("person_id", ""), APP.registry,
+                    missing_at=req.get("missing_at", ""),
+                    missing_place=req.get("missing_place", ""),
+                    possible_to=req.get("possible_to", ""),
+                    clothing=req.get("clothing", ""),
+                    contact_phone=req.get("contact_phone", ""),
+                    police=req.get("police", ""),
+                    police_case_no=req.get("police_case_no", ""),
+                    police_station=req.get("police_station", ""),
+                    belongings=req.get("belongings", ""),
+                    vehicle=req.get("vehicle", ""))
                 if c is None:
                     self._send(200, json.dumps({"ok": False,
                                                 "err": "该走失者名下无设备"}).encode())
@@ -648,6 +698,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         global APP
+        if self.path.startswith("/api/upload"):
+            self._api_upload()
+            return
         if self.path == "/api/registry":
             self._api_registry()
             return
