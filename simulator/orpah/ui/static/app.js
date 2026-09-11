@@ -77,6 +77,7 @@ function esc(s) {
 /* ---------- 全量状态轮询（计数 / 连接 / 表格真相） ---------- */
 const seenRows = {};   // seq -> row element
 const MAX_ROWS = 50;
+let lostSns = new Set();   // 当前丢失态设备 SN（用于报文流标红）
 
 function renderRows(rows) {
   const tbody = $("msgList");
@@ -104,7 +105,7 @@ function renderRows(rows) {
       a.href = "registry.html?sn=" + encodeURIComponent(r.sn);
       a.textContent = r.sn;
       a.title = "在设备清册中查看该 SN";
-      a.className = "snlink";
+      a.className = lostSns.has(r.sn) ? "snlink lost" : "snlink";
       snCell.appendChild(a);
     } else {
       snCell.textContent = "-";
@@ -297,6 +298,7 @@ async function refresh() {
     $("chipServer").textContent = s.server_recv > 0 ? T("chip_run") : T("chip_listen");
     $("chipServer").className = "chip" + (s.server_recv > 0 ? " ok" : "");
     // 报文流表格（全量真相）
+    lostSns = new Set(s.lost_sns || []);
     const rows = (s.reports || []).map(x => ({
       ...x, tm: new Date((x.ts || 0) * 1000).toTimeString().slice(0, 8),
     }));

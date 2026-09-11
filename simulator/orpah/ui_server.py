@@ -24,6 +24,7 @@ import socket
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 from collections import deque
 
@@ -186,9 +187,10 @@ class OrpahApp:
         self._remember(msg, "server")
         self._push_flow("up", msg, "server")
         self._emit("server", msg)
-        # 设备清册：更新最近见时间
+        # 设备清册：更新最近见时间；走失案件：被看到即触发「发现」
         if msg.get("sn"):
             self.registry.touch(msg["sn"])
+            self.cases.on_found(msg["sn"], self.registry, detail="report")
 
     def _on_lost(self, snap):
         """Server 走失表变更 → 存快照（前端展示）。"""
@@ -380,6 +382,8 @@ class OrpahApp:
             "reports": list(reversed(rows)),
             "flow": list(self.flow),
             "lost": self.lost,
+            "lost_sns": [d.sn for d in self.registry.devices.values()
+                         if d.status == reg.STATUS_LOST],
             "publishes": list(self.publishes),
             "publish_total": self.publish_total,
             "founds": list(self.founds),
@@ -535,7 +539,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     req.get("communicate", ""))
                 self._send(200, json.dumps({"ok": True, "pid": pid}).encode())
             elif action == "add_device":
-                APP.registry.register(req.get("sn", ""),
+                sn = req.get("sn", "").strip().upper()
+                if not oid.sn_ok(sn):
+                    self._send(200, json.dumps({"ok": False,
+                        "err": f"SN 格式非法（{oid.sn_err(sn)}）"}).encode())
+                    return
+                if not oid.verify_check(sn):
+                    self._send(200, json.dumps({"ok": False,
+                        "err": "SN 校验位错误"}).encode())
+                    return
+                APP.registry.register(sn,
                                       person_id=req.get("person_id") or None,
                                       org=req.get("org"), cc=req.get("cc"))
                 self._send(200, json.dumps({"ok": True}).encode())
@@ -572,27 +585,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
     def _api_upload(self):
-        """照片上传：POST /api/upload?filename=<name>，body 为原始图片字节。"""
+        """照片上传：POST /api/upload?filename=<name>，body 为原始图片字节。
+
+        校验扩展名 + 5MB 上限；uuid 重命名防注入/重名；存 static/uploads/。
+        """
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         name = ""
         for kv in qs.split("&"):
             k, _, v = kv.partition("=")
             if k == "filename":
                 name = v
-        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(name or ""))
-        if not name or "." not in name:
-            self._send(400, json.dumps({"ok": False, "err": "缺少文件名"}).encode())
+        ext = os.path.basename(name or "").rsplit(".", 1)[-1].lower()
+        ALLOWED = {"jpg", "jpeg", "png", "webp", "gif"}
+        if ext not in ALLOWED:
+            self._send(400, json.dumps({"ok": False,
+                                        "err": "仅支持 jpg/png/webp/gif"}).encode())
             return
-        up = os.path.join(STATIC_DIR, "uploads")
-        os.makedirs(up, exist_ok=True)
         n = int(self.headers.get("Content-Length", 0))
-        data = self.rfile.read(n)
-        if not data:
+        if n <= 0:
             self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
             return
-        with open(os.path.join(up, name), "wb") as f:
+        if n > 5 * 1024 * 1024:
+            self._send(400, json.dumps({"ok": False, "err": "图片超过 5MB 限制"}).encode())
+            return
+        data = self.rfile.read(n)
+        up = os.path.join(STATIC_DIR, "uploads")
+        os.makedirs(up, exist_ok=True)
+        fname = f"{uuid.uuid4().hex}.{ext}"
+        with open(os.path.join(up, fname), "wb") as f:
             f.write(data)
-        self._send(200, json.dumps({"ok": True, "url": "/uploads/" + name}).encode())
+        self._send(200, json.dumps({"ok": True, "url": "/uploads/" + fname}).encode())
 
     def _api_cases(self):
         """走失案件：mark 立案 / close 结案（找回或撤销）。"""

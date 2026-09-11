@@ -13,7 +13,7 @@ untrack）联动，并注入 Router 发现事件（ORPAH-FOUND）。
 """
 import time
 
-from registry import STATUS_ACTIVE, STATUS_LOST
+from registry import STATUS_ACTIVE, STATUS_LOST, STATUS_SCRAPPED
 
 CASE_OPEN = "open"        # 走失中（已立案）
 CASE_FOUND = "found"      # 已发现（任一台设备命中走失表）
@@ -46,6 +46,7 @@ class Case:
         self.closed_at = None
         self.outcome = None          # "found" / "revoked"（结案方式）
         self.events = []             # [{t, type, sn, detail}]
+        self.found_sns = set()       # 已记录「发现」的设备 SN（按 case+sn 去重）
         # 走失信息（现实寻人启事要素）
         self.missing_at = missing_at
         self.missing_place = missing_place
@@ -90,7 +91,8 @@ class CaseManager:
         old = self.active_case(person_id)
         if old is not None:
             return old, [], True
-        devs = registry.devices_of(person_id)
+        devs = [d for d in registry.devices_of(person_id)
+                if d.status != STATUS_SCRAPPED]   # 报废设备不再参与案件
         if not devs:
             return None, [], False
         ts = ts if ts is not None else int(time.time())
@@ -107,7 +109,10 @@ class CaseManager:
         return c, sns, False
 
     def on_found(self, sn, registry, ts=None, detail=""):
-        """某设备被 Router 发现（ORPAH-FOUND）→ 找到其走失者案件 → 状态→found。"""
+        """某设备被上报/发现 → 找到其走失者案件 → 首次发现即转 found、写事件。
+
+        同一设备重复出现只刷新 updated，不重复写事件（按 case+sn 去重）。
+        """
         rec = registry.get(sn)
         if rec is None or not rec.person_id:
             return None
@@ -118,7 +123,9 @@ class CaseManager:
         if c.status == CASE_OPEN:
             c.status = CASE_FOUND
         c.updated = ts
-        c.note(ts, "found", sn=sn, detail=detail)
+        if sn not in c.found_sns:
+            c.found_sns.add(sn)
+            c.note(ts, "found", sn=sn, detail=detail)
         return c
 
     def close(self, case_id, registry, outcome, ts=None):
