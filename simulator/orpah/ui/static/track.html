@@ -150,8 +150,9 @@
   </table>
   <p class="hint" data-i18n="tk_st_hint">打点 = 此刻无人机在该站位（自动收尾上一个站位的窗口）；窗口内所有 report 的 RSSI 取中位数作为该站位观测。「绑定」把最新一条 report 的 RSSI 直接指派给该站位。至少 2 个站位有观测才能定位。</p>
   <canvas id="canvasLoc" width="620" height="420"></canvas>
-  <p class="hint" data-i18n="tk_st_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=定位估计、灰点=无观测站位。坐标与上方 A/n 换算共用。</p>
+  <p class="hint" data-i18n="tk_st_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=定位估计、黄虚线椭圆=95% 置信范围、灰点=无观测站位。坐标与上方 A/n 换算共用。</p>
   <p class="hint" data-i18n="tk_st_quality_hint">残差 = 测量距离 − 估计点到该站位的距离；RMS 越小越可信。GDOP 反映站位几何（越小越好；站位数不足、近共线或都在同一侧时 GDOP 会很大甚至无解，此时估计点不可信）。</p>
+  <p class="hint" data-i18n="tk_st_wls_hint">定位用加权最小二乘：RSSI 测距误差随距离增长（此处取 σ = 0.25×距离、下限 1 m），远端站位权重自动降低，不会被噪声拽偏。95% 置信椭圆与「搜索半径」由协方差（加权法方程之逆 × 后验方差）算出；搜索半径是沿最长轴的 95% 覆盖半径，供现场按该范围找人。</p>
 </section>
 
 <section class="card">
@@ -174,6 +175,9 @@
     <div><span class="k" data-i18n="tk_lab_loc">定位估计：</span><span class="v-ok" id="stLoc">-</span></div>
     <div><span class="k" data-i18n="tk_lab_res">定位残差：</span><span id="stRes">-</span></div>
     <div><span class="k" data-i18n="tk_lab_gdop">几何质量：</span><span id="stGdop">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_wls">权重解：</span><span id="stWls">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_ell">95% 置信：</span><span id="stEll">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_rad">搜索半径：</span><span id="stRad">-</span></div>
     <div><span class="k" data-i18n="tk_lab_used">参与定位：</span><span id="stUsed">-</span></div>
   </div>
   <p class="hint" id="hint3" data-i18n="tk_hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
@@ -290,6 +294,136 @@ function trilaterate(anchors, dists) {
   return { x: (a11 * b0 - a01 * b1) / det, y: (a00 * b1 - a01 * b0) / det };
 }
 
+/* ---- 加权最小二乘（WLS）+ 误差椭圆 ----
+   为什么必须加权：RSSI 测距误差随距离增长（路径损耗模型下 σ_d ≈ d·ln10·σ_rssi/(10n)），
+   远站位的距离本就不可信；等权最小二乘会被远端噪声拽偏。
+   权重 w_i = 1/σ_i²，σ_i = max(SIG_FLOOR, SIG_REL·d_i)（相对误差模型，简单且可解释）。
+   协方差 C = σ̂0²·(JᵀWJ)⁻¹，J 行 = 估计点到站位的单位向量（与 GDOP 用的是同一个 J），
+   σ̂0² = Σw·r²/(n−2)（后验单位权方差）→ 由 C 的特征值给 95% 置信椭圆（χ²(2,0.95)=5.991）。 */
+const SIG_REL = 0.25;                 // 测距相对误差（RSSI 典型 20~30%）
+const SIG_FLOOR = 1.0;                // 距离下限（米）：防 d→0 时权重爆炸
+const ELLIPSE_K = Math.sqrt(5.991);   // χ²(2, 0.95) → 2.4477
+
+function wlsLocate(obs, init) {
+  const n = obs.length;
+  if (n < 2) return null;
+  const sig = obs.map(o => Math.max(SIG_FLOOR, SIG_REL * Math.max(o.dist, 0)));
+  const w = sig.map(s => 1 / (s * s));
+  const cost = (q) => {
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const o = obs[i];
+      const r = Math.hypot(q.x - o.s.x, q.y - o.s.y) - o.dist;
+      s += w[i] * r * r;
+    }
+    return s;
+  };
+  let p = init ? { x: init.x, y: init.y } : {
+    x: obs.reduce((s, o) => s + o.s.x, 0) / n,
+    y: obs.reduce((s, o) => s + o.s.y, 0) / n,
+  };
+  let c0 = cost(p);
+  let iters = 0, converged = false;
+  /* 高斯-牛顿 + **步长折半线搜索**：测量不自洽（距离环不相交）时裸 GN 会来回振荡、
+     打满迭代还没有意义地"给出"一个点。线搜索保证代价单调下降，到不动即停。 */
+  for (let it = 0; it < 40; it++) {
+    let a00 = 0, a01 = 0, a11 = 0, g0 = 0, g1 = 0;
+    for (let i = 0; i < n; i++) {
+      const o = obs[i];
+      const dx = p.x - o.s.x, dy = p.y - o.s.y;
+      const r = Math.hypot(dx, dy) || 1e-6;
+      const ux = dx / r, uy = dy / r;        // ∂残差/∂p（单位向量）
+      const res = r - o.dist;                // 预测 − 测量
+      const wi = w[i];
+      a00 += wi * ux * ux; a01 += wi * ux * uy; a11 += wi * uy * uy;
+      g0 += wi * ux * res; g1 += wi * uy * res;
+    }
+    const detN = a00 * a11 - a01 * a01;
+    if (Math.abs(detN) < 1e-12) {
+      return { ok: false, reason: "singular", iters, x: p.x, y: p.y,
+               obsCount: n, rms: Math.sqrt(c0 / n), sig };
+    }
+    const d0 = -(a11 * g0 - a01 * g1) / detN;    // 解 (JᵀWJ)δ = −JᵀWr
+    const d1 = -(-a01 * g0 + a00 * g1) / detN;
+    let step = 1, moved = false;
+    for (let k = 0; k < 8; k++) {                // 折半直到代价下降
+      const q = { x: p.x + d0 * step, y: p.y + d1 * step };
+      const c1 = cost(q);
+      if (c1 < c0) { p = q; c0 = c1; moved = true; break; }
+      step /= 2;
+    }
+    iters = it + 1;
+    if (!moved) { converged = true; break; }     // 任何步长都不再下降 → 已到最小点
+    if (Math.hypot(d0 * step, d1 * step) < 1e-3) { converged = true; break; }
+  }
+  /* 在最终解处再算一次：残差 / 权重 / JᵀWJ（协方差要用最终的 J） */
+  let a00 = 0, a01 = 0, a11 = 0, sum2 = 0, sum2w = 0;
+  const per = {};
+  for (let i = 0; i < n; i++) {
+    const o = obs[i];
+    const dx = p.x - o.s.x, dy = p.y - o.s.y;
+    const r = Math.hypot(dx, dy) || 1e-6;
+    const ux = dx / r, uy = dy / r;
+    const res = r - o.dist;
+    per[o.s.sid] = res;
+    sum2 += res * res; sum2w += w[i] * res * res;
+    a00 += w[i] * ux * ux; a01 += w[i] * ux * uy; a11 += w[i] * uy * uy;
+  }
+  const det = a00 * a11 - a01 * a01;
+  if (Math.abs(det) < 1e-12) {
+    return { ok: false, reason: "singular", iters, x: p.x, y: p.y,
+             obsCount: n, rms: Math.sqrt(sum2 / n), sig, per };
+  }
+  const dof = Math.max(1, n - 2);
+  const s0 = Math.sqrt(sum2w / dof);              // 后验单位权标准差（≈1 = 残差与先验噪声相符）
+  const c00 = a11 / det, c01 = -a01 / det, c11 = a00 / det;
+  /* 协方差用**先验**噪声模型 (JᵀWJ)⁻¹（已在 w 里含 σ_i），只有后验明显更差时才放大：
+     为什么不能只用 σ0²(JᵀWJ)⁻¹ —— 恒定 RSSI 这类「自洽但错误」的输入残差≈0，
+     σ0→0 会给出「零不确定度」的假自信（正是本页一直要防的那类坑）。
+     s0 > 1 说明残差比假定的测距噪声还大（有未建模误差）→ 放大椭圆。*/
+  const inflate = Math.max(1, s0 * s0);
+  const cov = { a: inflate * c00, b: inflate * c01, c: inflate * c11 };
+  return { ok: true, x: p.x, y: p.y, iters, converged, obsCount: n, sig, w,
+           per, rms: Math.sqrt(sum2 / n), sigma0: s0, inflate, cov,
+           ellipse: ellipseOf(cov) };
+}
+
+/* 由协方差给 95% 置信椭圆：特征值 → 半轴长，特征向量方位 → 倾角。
+   degenerate = 半短轴 ≈0（几何退化，如站位近共线）→ 椭圆退化成一条线段，
+   此时「半径」仍可报（沿最长轴），但面积/形状不可信。 */
+function ellipseOf(cov) {
+  if (!cov) return null;
+  const tr = cov.a + cov.c, det = cov.a * cov.c - cov.b * cov.b;
+  const disc = Math.max(tr * tr / 4 - det, 0);
+  const l1 = tr / 2 + Math.sqrt(disc);
+  const l2 = tr / 2 - Math.sqrt(disc);
+  if (!(l1 > 0) || !isFinite(l1)) return null;
+  const theta = 0.5 * Math.atan2(2 * cov.b, cov.a - cov.c);   // 数学坐标系（y 向上）
+  const semiMajor = ELLIPSE_K * Math.sqrt(l1);
+  const semiMinor = l2 > 0 ? ELLIPSE_K * Math.sqrt(l2) : 0;
+  const deg = d => (d * 180 / Math.PI + 360) % 360;
+  return {
+    l1, l2, theta, thetaDeg: deg(theta),
+    semiMajor, semiMinor,
+    radius: semiMajor,                       // 保守覆盖半径（沿最长轴，95%）
+    area: Math.PI * semiMajor * semiMinor,
+    degenerate: semiMinor < 0.05 * semiMajor, // 半短轴相对半长轴太小
+  };
+}
+
+/* 椭圆 → 局部坐标点列（画布/地图都能用；n 段足够平滑） */
+function ellipsePoints(ell, cx0, cy0, n = 48) {
+  if (!ell) return [];
+  const ct = Math.cos(ell.theta), st = Math.sin(ell.theta);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = 2 * Math.PI * i / n;
+    const u = ell.semiMajor * Math.cos(t), v = ell.semiMinor * Math.sin(t);
+    out.push({ x: cx0 + u * ct - v * st, y: cy0 + u * st + v * ct });
+  }
+  return out;
+}
+
 /* ---- 单 tick：移动 → 测 RSSI → 定位 → 记录 ---- */
 function stepOnce() {
   tick++;
@@ -365,7 +499,7 @@ function refreshTileNote() {
   el.textContent = T(p.note);
 }
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
-let lRings = [], lEstLoc = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计
+let lRings = [], lEstLoc = null, lEllipse = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计 / 95% 置信椭圆
 
 function baseLat() { return parseFloat($("baseLat").value); }
 function baseLng() { return parseFloat($("baseLng").value); }
@@ -414,12 +548,14 @@ function ensureMap() {
   lEstMarker = L.marker([0, 0]).addTo(lmap);
   lRings = [];
   lEstLoc = null;        // 懒创建（Path 没有 setOpacity，用 add/remove 控制显隐）
+  lEllipse = null;       // 95% 置信椭圆（同上）
   refreshRouters();
 }
 function drawMap() {
   ensureMap();
   lTrueMarker.setOpacity(1); lEstMarker.setOpacity(1);
   if (lEstLoc) { lmap.removeLayer(lEstLoc); lEstLoc = null; }
+  if (lEllipse) { lmap.removeLayer(lEllipse); lEllipse = null; }
   lRings.forEach(r => r.remove()); lRings = [];
   if ($("showTrue").checked) lTruePath.setLatLngs(trueHist.map(p => toLatLng(p.x, p.y)));
   lEstPath.setLatLngs(estHist.map(p => toLatLng(p.x, p.y)));
@@ -713,7 +849,10 @@ function stationObs(s) {
   return { rssi: med, n: vals.length, src: "window" };
 }
 
-/* 汇总观测 → 距离 → 定位（复用 trilaterate） */
+/* 汇总观测 → 距离 → 定位，两套解：
+   ① `estLin` = 线性最小二乘（等权，先算，作为 WLS 的初值）；
+   ② `wls` = **加权最小二乘** + 协方差 → 95% 置信椭圆。
+   最终采用 WLS（它才把「远端距离更不可信」算进去）；WLS 不收敛/奇异时回退线性解并说明。 */
 function computeLoc() {
   const A = plA(), n = plN();
   const obs = [];
@@ -722,10 +861,12 @@ function computeLoc() {
     if (o) obs.push({ s, rssi: o.rssi, n: o.n, src: o.src,
                       dist: distFromRssi(o.rssi, A, n) });
   }
-  const est = obs.length >= 2
+  const estLin = obs.length >= 2
     ? trilaterate(obs.map(x => ({ x: x.s.x, y: x.s.y })), obs.map(x => x.dist))
     : null;
-  return { obs, est };
+  const wls = obs.length >= 2 ? wlsLocate(obs, estLin) : null;
+  const est = (wls && wls.ok) ? { x: wls.x, y: wls.y } : estLin;
+  return { obs, est, estLin, wls };
 }
 
 function winText(s) {
@@ -768,6 +909,11 @@ function median(vals) {
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 }
 
+/* 观测的距离噪声 σ（与 wlsLocate 同一模型：max(下限, 相对误差×距离)） */
+function sigOf(o) {
+  return Math.max(SIG_FLOOR, SIG_REL * Math.max(o.dist || 0, 0));
+}
+
 /* 站位布局条件数（与估计点无关）：经典最小二乘矩阵 A（行 = 2(xj-x0), 2(yj-y0)）
    的 λmax/λmin；∞ = 完全共线。**解不出来时**用它区分「站位几何不行」还是「距离环不相交」。 */
 function layoutCond(obs) {
@@ -804,7 +950,7 @@ function resGrade(rms, medDist) {
 function renderStations() {
   const tbody = $("stationBody");
   if (!tbody) return;
-  const { obs, est } = computeLoc();
+  const { obs, est, estLin, wls } = computeLoc();
   const q = qualityOf(obs, est);
   const bySid = {};
   obs.forEach(o => { bySid[o.s.sid] = o; });
@@ -847,7 +993,9 @@ function renderStations() {
       ? o.rssi.toFixed(1) + " dBm · " +
         (o.src === "bind" ? T("tk_st_src_bind") : "n=" + o.n)
       : "—";
-    tr.querySelector(".stdist").textContent = o ? o.dist.toFixed(1) + " m" : "—";
+    tr.querySelector(".stdist").textContent = o
+      ? o.dist.toFixed(1) + " m" + (sigOf(o) ? " ±" + sigOf(o).toFixed(1) : "")
+      : "—";
     const re = tr.querySelector(".stres");
     const r = (q && o && q.per[o.s.sid] !== undefined) ? q.per[o.s.sid] : null;
     re.textContent = r === null ? "—" : (r >= 0 ? "+" : "−") + Math.abs(r).toFixed(1) + " m";
@@ -868,14 +1016,46 @@ function renderStations() {
     setInp(".stx", s.x);
     setInp(".sty", s.y);
   });
-  drawLoc(obs, est);
+  drawLoc(obs, est, wls);
   // 地图视图（真实模式）：标记变了就重画（含基点变化），并刷新距离环/估计
   if (lmap && mapSigOf() !== mapSig) refreshRouters();
-  if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est);
+  if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est, wls);
   $("stUsed").textContent = T("tk_st_used_fmt")
     .replace("{n}", obs.length).replace("{t}", stations.length);
   // 定位结果 + 质量：没有质量指标时，退化输入（如恒定 RSSI）会给出看着正常、实际无意义的坐标
   const eLoc = $("stLoc"), eRes = $("stRes"), eGd = $("stGdop");
+  const eWls = $("stWls"), eEll = $("stEll"), eRad = $("stRad");
+  if (wls && wls.ok && estLin) {          // 加权解 vs 线性解：平移量 = 权重带来的修正
+    const shift = Math.hypot(wls.x - estLin.x, wls.y - estLin.y);
+    let txt = T("tk_wls_fmt").replace("{s}", shift.toFixed(1));
+    if (!wls.converged) {
+      txt += " · " + T("tk_wls_noconv");
+    } else if (wls.sigma0 > 3) {
+      txt += " · " + T("tk_wls_mismatch").replace("{v}", wls.sigma0.toFixed(0));
+    }
+    eWls.textContent = txt;
+    eWls.className = "v-" + (!wls.converged ? "bad" : (shift <= 1 ? "ok" : (shift <= 5 ? "err" : "bad")));
+  } else if (wls && !wls.ok) {
+    eWls.textContent = T("tk_wls_singular"); eWls.className = "v-bad";
+  } else {
+    eWls.textContent = "-"; eWls.className = "";
+  }
+  const ell = (wls && wls.ok) ? wls.ellipse : null;
+  if (ell) {
+    eEll.textContent = T("tk_ell_fmt")
+      .replace("{a}", ell.semiMajor.toFixed(1))
+      .replace("{b}", ell.semiMinor.toFixed(1))
+      .replace("{t}", ell.thetaDeg.toFixed(0))
+      + (wls.converged ? "" : " · " + T("tk_ell_unconv"))
+      + (ell.degenerate ? " · " + T("tk_ell_degen") : "");
+    eEll.className = "v-" + (ell.degenerate ? "bad"
+      : (ell.semiMajor <= 10 ? "ok" : (ell.semiMajor <= 50 ? "err" : "bad")));
+    eRad.textContent = T("tk_rad_fmt").replace("{v}", ell.radius.toFixed(1));
+    eRad.className = "v-" + (ell.radius <= 10 ? "ok" : (ell.radius <= 50 ? "err" : "bad"));
+  } else {
+    eEll.textContent = "-"; eEll.className = "";
+    eRad.textContent = "-"; eRad.className = "";
+  }
   const cond = layoutCond(obs);
   if (est) {
     eLoc.textContent = "( " + est.x.toFixed(1) + ", " + est.y.toFixed(1) + " )";
@@ -912,7 +1092,7 @@ function renderStations() {
 }
 
 /* 站位 + 距离环 + 定位估计（真实模式专用画布，不碰模拟模式的 draw()） */
-function drawLoc(obs, est) {
+function drawLoc(obs, est, wls) {
   const c = $("canvasLoc"), ctx = c.getContext("2d");
   const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
   ctx.clearRect(0, 0, W, H);
@@ -938,12 +1118,31 @@ function drawLoc(obs, est) {
     ctx.fillStyle = "#c9d1d9"; ctx.font = "11px monospace";
     ctx.fillText(o.s.name || o.s.sid, sx + 7, sy - 7);
   });
-  if (est) cross(ctx, cx + est.x * SCALE, cy - est.y * SCALE, "#f85149");
+  if (est) {
+    // 先画 95% 置信椭圆（黄），再画估计点（红叉），保证叉在椭圆之上
+    if (wls && wls.ok && wls.ellipse) {
+      const pts = ellipsePoints(wls.ellipse, est.x, est.y);
+      ctx.save();
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
+        if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = "rgba(210,153,34,.16)";
+      ctx.strokeStyle = "rgba(210,153,34,.85)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    cross(ctx, cx + est.x * SCALE, cy - est.y * SCALE, "#f85149");
+  }
 }
 
 /* 真实模式地图视图：站位 + 距离环（半径 = 估计距离，米）+ 定位估计。
    同时清掉模拟轨迹/标记 —— 它们在地图上没有意义。 */
-function drawMapLoc(obs, est) {
+function drawMapLoc(obs, est, wls) {
   ensureMap();
   lTruePath.setLatLngs([]); lEstPath.setLatLngs([]);
   lTrueMarker.setOpacity(0); lEstMarker.setOpacity(0);
@@ -951,6 +1150,16 @@ function drawMapLoc(obs, est) {
   lRings = obs.map(o => L.circle(toLatLng(o.s.x, o.s.y), {
     radius: o.dist, color: "#58a6ff", weight: 1, opacity: 0.45, fill: false,
   }).addTo(lmap));
+  // 95% 置信椭圆（多边形，逐点投影到经纬度）
+  if (lEllipse) { lmap.removeLayer(lEllipse); lEllipse = null; }
+  if (est && wls && wls.ok && wls.ellipse) {
+    const latlngs = ellipsePoints(wls.ellipse, est.x, est.y)
+      .map(p => toLatLng(p.x, p.y));
+    lEllipse = L.polygon(latlngs, {
+      color: "#d29922", weight: 1.5, opacity: 0.9, dashArray: "5 4",
+      fillColor: "#d29922", fillOpacity: 0.16,
+    }).addTo(lmap);
+  }
   if (est) {
     const ll = toLatLng(est.x, est.y);
     if (!lEstLoc) {
