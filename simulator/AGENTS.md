@@ -73,6 +73,18 @@
 - VS Code task（`orpah-ui`/`orpah-demo-cli`）已设 `PYTHONIOENCODING=utf-8` 双保险。
 - 检测某文件是否 GBK：python `open(p,'rb').read().decode('utf-8')` 抛错而 `.decode('gbk')`
   成功 → GBK。注意**不要**只读文件前 N 字节判断（会因截断多字节字符误报，2026-09-09 教训）。
+- **⚠ 用 PowerShell 5.1 往 HTTP API 发中文会被静默换成 `?`（2026-09-12 实测复现）**：
+  `Invoke-RestMethod -ContentType "application/json" -Body '<含中文的 JSON 字符串>'` →
+  每个非 ASCII 字符在服务端落库都变成 `?`（实测 `"name":"悬停点Z"` → 库里 `???Z`；
+  先前 `"actor":"张警官"` → 事件里 `???`）。**加 `charset=utf-8` 也无效**。
+  注意**命令回显里中文是好的**（说明命令文本到了 shell），坏在 PS 组装 body 那一步 ——
+  所以别以为是"终端显示乱码"，是**数据真的坏了**。
+  - **正路**：① 传 UTF-8 字节（实测有效）：
+    `$by=[System.Text.Encoding]::UTF8.GetBytes($json); Invoke-RestMethod ... -Body $by`
+    ② 更省事：改用 `C:\Python313\python.exe` 写小脚本（`json.dumps(...).encode("utf-8")`）；
+    ③ 或直接在页面上操作（浏览器发的就是 UTF-8）。
+  - 破坏是**不可逆**的（服务端收到时就是 `?`，无从还原），只能重新写入正确值。
+  - **入库前的自检**：写完中文用 API 读回一眼（`repr()`），别只看 POST 的返回。
 
 ## 1. 定位与启动
 
