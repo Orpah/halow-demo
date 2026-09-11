@@ -223,6 +223,60 @@ function renderPublishes(publishes) {
   });
 }
 
+/* ---------- 事件历史（IoTDB 持久化，重启后仍在） ---------- */
+const evtLabel = v => {
+  const s = OrpahI18n.t("evt_type_" + v);
+  return s === "evt_type_" + v ? (v || "?") : s;   // 字典无此键 → 回退机器值
+};
+
+function renderEvents(rows, ok) {
+  const ul = $("evtList");
+  if (!ul) return;
+  const state = $("evtState");
+  const list = rows || [];
+  state.textContent = ok ? T("evt_n").replace("{n}", list.length)
+                         : T("evt_offline");
+  state.className = ok ? "hint" : "hint lost-yes";
+  ul.innerHTML = "";
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "pub-empty";
+    li.textContent = T("evt_empty");
+    ul.appendChild(li);
+    return;
+  }
+  list.forEach(e => {
+    const li = document.createElement("li");
+    li.className = "pub-meta";
+    const tm = new Date(e.t || 0).toTimeString().slice(0, 8);
+    li.innerHTML =
+      `<span class="tm">${esc(tm)}</span> ` +
+      `<span class="pub-act"><b>${esc(evtLabel(e.etype))}</b>` +
+      (e.sn ? ` <b class="lost-yes">${esc(e.sn)}</b>` : "") +
+      (e.detail ? ` ${esc(e.detail)}` : "") + `</span>`;
+    ul.appendChild(li);
+  });
+}
+
+let evtBusy = false;
+
+async function refreshEvents() {
+  const ul = $("evtList");
+  if (!ul || evtBusy) return;      // 防重入：IoTDB 慢时不堆请求
+  evtBusy = true;
+  const limit = Math.min(200, Math.max(5, parseInt($("evtLimit").value) || 30));
+  const etype = $("evtType").value;
+  try {
+    const r = await fetch(`/api/ts/events?limit=${limit}` +
+      (etype ? `&etype=${encodeURIComponent(etype)}` : "")).then(x => x.json());
+    renderEvents(r.rows, !!r.ok);
+  } catch (e) {
+    renderEvents([], false);
+  } finally {
+    evtBusy = false;
+  }
+}
+
 function renderId(d) {
   if (!d || !d.sn) return;
   $("idSn").textContent = d.sn;
@@ -366,6 +420,15 @@ applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，�
 connect();
 setInterval(refresh, 1000);
 refresh();
+
+/* 事件历史：初始化拉一次 + 每 5s 刷新（IoTDB 查询很轻，不跟 1s 轮询） */
+if ($("btnEvtRefresh")) {
+  $("btnEvtRefresh").onclick = refreshEvents;
+  $("evtType").onchange = refreshEvents;
+  $("evtLimit").onchange = refreshEvents;
+  setInterval(refreshEvents, 5000);
+  refreshEvents();
+}
 
 /* ---------- 顶部「工具」下拉菜单 ---------- */
 const toolsBtn = $("toolsBtn");

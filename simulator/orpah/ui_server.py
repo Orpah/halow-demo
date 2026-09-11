@@ -238,6 +238,12 @@ class OrpahApp:
         self.publishes.insert(0, rec)
         del self.publishes[20:]
         self._emit("publish", {"n": len(entries), "targets": targets})
+        # 落库（内存环形只留 20 条，历史看「事件历史」区）
+        ent = ",".join(f"{e['sn']}={'1' if e['tracked'] else '0'}"
+                       for e in entries)
+        self.tsdb.write_event(
+            "publish", sn="",
+            detail=f"n={len(entries)} targets={targets} {ent}".strip())
 
     def _on_found_router(self, msg):
         """Router 发送 ORPAH-FOUND（发现走失）→ 消息流记 Router 段。"""
@@ -250,8 +256,11 @@ class OrpahApp:
         self.founds.insert(0, rec)
         del self.founds[20:]
         self._emit("found", rec)
-        # 走失案件：任一台设备被 Router 发现 → 该人案件进入「已发现」
         sn = msg.get("sn", "-")
+        # 落库（内存环形只留 20 条）
+        self.tsdb.write_event("found", sn=sn,
+                              detail=f"router {addr[0]}:{addr[1]}")
+        # 走失案件：任一台设备被 Router 发现 → 该人案件进入「已发现」
         c, newly = self.cases.on_found(sn, self.registry,
                                        detail=f"router {addr[0]}:{addr[1]}")
         if newly:
@@ -385,6 +394,13 @@ class OrpahApp:
         self._emit("id_report", rec)
         if rec.get("sn"):
             self.registry.touch(rec["sn"])
+        # 落库（内存 deque 有上限，历史看「事件历史」区）
+        self.tsdb.write_event(
+            "id_report", sn=rec.get("sn", ""),
+            detail=(f"alg={rec.get('alg')} level={rec.get('level')} "
+                    f"trust={rec.get('trust')} "
+                    f"accepted={rec.get('accepted')}" +
+                    (f" err={rec.get('error')}" if rec.get("error") else "")))
 
     # ---------------- 控制（前端按钮） ----------------
     def status(self):
@@ -511,6 +527,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/ts/query"):
             self._api_ts_query()
+            return
+        if self.path.startswith("/api/ts/events"):
+            self._api_ts_events()
             return
         if self.path.startswith("/api/checksum"):
             self._api_checksum()
@@ -817,6 +836,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             limit = 100
         rows = APP.tsdb.query_report(sn, limit) if sn else None
         self._send(200, json.dumps({"ok": rows is not None, "sn": sn,
+                                    "rows": rows or []}).encode())
+
+    def _api_ts_events(self):
+        """GET /api/ts/events?limit=N[&etype=][&sn=] → IoTDB 里的业务事件历史。
+
+        事件由本进程写入（publish/found/id_report/case_*），**重启后仍在**。
+        """
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        try:
+            limit = int((qs.get("limit") or ["50"])[0])
+        except ValueError:
+            limit = 50
+        limit = min(max(limit, 1), 500)
+        etype = (qs.get("etype") or [""])[0].strip()
+        sn = (qs.get("sn") or [""])[0].strip()
+        rows = APP.tsdb.query_events(limit=limit, etype=etype, sn=sn)
+        self._send(200, json.dumps({"ok": rows is not None,
+                                    "etype": etype, "sn": sn,
                                     "rows": rows or []}).encode())
 
     def _api_sig(self):

@@ -24,7 +24,7 @@
 ## 三、案件闭环 + 安全事件与运维
 
 - [x] **走失案件闭环（以人为单位，非单 SN）**：某人走失 → 标记（其名下所有设备进入走失态）→ 路由器发现任一台即视为发现该人 → 找回/撤销 → 结案。case 状态机 + 页面（`cases.py` + `case.html`，2026-09-11 完成）。多设备定位聚合并入「真实 report 聚合」。
-- [ ] **审计日志**：走失标记、撤销、重放、超窗、验签失败的持久化审计（谁/何时/哪个 SN/前后状态/结果）+ **数据保留期限/最小化**意识。
+- [x] **审计日志**：走失标记、撤销、重放、超窗、验签失败的持久化审计（谁/何时/哪个 SN/前后状态/结果）+ **数据保留期限/最小化**意识。→ **已做一半**（2026-09-11）：所有业务事件落 IoTDB `root.orpah.events`（`publish`/`found`/`id_report`/`case_mark`/`case_found`/`case_close`），`/api/ts/events` 可回读、`index.html` 有「事件历史」区，**重启后仍在**。**未做**：审计里的「谁」（操作者/角色）、数据保留期限、超出演示的完整覆盖面。
 - [ ] **告警与通知**：RSSI 突变、长未上报、校验位连续失败、签名失败率超阈、走失超时 → 规则引擎 + 通知（页面红点/Webhook/邮件；演示可用 SSE 弹窗）。
 - [ ] **回放**：按时间段回放报文流 + 定位轨迹 + 安全事件。
 - [ ] **重放/篡改自动化测试台**：批量用例（黄金样本、边界 SN、过期 nonce、错 CC）一键跑并出报告。
@@ -41,6 +41,18 @@
 - [ ] **指标面板**：校验失败率、签名算法分布、平均 RSSI、定位误差 CDF、走失处置时长。
 - [ ] **配置中心**：路径损耗 A/n 校准值、各 router 坐标、锚点库、基图参数、SSE/API 地址外置。
 - [ ] **文档/导览**：协议版本↔页面功能映射、黄金样本一键自检、demo 剧本（入网→移动→走失→撤销→定位→找回）。
+
+## 六、页面 × 存储接入现状（2026-09-11 审计）
+
+| 页面 | 接口 | 存储 | 说明 |
+|---|---|---|---|
+| `registry.html` | `/api/registry`、`/api/upload` | **SQLite** `persons`/`devices` | 照片落 `ui/static/uploads/`（文件） |
+| `case.html` | `/api/cases`、`/api/registry` | **SQLite** `cases`/`case_events` | |
+| `track.html`（真实模式） | `/api/ts/query` | **IoTDB** `root.orpah.devices.<sn>` | 模拟模式纯前端，无状态 |
+| `index.html` | `/api/status`、`/api/events`、`/api/ctl`、`/api/ts/events` | **IoTDB** `root.orpah.events`（事件历史） | 拓扑计数/报文流环形仍是内存态（**重启归零**，属设计：当前状态展示） |
+| `sig.html` | `/api/sig` | 无（内存 KeyStore） | `KeyStore.save/load` 存在但 UI 未接；重启丢密钥 |
+| `checksum.html` / `damm32.html` | `/api/checksum` | 无 | 纯计算，产出用完即弃 |
+| `rssi.html` | 无 | 无 | 纯前端算法演示 |
 
 ## 优先级
 

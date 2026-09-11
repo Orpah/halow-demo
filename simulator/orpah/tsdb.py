@@ -31,6 +31,8 @@ class Tsdb:
         self.session = None
         self.available = False
         self._lock = threading.Lock()
+        self._evt_lock = threading.Lock()
+        self._evt_last_ms = 0            # 事件时间戳单调递增游标
         self._last_try = 0.0
         self._retry_delay = 1.0
         if self.enabled:
@@ -96,16 +98,25 @@ class Tsdb:
             return False
 
     def write_event(self, etype, sn="", detail="", ts=None):
-        """写一条业务事件（case_mark/case_found/case_close/found 等）。
+        """写一条业务事件（publish/found/id_report/case_mark/case_found/case_close）。
 
         ts 可选：传入业务发生时间（如 missing_at），否则用当前时间。
+        注意：所有事件共用 root.orpah.events 这一个设备路径，IoTDB 同设备同时间戳
+        为 last-write-wins → 同一毫秒的多条事件会互相覆盖。故未显式传 ts 时把
+        时间戳钳成单调递增（最多偏移几毫秒），不丢事件。
         """
         if not self._ensure() or self.session is None:
             return False
         try:
+            ms = int((ts or time.time()) * 1000)
+            if ts is None:                       # 仅自动时间参与单调化
+                with self._evt_lock:
+                    if ms <= self._evt_last_ms:
+                        ms = self._evt_last_ms + 1
+                    self._evt_last_ms = ms
             with self._lock:
                 self.session.insert_record(
-                    "root.orpah.events", int((ts or time.time()) * 1000),
+                    "root.orpah.events", ms,
                     ["etype", "sn", "detail"],
                     [TSDataType.TEXT, TSDataType.TEXT, TSDataType.TEXT],
                     [etype, sn or "", detail or ""])
@@ -115,18 +126,11 @@ class Tsdb:
             return False
 
     # ---------------- 查询 ----------------
-    def query_report(self, sn, limit=100):
-        """查询某设备最近上报点 → [{t(ms), rssi, seq, router_id}]。
-
-        无数据时返回空列表 []；IoTDB 未就绪/查询失败返回 None。
-        """
-        if not self._ensure() or self.session is None:
-            return None
+    def _read_rows(self, sql):
+        """执行查询 → [{t(ms), <列名>: 值}]（TEXT 自动解码）。失败返回 None。"""
         try:
             with self._lock:
-                ds = self.session.execute_query_statement(
-                    f"SELECT rssi, seq, router_id FROM {self._sn_path(sn)} "
-                    f"ORDER BY time DESC LIMIT {int(limit)}")
+                ds = self.session.execute_query_statement(sql)
             cols = ds.get_column_names()
             rows = []
             while ds.has_next():
@@ -144,6 +148,39 @@ class Tsdb:
         except Exception:
             self.available = False
             return None
+
+    def query_report(self, sn, limit=100):
+        """查询某设备最近上报点 → [{t(ms), rssi, seq, router_id}]。
+
+        无数据时返回空列表 []；IoTDB 未就绪/查询失败返回 None。
+        """
+        if not self._ensure() or self.session is None:
+            return None
+        rows = self._read_rows(
+            f"SELECT rssi, seq, router_id FROM {self._sn_path(sn)} "
+            f"ORDER BY time DESC LIMIT {int(limit)}")
+        return rows
+
+    def query_events(self, limit=50, etype="", sn=""):
+        """查询业务事件历史（时间倒序）→ [{t(ms), etype, sn, detail}]。
+
+        etype / sn 为空则不过滤。过滤在本地做（多取一些再筛）：
+        IoTDB 树模型对「非投影列」做值过滤不可靠，故不把条件写进 WHERE。
+        无数据时返回空列表 []；IoTDB 未就绪/查询失败返回 None。
+        """
+        if not self._ensure() or self.session is None:
+            return None
+        limit = max(1, int(limit))
+        fetch = limit if not (etype or sn) else min(limit * 10, 5000)
+        rows = self._read_rows(
+            f"SELECT etype, sn, detail FROM root.orpah.events "
+            f"ORDER BY time DESC LIMIT {fetch}")
+        if rows is None:
+            return None
+        out = [r for r in rows
+               if (not etype or r.get("etype") == etype)
+               and (not sn or r.get("sn") == sn)]
+        return out[:limit]
 
     def close(self):
         if self.session is not None:

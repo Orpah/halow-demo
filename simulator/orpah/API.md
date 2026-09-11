@@ -101,10 +101,38 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 - `t` 为毫秒时间戳；`ok=false` 表示 IoTDB 未就绪或查询失败。
 - 数据模型：设备上报 `root.orpah.devices.<sn>`（测点 rssi/seq/router_id），
-  业务事件 `root.orpah.events`（etype/sn/detail：case_mark/case_found/case_close）。
+  业务事件 `root.orpah.events`（etype/sn/detail）。
 - IoTDB 未启动时写入静默降级、每 10s 重连一次，不影响 SQLite/UI。
 - `track.html` 的「真实上报」模式消费本接口：按时间升序画 RSSI 时序 + 按 A/n 换算距离。
   单测点只能得「距离环」，需多路由器（各自带 `router_id` + 已知坐标）才可三边定位到点。
+- **`query_report` 按时间倒序返回**，前端消费前需自行翻正。
+
+### `/api/ts/events`（业务事件历史）
+
+`GET /api/ts/events?limit=N[&etype=<类型>][&sn=<SN>]` → 事件倒序：
+
+```json
+{"ok": true, "etype": "", "sn": "",
+ "rows": [{"t": 1789100000000, "etype": "publish", "sn": "", "detail": "n=2 targets=1 CN-...=1"}]}
+```
+
+| etype | 何时写 | detail 形态 |
+|---|---|---|
+| `publish` | Server 发布/更新 LOST-TABLE | `n=<项数> targets=<台数> <sn>=<1|0>,…` |
+| `found` | Server 收到 ORPAH-FOUND（走失命中） | `router <ip>:<port>` |
+| `id_report` | Server 验完一条 Orpah ID 上报 | `alg=… level=… trust=… accepted=…`（失败附 `err=…`） |
+| `case_mark` | 立案（去重后只写一次） | `case_id` |
+| `case_found` | 案件进入已发现（`newly` 时才写） | 触发来源 |
+| `case_close` | 结案 | `<case_id>:closed\|revoked` |
+
+- `limit` 上限 500（默认 50）。`etype` / `sn` 在**服务端本地过滤**（多取 10 倍再筛，上限 5000），
+  因为 IoTDB 树模型对「非投影列」做值过滤不可靠。
+- **持久化**：这些事件重启后仍在（内存环形缓冲只留 20 条，历史以本接口为准）；
+  `index.html` 的「事件历史（IoTDB 落库）」区消费本接口。
+- **写事件的时间戳单调化**：所有事件共用 `root.orpah.events` 这一个设备路径，
+  IoTDB 同设备同时间戳是 last-write-wins → 同一毫秒的多条事件会互相覆盖。
+  故未显式传 `ts` 时把时间戳钳成严格递增（最多偏移几毫秒）；显式传 `ts`（业务时间）则原样保留。
+- 逐条报文流不重复写事件：已作为设备测点存在 `root.orpah.devices.<sn>`（见上）。
 
 ---
 

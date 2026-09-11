@@ -140,6 +140,28 @@
   </div>
 </section>
 
+<!-- ============ 事件历史（IoTDB 落库，重启后仍在） ============ -->
+<section class="card" id="evtsec">
+  <h3 data-i18n="evt_title">事件历史（IoTDB 落库）</h3>
+  <div class="config-row">
+    <label><span data-i18n="evt_type">类型</span>
+      <select id="evtType">
+        <option value="" data-i18n="evt_all">全部</option>
+        <option value="publish">publish</option>
+        <option value="found">found</option>
+        <option value="id_report">id_report</option>
+        <option value="case_mark">case_mark</option>
+        <option value="case_found">case_found</option>
+        <option value="case_close">case_close</option>
+      </select>
+    </label>
+    <label><span data-i18n="evt_limit">最近</span> <input id="evtLimit" type="number" value="30" min="5" max="200" step="5"> <span data-i18n="evt_rows">条</span></label>
+    <button class="btn" id="btnEvtRefresh" data-i18n="evt_refresh">刷新</button>
+    <span class="hint" id="evtState"></span>
+  </div>
+  <ul id="evtList"></ul>
+</section>
+
 <!-- ============ 控制 ============ -->
 <section class="card" id="ctlsec">
   <h3 data-i18n="ctl_title">上报控制</h3>
