@@ -86,4 +86,21 @@ police_case_no, police_station, belongings, vehicle, outcome, closed_at`
 
 `status` 返回新增 `lost_sns: [sn...]`（当前 `lost` 状态设备），
 index 报文流据此把丢失设备 SN 标红；SN 已链接 `registry.html?sn=`。
-registry/cases/index 均 1s 轮询同一内存数据源。
+另含 `tsdb: bool`（IoTDB 是否在线）。
+registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
+
+---
+
+## 5. `/api/ts/query`（IoTDB 时序查询）
+
+`GET /api/ts/query?sn=<SN>&limit=N` → 该设备最近上报点：
+
+```json
+{"ok": true, "sn": "CN-WH01-9AF3C1D2", "rows": [{"t": 1789100000000, "rssi": -55.0, "seq": 1, "router_id": ""}]}
+```
+
+- `t` 为毫秒时间戳；`ok=false` 表示 IoTDB 未就绪或查询失败。
+- 数据模型：设备上报 `root.orpah.devices.<sn>`（测点 rssi/seq/router_id），
+  业务事件 `root.orpah.events`（etype/sn/detail：case_mark/case_found/case_close）。
+- IoTDB 未启动时写入静默降级、每 10s 重连一次，不影响 SQLite/UI。
+
