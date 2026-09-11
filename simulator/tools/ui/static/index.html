@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_tools">
 <head>
 <meta charset="utf-8">
 <title>TXW8301 模拟器 UI</title>
@@ -8,12 +8,13 @@
 </head>
 <body>
 <header>
-  <div class="brand"><img class="brand-logo" src="orpah-logo.png" alt="orpah" title="orpah"> TXW8301 模拟器 <span class="sub" id="bannerSub">CH32V203 · 无射频 · 虚拟空口</span></div>
+  <div class="brand"><img class="brand-logo" src="orpah-logo.png" alt="orpah" title="orpah"> <span data-i18n="tui_brand">TXW8301 模拟器</span> <span class="sub" id="bannerSub" data-i18n="bs_sim0">CH32V203 · 无射频 · 虚拟空口</span></div>
   <div class="tools">
-    <span id="srvstatus" class="badge">未连接</span>
-    <button id="btnClearConsole" class="btn">清空控制台</button>
-    <button id="btnClearFrames" class="btn">清空帧</button>
-    <button id="btnFrameMonitor" class="btn">帧监视: 关</button>
+    <span id="srvstatus" class="badge" data-i18n="tui_srv_off">未连接</span>
+    <button id="btnClearConsole" class="btn" data-i18n="tui_clear_console">清空控制台</button>
+    <button id="btnClearFrames" class="btn" data-i18n="tui_clear_frames">清空帧</button>
+    <button id="btnFrameMonitor" class="btn" data-i18n="tui_fm_off_btn">帧监视: 关</button>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
@@ -21,34 +22,34 @@
 <section id="topology" class="card">
   <div class="topo">
     <div class="node" id="nodeA">
-      <div class="node-title">设备 A
+      <div class="node-title"><span data-i18n="tui_dev_a">设备 A</span>
         <span class="chip" id="typeA">--</span><span class="chip" id="modeA">--</span>
         <span class="chip pow" id="powA">--</span>
       </div>
       <div class="node-row small" id="portA">--</div>
       <div class="node-row">SSID <b id="ssidA">-</b></div>
-      <div class="node-row">频率 <b id="chanA">-</b> · 带宽 <b id="bwA">-</b></div>
-      <div class="node-row">连接 <b class="conn" id="connA">OFFLINE</b></div>
+      <div class="node-row"><span data-i18n="tui_freq">频率</span> <b id="chanA">-</b> · <span data-i18n="tui_bw">带宽</span> <b id="bwA">-</b></div>
+      <div class="node-row"><span data-i18n="tui_conn">连接</span> <b class="conn" id="connA">OFFLINE</b></div>
       <div class="rssi-bar" id="rssiA"><i></i><i></i><i></i><i></i><span class="rssi-num" id="rssiTxtA"></span></div>
-      <div class="node-row small">TX <span id="txA">0</span> · RX <span id="rxA">0</span> · 运行 <span id="upA">0s</span></div>
+      <div class="node-row small">TX <span id="txA">0</span> · RX <span id="rxA">0</span> · <span data-i18n="tui_run">运行</span> <span id="upA">0s</span></div>
     </div>
     <div class="link">
-      <div class="link-label" id="linkLabel">虚拟空口 (TCP)</div>
+      <div class="link-label" id="linkLabel" data-i18n="tui_air_virtual">虚拟空口 (TCP)</div>
       <div class="flow"><span></span><span></span><span></span><span></span><span></span></div>
       <div class="link-state" id="linkState">--</div>
-      <div class="link-tip">ℹ️ <b>真机↔真机</b>（RF）或 <b>虚拟机↔虚拟机</b>（虚拟空口）可互通；<b>真机↔虚拟机不互通</b></div>
+      <div class="link-tip" data-i18n-html="tui_link_tip">ℹ️ <b>真机↔真机</b>（RF）或 <b>虚拟机↔虚拟机</b>（虚拟空口）可互通；<b>真机↔虚拟机不互通</b></div>
     </div>
     <div class="node" id="nodeB">
-      <div class="node-title">设备 B
+      <div class="node-title"><span data-i18n="tui_dev_b">设备 B</span>
         <span class="chip" id="typeB">--</span><span class="chip" id="modeB">--</span>
         <span class="chip pow" id="powB">--</span>
       </div>
       <div class="node-row small" id="portB">--</div>
       <div class="node-row">SSID <b id="ssidB">-</b></div>
-      <div class="node-row">频率 <b id="chanB">-</b> · 带宽 <b id="bwB">-</b></div>
-      <div class="node-row">连接 <b class="conn" id="connB">OFFLINE</b></div>
+      <div class="node-row"><span data-i18n="tui_freq">频率</span> <b id="chanB">-</b> · <span data-i18n="tui_bw">带宽</span> <b id="bwB">-</b></div>
+      <div class="node-row"><span data-i18n="tui_conn">连接</span> <b class="conn" id="connB">OFFLINE</b></div>
       <div class="rssi-bar" id="rssiB"><i></i><i></i><i></i><i></i><span class="rssi-num" id="rssiTxtB"></span></div>
-      <div class="node-row small">TX <span id="txB">0</span> · RX <span id="rxB">0</span> · 运行 <span id="upB">0s</span></div>
+      <div class="node-row small">TX <span id="txB">0</span> · RX <span id="rxB">0</span> · <span data-i18n="tui_run">运行</span> <span id="upB">0s</span></div>
     </div>
   </div>
 </section>
@@ -56,28 +57,28 @@
 <!-- ============ 双设备面板 ============ -->
 <section id="panels">
   <div class="card panel" id="panelA">
-    <h3>设备 A 控制台 <button class="btn mini" id="clearA" title="清空本台控制台 (Ctrl+L)">清屏</button></h3>
+    <h3><span data-i18n="tui_dev_a">设备 A</span> <span data-i18n="tui_console">控制台</span> <button class="btn mini" id="clearA" data-i18n-title="tui_clear_title" data-i18n="tui_clear_btn" title="清空本台控制台 (Ctrl+L)">清屏</button></h3>
     <div class="console"><pre id="consoleA"></pre></div>
     <div class="cmdrow">
       <div class="cmdwrap">
-        <input id="cmdA" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+        <input id="cmdA" data-i18n-ph="tui_cmd_ph" placeholder="AT 命令 / HEX 数据" autocomplete="off">
         <div class="ac-menu" id="acMenuA" hidden></div>
       </div>
       <label class="hexbox"><input type="checkbox" id="hexA" class="hexchk" data-dev="A"> HEX</label>
-      <button class="btn send" data-dev="A">发送</button>
+      <button class="btn send" data-dev="A" data-i18n="tui_send">发送</button>
     </div>
     <div class="quick" data-dev="A"><!-- 快捷按钮由 app.js 按设备方言渲染 --></div>
   </div>
   <div class="card panel" id="panelB">
-    <h3>设备 B 控制台 <button class="btn mini" id="clearB" title="清空本台控制台 (Ctrl+L)">清屏</button></h3>
+    <h3><span data-i18n="tui_dev_b">设备 B</span> <span data-i18n="tui_console">控制台</span> <button class="btn mini" id="clearB" data-i18n-title="tui_clear_title" data-i18n="tui_clear_btn" title="清空本台控制台 (Ctrl+L)">清屏</button></h3>
     <div class="console"><pre id="consoleB"></pre></div>
     <div class="cmdrow">
       <div class="cmdwrap">
-        <input id="cmdB" placeholder="AT 命令 / HEX 数据" autocomplete="off">
+        <input id="cmdB" data-i18n-ph="tui_cmd_ph" placeholder="AT 命令 / HEX 数据" autocomplete="off">
         <div class="ac-menu" id="acMenuB" hidden></div>
       </div>
       <label class="hexbox"><input type="checkbox" id="hexB" class="hexchk" data-dev="B"> HEX</label>
-      <button class="btn send" data-dev="B">发送</button>
+      <button class="btn send" data-dev="B" data-i18n="tui_send">发送</button>
     </div>
     <div class="quick" data-dev="B"><!-- 快捷按钮由 app.js 按设备方言渲染 --></div>
   </div>
@@ -85,47 +86,47 @@
 
 <!-- ============ 帧监视器 ============ -->
 <section class="card" id="framesec">
-  <h3>帧监视器 <span class="hint">(需开启“帧监视”，走 AT+SYSDBG=WNB)</span></h3>
+  <h3><span data-i18n="tui_frames_title">帧监视器</span> <span class="hint" data-i18n="tui_frames_hint">(需开启“帧监视”，走 AT+SYSDBG=WNB)</span></h3>
   <table id="frameTable">
-    <thead><tr><th>时间</th><th>方向</th><th>目的MAC</th><th>源MAC</th><th>类型</th><th>长度</th><th>Hex</th></tr></thead>
+    <thead><tr><th data-i18n="tui_th_time">时间</th><th data-i18n="tui_th_dir">方向</th><th data-i18n="tui_th_dst">目的MAC</th><th data-i18n="tui_th_src">源MAC</th><th data-i18n="tui_th_type">类型</th><th data-i18n="tui_th_len">长度</th><th>Hex</th></tr></thead>
     <tbody id="frameList"></tbody>
   </table>
 </section>
 
 <!-- ============ 配置面板 ============ -->
 <section class="card" id="configsec">
-  <h3>配置面板 <span class="hint">(生成 AT 命令下发)</span></h3>
+  <h3><span data-i18n="tui_cfg_title">配置面板</span> <span class="hint" data-i18n="tui_cfg_hint">(生成 AT 命令下发)</span></h3>
   <div class="config-row">
-    <label>设备 <select id="cfgDevice"><option value="A">A</option><option value="B">B</option></select></label>
-    <label>模式 <select id="cfgMode"><option value="AP">AP</option><option value="STA" selected>STA</option><option value="APSTA">APSTA</option><option value="GROUP">GROUP</option></select></label>
+    <label><span data-i18n="tui_cfg_dev">设备</span> <select id="cfgDevice"><option value="A">A</option><option value="B">B</option></select></label>
+    <label><span data-i18n="tui_cfg_mode">模式</span> <select id="cfgMode"><option value="AP">AP</option><option value="STA" selected>STA</option><option value="APSTA">APSTA</option><option value="GROUP">GROUP</option></select></label>
     <label>SSID <input id="cfgSsid" value="halowlink"></label>
-    <label>加密
+    <label><span data-i18n="tui_cfg_enc">加密</span>
       <select id="cfgKey"><option value="NONE" selected>NONE</option><option value="WPA-PSK">WPA-PSK</option></select>
     </label>
-    <label>PSK(64hex) <input id="cfgPsk" placeholder="WPA-PSK 时填写"></label>
-    <label>带宽
+    <label><span data-i18n="tui_cfg_psk">PSK(64hex)</span> <input id="cfgPsk" data-i18n-ph="tui_cfg_psk_ph" placeholder="WPA-PSK 时填写"></label>
+    <label><span data-i18n="tui_cfg_bw">带宽</span>
       <select id="cfgBw"><option>1</option><option>2</option><option>4</option><option selected>8</option></select>
     </label>
-    <label>信道 <input id="cfgChan" value="9080"></label>
-    <button class="btn primary" id="btnApply">应用配置</button>
+    <label><span data-i18n="tui_cfg_chan">信道</span> <input id="cfgChan" value="9080"></label>
+    <button class="btn primary" id="btnApply" data-i18n="tui_cfg_apply">应用配置</button>
   </div>
 </section>
 
 <!-- ============ 启动命令说明 ============ -->
 <section class="card" id="startsec">
-  <h3>启动模拟器</h3>
+  <h3 data-i18n="tui_start_title">启动模拟器</h3>
   <details>
-    <summary>常用启动命令（点击展开）</summary>
+    <summary data-i18n="tui_start_summary">常用启动命令（点击展开）</summary>
     <div class="start-cmds">
-      <div class="start-cmd"><code>python server.py --a pc:txah --b pc:txah</code><span>两台 TX-AH 虚拟机（泰芯 TX-AH-MODULE，无硬件）</span></div>
-      <div class="start-cmd"><code>python server.py --a COM3:txah --b pc:txah</code><span>一台 TX-AH 真机 + 虚拟机（两者不互通）</span></div>
-      <div class="start-cmd"><code>python server.py --a COM3:txah --b COM4:txah</code><span>两台 TX-AH 真机（真实 RF 互联）</span></div>
-      <div class="start-cmd"><code>python server.py --host-sim --target tj45</code><span>两台 T-Halow-RJ45 虚拟机（LilyGo，无硬件）</span></div>
-      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b COM4:tj45</code><span>两台 T-Halow-RJ45 真机（固件代次 V1.6/V2.4 自动探测，真实 RF）</span></div>
-      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b COM4:txah</code><span>TH-RJ45 + TX-AH 真机（TH-RJ45 升 V2.4 也能自动识别，同代互联）</span></div>
-      <div class="start-cmd"><code>python server.py --host-sim --target hc01</code><span>两台 HT-HC01 虚拟机（惠特自动化 ESP32+MM6108 · 占位，无硬件）</span></div>
-      <div class="start-cmd"><code>python server.py --a COM3:hc01 --b COM4:hc01</code><span>两台 HT-HC01 真机（真实 RF）</span></div>
-      <div class="start-cmd"><code>python server.py --list</code><span>列出本机串口</span></div>
+      <div class="start-cmd"><code>python server.py --a pc:txah --b pc:txah</code><span data-i18n="tui_sc1">两台 TX-AH 虚拟机（泰芯 TX-AH-MODULE，无硬件）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:txah --b pc:txah</code><span data-i18n="tui_sc2">一台 TX-AH 真机 + 虚拟机（两者不互通）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:txah --b COM4:txah</code><span data-i18n="tui_sc3">两台 TX-AH 真机（真实 RF 互联）</span></div>
+      <div class="start-cmd"><code>python server.py --host-sim --target tj45</code><span data-i18n="tui_sc4">两台 T-Halow-RJ45 虚拟机（LilyGo，无硬件）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b COM4:tj45</code><span data-i18n="tui_sc5">两台 T-Halow-RJ45 真机（固件代次 V1.6/V2.4 自动探测，真实 RF）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:tj45 --b COM4:txah</code><span data-i18n="tui_sc6">TH-RJ45 + TX-AH 真机（TH-RJ45 升 V2.4 也能自动识别，同代互联）</span></div>
+      <div class="start-cmd"><code>python server.py --host-sim --target hc01</code><span data-i18n="tui_sc7">两台 HT-HC01 虚拟机（惠特自动化 ESP32+MM6108 · 占位，无硬件）</span></div>
+      <div class="start-cmd"><code>python server.py --a COM3:hc01 --b COM4:hc01</code><span data-i18n="tui_sc8">两台 HT-HC01 真机（真实 RF）</span></div>
+      <div class="start-cmd"><code>python server.py --list</code><span data-i18n="tui_sc9">列出本机串口</span></div>
     </div>
   </details>
 </section>

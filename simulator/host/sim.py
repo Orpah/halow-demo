@@ -26,6 +26,11 @@ import time
 
 # 协议族（AT 方言）定义在 devprofiles.py：native=本模拟器，tah=泰芯 AH，hc01=HT-HC01 占位
 from devprofiles import FAMILY_NATIVE, FAMILY_TAH, FAMILY_HC01, tah_style
+try:
+    from blang import L                 # 后端叙事文案（控制台里的叙述行）多语言
+except Exception:                      # 找不到时回退为原样返回
+    def L(key, **kw):
+        return key
 
 # ---------------------------------------------------------------------------
 # 与固件一致的常量与工具
@@ -303,12 +308,14 @@ class Link:
                     ser = serial.Serial(port, baud, timeout=0.05, write_timeout=1.0)
                     ser.reset_input_buffer()
                     self.sock = _SerialPeer(ser, port, baud)
-                    self.core.out("log", f"[{self.core.name}] 串口空口已连接 {port} @{baud}")
+                    self.core.out("log", f"[{self.core.name}] " + L(
+                        "sim_serial_link", port=port, baud=baud))
                     threading.Thread(target=self._reader, args=(self.sock,),
                                      daemon=True).start()
                     return
                 except Exception:
-                    self.core.out("log", f"[{self.core.name}] 等待串口空口 {port} …")
+                    self.core.out("log", f"[{self.core.name}] " + L(
+                        "sim_wait_serial", port=port))
                     time.sleep(2)
 
         threading.Thread(target=_try, daemon=True).start()
@@ -408,7 +415,7 @@ class HostPort:
             c.settimeout(None)
             self.sock = c
             self.core.out("log",
-                          f"[{self.core.name}] host 数据口 :{self.port} 已连接")
+                          f"[{self.core.name}] " + L("sim_host_conn", port=self.port))
             threading.Thread(target=self._reader, args=(c,), daemon=True).start()
 
     def _frame(self, t, payload):
@@ -1113,7 +1120,9 @@ class Core:
         if host_port:
             self.hostport = HostPort(self, host_port)
             self.hostport.start()
-        self.out("log", f"[{self.name}] TXW8301 模拟器 PC 版启动 (AT 控制台 :{console_port}, 空口 {self.link_port_desc})" + (f", host 口 :{host_port}" if host_port else ""))
+        self.out("log", f"[{self.name}] " + L(
+            "sim_start_host" if host_port else "sim_start",
+            console=console_port, link=self.link_port_desc, host=host_port or ""))
         if autoconf:
             self._autoconf()
 

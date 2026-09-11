@@ -71,6 +71,7 @@ _HOST_DIR = os.path.normpath(os.path.join(
 if _HOST_DIR not in sys.path:
     sys.path.insert(0, _HOST_DIR)
 import devprofiles as dp
+from blang import L, set_lang
 
 # 全局事件队列：设备线程 -> SSE 推送（有界，防消费慢/断连时无限堆积）
 EVENTS = queue.Queue(maxsize=2000)
@@ -127,23 +128,29 @@ def parse_device_spec(spec, default_target="sim"):
 
 
 def device_type(source, target):
-    """设备类型中文标签：档案名（CH32V203/T-Halow-RJ45/TX-AH/HT-HC01）× 虚拟机/真机。"""
-    loc = "虚拟机" if source == "pc" else "真机"
+    """设备类型标签：档案名（CH32V203/T-Halow-RJ45/TX-AH/HT-HC01）× 虚拟机/真机。
+
+    档案名是 ASCII，只有「虚拟机/真机」需按当前语言取词（host/blang.py）。
+    """
+    loc = L("dt_pc") if source == "pc" else L("dt_serial")
     return f"{dp.name(target)} {loc}"
 
 
 def banner_sub(devices):
-    """顶部标题副文字：按设备类型组合显示（虚拟/真机 × 档案名）。"""
+    """顶部标题副文字：按设备类型组合显示（虚拟/真机 × 档案名）。
+
+    前端已按结构化字段本地拼（切语言即时生效），此串作为兼容/回退保留。
+    """
     if not devices:
-        return "CH32V203 · 无射频 · 虚拟空口"
+        return L("bs_sim0")
     dtypes = [device_type(d.source, d.target) for d in devices.values()]
     if len(set(dtypes)) == 1:
         t = dtypes[0]
-        if t == "CH32V203 虚拟机":
-            return "CH32V203 · 无射频 · 虚拟空口"
-        if t.endswith("虚拟机"):
-            base = t[:-len("虚拟机")].rstrip()          # 如 T-Halow-RJ45 / HT-HC01
-            return f"{base} 兼容 · 无射频 · 虚拟空口"
+        if t == f"CH32V203 {L('dt_pc')}":
+            return L("bs_sim0")
+        if t.endswith(L("dt_pc")):
+            base = t[:-len(L("dt_pc"))].rstrip()        # 如 T-Halow-RJ45 / HT-HC01
+            return f"{base} {L('bs_virtual')}"
         return t                       # 真机
     # 混合来源/目标：逐台列出
     return " · ".join(f"{n}: {device_type(d.source, d.target)}"
@@ -263,6 +270,9 @@ class Device:
         self.label = f"{device_type(source, target)} · {port}"
         self.state = {
             "name": name, "port": port, "type": device_type(source, target),
+            # 结构化字段（前端据此本地拼标签，不解析上面已本地化的 type 串）
+            "source": source, "target": target,
+            "pname": dp.name(target),
             "ok": False, "conn": "OFFLINE",
             "mode": "", "ssid": "", "rssi": 0,
             "chan": "", "bw": 0,        # 工作频点列表(×10 单位) / 带宽 MHz（CHAN_LIST/BSS_BW 轮询）
@@ -325,7 +335,7 @@ class Device:
         → 周期重发直至读到版本或超时（2026-09-09，与启动 AT+VERSION 被挤掉的坑同源）。
         """
         self._fw_probed = True
-        self.push("log", text=f"[{self.name}] 探测固件代次…")
+        self.push("log", text=f"[{self.name}] {L('probing')}")
         deadline = time.time() + 8.0
         v = ""
         while not STOP.is_set() and time.time() < deadline:
@@ -345,8 +355,10 @@ class Device:
         self._apply_dialect(want_v2)
         self.state["v2"] = self.tahv2
         self.push("status", state=dict(self.state))
-        self.push("log", text=f"[{self.name}] 固件代次={'V2.4(AH-SDK V2)' if self.tahv2 else 'V1.6(T-Halow)'}"
-                              f" 版本={v or '（未读到，按档案默认）'}")
+        self.push("log", text=f"[{self.name}] " + L(
+            "fw_gen",
+            gen=("V2.4(AH-SDK V2)" if self.tahv2 else "V1.6(T-Halow)"),
+            ver=(v or L("ver_default"))))
 
     def send(self, line):
         try:
@@ -422,10 +434,9 @@ class Device:
                 self.state["conn"] = "OFFLINE"
                 self.state["ok"] = False
                 self.push("log",
-                          text=f"[{self.name}] 超过 {LIVENESS_TIMEOUT:.0f}s 未收到设备数据，"
-                               f"判关机（若已重新上电请稍候自动重连）")
+                          text=f"[{self.name}] " + L("no_data", s=LIVENESS_TIMEOUT))
         else:
-            self.push("log", text=f"[{self.name}] 设备开始应答（开机）")
+            self.push("log", text=f"[{self.name}] {L('alive')}")
         self.push("status", state=dict(self.state))
 
     def _close_transport(self):
@@ -456,7 +467,7 @@ class Device:
         self._last_rx = time.monotonic()     # 模块开机头几秒不打印，别立刻判离线
         self._ever_rx = False                # 新句柄 = 尚未收到字节，power 回关机等首包
         self._assert_at = time.monotonic() + 1.0   # 尽快重断言 SYSDBG
-        self.push("log", text=f"[{self.name}] 串口 {self.port} 已重连，等待设备应答")
+        self.push("log", text=f"[{self.name}] " + L("reconnected", port=self.port))
         return True
 
     # ---------------- 泰芯真机 LMAC 流（TX/RX 真实计数） ----------------
@@ -813,7 +824,7 @@ class Device:
     def start(self):
         threading.Thread(target=self.reader_loop, daemon=True).start()
         threading.Thread(target=self.poll_loop, daemon=True).start()
-        self.push("log", text=f"[{self.name}] 已连接 {self.label}")
+        self.push("log", text=f"[{self.name}] " + L("connected", label=self.label))
 
 
 # ---------------------------------------------------------------------------
@@ -842,13 +853,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps(
                 {d: DEVICES[d].state for d in DEVICES if DEVICES[d]}).encode())
             return
-        if self.path == "/api/info":
+        if self.path == "/api/info" or self.path.startswith("/api/info?"):
+            # 前端加载/切换语言时带 ?lang= → 后端叙事文案（设备标签、控制台叙述行）跟着走
+            if "?" in self.path:
+                from urllib.parse import parse_qs
+                q = parse_qs(self.path.split("?", 1)[1])
+                if q.get("lang"):
+                    set_lang(q["lang"][0])
             self._send(200, json.dumps({
                 "target": TARGET,
                 "sub": banner_sub(DEVICES),
                 "devices": {
                     n: {"source": d.source, "target": d.target,
                         "type": device_type(d.source, d.target),
+                        "pname": dp.name(d.target),
                         "link": d.link_desc,
                         "v2": d.tahv2}          # 前端据此切泰芯 V2.x 命令集/快捷按钮
                     for n, d in DEVICES.items()
@@ -949,7 +967,12 @@ def main():
                         + "（见 host/devprofiles.py）")
     ap.add_argument("--port", type=int, default=HTTP_PORT)
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--lang", choices=["zh", "en"], default="zh",
+                    help="后端叙事文案语言（控制台里的叙述行/设备标签）；"
+                         "浏览器端 ?lang= 会覆盖它，但启动时的日志需靠此參数"
+                         "才对得上")
     args = ap.parse_args()
+    set_lang(args.lang)      # 必须早于建建设备：启动日志在建时即入队
 
     if args.list:
         for p in list_ports.comports():
@@ -993,14 +1016,15 @@ def main():
                         peer = ("127.0.0.1", PC_PORTS["A"][1])
                 hosts.add(name, role, console_p, link_p, peer, target,
                           link_serial=link_serial)
-                link_hint = f"串口 {link_serial}" if link_serial else f"TCP :{link_p}"
+                link_hint = (f"{L('lk_serial')} {link_serial}" if link_serial
+                             else f"TCP :{link_p}")
                 dev = Device(name, TcpTransport("127.0.0.1", console_p), link_hint,
                              source="pc", target=target, link_desc=link_hint)
             else:
                 # 真机串口的物理互联介质：native(CH32V203 模拟器板)=UART2 交叉线，
                 # 其余(tah/hc01，T-Halow/TX-AH/HT-HC01)=真实射频 RF
-                air = ("UART2 物理空口" if dp.family(target) == dp.FAMILY_NATIVE
-                       else "RF 物理空口（802.11ah）")
+                air = (L("lk_uart2") if dp.family(target) == dp.FAMILY_NATIVE
+                       else L("lk_rf"))
                 dev = Device(name, SerialTransport(port), port,
                              source="serial", target=target, link_desc=air)
             DEVICES[name] = dev

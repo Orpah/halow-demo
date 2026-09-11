@@ -1,6 +1,44 @@
 /* TXW8301 模拟器 UI — 前端逻辑（无框架，纯 vanilla JS） */
 "use strict";
 
+const T = (k) => OrpahI18n.t(k);
+
+/* 按语言取时间格式（仅数字时:分:秒，两个 locale 视觉一致） */
+const localeOf = () => (OrpahI18n.lang === "en" ? "en-GB" : "zh-CN");
+
+/* 设备标签 / 顶部副标题：一律用后端给的结构化字段（source/target/pname）
+ * 在前端拼——不要解析 device_type() 拼好的字符串，那串已按当前语言本地化，
+ * 切语言/换语言后解析必错。 */
+const locKeyOf = (source) => (source === "pc" ? "dt_pc" : "dt_serial");
+
+function typeText(s) {
+  const pname = (s && s.pname) || "";
+  if (!pname) return (s && s.type) || "";      // 后端未给结构化字段时回退
+  return pname + " " + T(locKeyOf(s.source));
+}
+
+function bannerText(devs) {
+  const items = Object.entries(devs || {}).map(([n, d]) => ({
+    n, pname: d.pname || d.target || "?", locKey: locKeyOf(d.source),
+  }));
+  if (!items.length) return T("bs_sim0");
+  const uniq = new Set(items.map(i => i.pname + "|" + i.locKey));
+  if (uniq.size === 1) {
+    const i = items[0];
+    if (i.locKey === "dt_pc" && i.pname === "CH32V203") return T("bs_sim0");
+    if (i.locKey === "dt_pc") return i.pname + " " + T("bs_virtual");
+    return i.pname + " " + T("dt_serial");
+  }
+  return items.map(i => `${i.n}: ${i.pname} ${T(i.locKey)}`).join(" · ");
+}
+
+/* 物理互联介质标签：后端已按语言拼好（Serial COM3 / TCP :9601 / UART2…），
+ * 空值（PC↔PC 走虚拟空口）时回退到字典。 */
+function linkText(raw) {
+  const s = String(raw || "").trim();
+  return s || T("tui_air_virtual");
+}
+
 const state = {
   A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
        ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
@@ -11,77 +49,56 @@ const consoles = { A: [], B: [] };
 let frames = [];
 let frameMonitor = false;
 
-/* AT 命令提示库（TXW8301 / T-Halow-RJ45 兼容） */
+/* AT 命令提示库（TXW8301 / T-Halow-RJ45 兼容）
+ * 命令本身语言中立，说明文字全部放共享字典（key = "at:def:<cmd>"），见 atHint()。 */
 const AT_CMDS = [
-  { cmd: "AT+MODE=", hint: "[ap/sta/group/apsta] 工作模式" },
-  { cmd: "AT+MODE?", hint: "查询当前模式" },
-  { cmd: "AT+SSID=", hint: "[ssid] 网络名（≤32字符）" },
-  { cmd: "AT+SSID?", hint: "查询 SSID" },
-  { cmd: "AT+KEYMGMT=", hint: "[WPA-PSK/NONE] 加密方式" },
-  { cmd: "AT+PSK=", hint: "[64位hex] 加密密码" },
-  { cmd: "AT+PAIR=", hint: "[0/1] 快速配对" },
-  { cmd: "AT+BSS_BW=", hint: "[1/2/4/8] 带宽 MHz" },
-  { cmd: "AT+FREQ_RANGE=", hint: "[起始,结束] 频率范围 MHz" },
-  { cmd: "AT+CHAN_LIST=", hint: "[freq1,freq2,...] 工作频率列表" },
-  { cmd: "AT+RSSI", hint: "[?/索引/MAC] 查询信号强度" },
-  { cmd: "AT+CONN_STATE", hint: "查看连接状态" },
-  { cmd: "AT+WNBCFG", hint: "查看设备参数" },
-  { cmd: "AT+SCAN_AP", hint: "扫描 AP（STA 模式）" },
-  { cmd: "AT+BSSLIST", hint: "获取扫描到的 AP 列表" },
-  { cmd: "AT+TXPOWER=", hint: "[6..20] 发射功率 dBm" },
-  { cmd: "AT+ACKTMO=", hint: "[us] ACK 超时（>1km 通信时）" },
-  { cmd: "AT+TX_MCS=", hint: "[0..7/255] TX MCS" },
-  { cmd: "AT+HEART_INT=", hint: "[ms] 心跳间隔" },
-  { cmd: "AT+UNPAIR=", hint: "[mac_addr] 解除指定 STA 配对" },
-  { cmd: "AT+LOADDEF=", hint: "[1] 恢复出厂设置" },
-  { cmd: "AT+SYSDBG=", hint: "[LMAC/WNB,0/1] 调试打印开关" },
-  { cmd: "AT+JOINGROUP=", hint: "[组播地址,AID] 加入组播网络" },
-  { cmd: "AT+R_SSID=", hint: "[ssid] 中继上级 AP 的 SSID" },
-  { cmd: "AT+R_PSK=", hint: "[64hex] 中继上级 AP 的密码" },
-  { cmd: "AT+ROAM=", hint: "[0/1] 漫游开关（STA 侧）" },
-  { cmd: "AT+PS_MODE=", hint: "[0..4] STA 休眠模式" },
-  { cmd: "AT+WAKEUP", hint: "唤醒休眠模块" },
-  { cmd: "AT+VERSION", hint: "查询固件版本" },
-  { cmd: "AT+MAC_ADDR", hint: "查询本机 MAC 地址" },
-  { cmd: "AT+TXDATA=", hint: "[长度] 进入数据模式发送数据" },
-  { cmd: "AT+RST", hint: "复位模块" },
+  { cmd: "AT+MODE=" }, { cmd: "AT+MODE?" },
+  { cmd: "AT+SSID=" }, { cmd: "AT+SSID?" },
+  { cmd: "AT+KEYMGMT=" }, { cmd: "AT+PSK=" },
+  { cmd: "AT+PAIR=" }, { cmd: "AT+BSS_BW=" },
+  { cmd: "AT+FREQ_RANGE=" }, { cmd: "AT+CHAN_LIST=" },
+  { cmd: "AT+RSSI" }, { cmd: "AT+CONN_STATE" }, { cmd: "AT+WNBCFG" },
+  { cmd: "AT+SCAN_AP" }, { cmd: "AT+BSSLIST" },
+  { cmd: "AT+TXPOWER=" }, { cmd: "AT+ACKTMO=" }, { cmd: "AT+TX_MCS=" },
+  { cmd: "AT+HEART_INT=" }, { cmd: "AT+UNPAIR=" }, { cmd: "AT+LOADDEF=" },
+  { cmd: "AT+SYSDBG=" }, { cmd: "AT+JOINGROUP=" },
+  { cmd: "AT+R_SSID=" }, { cmd: "AT+R_PSK=" }, { cmd: "AT+ROAM=" },
+  { cmd: "AT+PS_MODE=" }, { cmd: "AT+WAKEUP" }, { cmd: "AT+VERSION" },
+  { cmd: "AT+MAC_ADDR" }, { cmd: "AT+TXDATA=" }, { cmd: "AT+RST" },
 ];
 
 /* TX-AH 泰芯真机（AH-SDK V2.x 固件 v2.4.1.x）命令提示库：真机串口(txah)用。
    与 T-Halow(tj45)/模拟器方言不同：设模式 AT+WIFIMODE=、查询带 '?'、无 AT+MODE/CONN_STATE。 */
 const CMDS_TAHV2 = [
-  { cmd: "AT+WIFIMODE=", hint: "[ap/sta/apsta] 工作模式" },
-  { cmd: "AT+WIFIMODE=?", hint: "查询当前模式" },
-  { cmd: "AT+SSID=", hint: "[ssid] 网络名（≤32字符）" },
-  { cmd: "AT+SSID=?", hint: "查询 SSID" },
-  { cmd: "AT+ENCRYPT=", hint: "[0/1] 加密开关" },
-  { cmd: "AT+KEY=", hint: "[≥8字符] 加密密钥（ASCII）" },
-  { cmd: "AT+PAIR=", hint: "[0/1/2] 快速配对（成功后 AT+PAIR=0 建链）" },
-  { cmd: "AT+CHAN_LIST=", hint: "[freq1,freq2,...] 工作频率（AP/STA 须完全一致）" },
-  { cmd: "AT+CHAN_LIST=?", hint: "查询信道列表" },
-  { cmd: "AT+BSS_BW=", hint: "[1/2/4/8] 带宽 MHz" },
-  { cmd: "AT+BSS_BW=?", hint: "查询带宽" },
-  { cmd: "AT+CHANNEL=", hint: "[序号] AP 端工作信道序号" },
-  { cmd: "AT+SCAN", hint: "扫描周围 AP（结果看 UMAC 打印 AT+SYSDBG=UMAC,1）" },
-  { cmd: "AT+SYSCFG", hint: "查看设备参数" },
-  { cmd: "AT+RSSI=?", hint: "查询信号强度（关联后非 0）" },
-  { cmd: "AT+MAC_ADDR=?", hint: "查询本机 MAC" },
-  { cmd: "AT+TXPOWER=", hint: "[1..20] 发射功率 dBm" },
-  { cmd: "AT+ACK_TO=", hint: "[us] ACK 超时（>1km 通信时）" },
-  { cmd: "AT+UNPAIR=", hint: "[mac] 解除指定 STA 配对" },
-  { cmd: "AT+APHIDE=", hint: "[0/1] 隐藏 AP（1=扫描不到）" },
-  { cmd: "AT+ROAM=", hint: "[0/1] 漫游开关（STA 侧）" },
-  { cmd: "AT+R_SSID=", hint: "[ssid] 中继下级 SSID" },
-  { cmd: "AT+R_KEY=", hint: "[key≥8] 中继下级密钥" },
-  { cmd: "AT+WAKEUP=", hint: "[mac] 唤醒休眠 STA（AP 端）" },
-  { cmd: "AT+DSLEEP=", hint: "[1] 进入休眠" },
-  { cmd: "AT+SYSDBG=", hint: "[LMAC/UMAC/WNB,0/1] 调试打印开关" },
-  { cmd: "AT+LOADDEF=", hint: "[1] 恢复出厂设置" },
-  { cmd: "AT+RST", hint: "复位模块（重启固件）" },
-  { cmd: "AT+VERSION", hint: "查询固件版本" },
-  { cmd: "AT+PING=", hint: "[ip,次数,size] ping（需网络宏）" },
-  { cmd: "AT+TEST_START=", hint: "[0/1] 进入/退出 RF 测试模式" },
+  { cmd: "AT+WIFIMODE=" }, { cmd: "AT+WIFIMODE=?" },
+  { cmd: "AT+SSID=" }, { cmd: "AT+SSID=?" },
+  { cmd: "AT+ENCRYPT=" }, { cmd: "AT+KEY=" }, { cmd: "AT+PAIR=" },
+  { cmd: "AT+CHAN_LIST=" }, { cmd: "AT+CHAN_LIST=?" },
+  { cmd: "AT+BSS_BW=" }, { cmd: "AT+BSS_BW=?" }, { cmd: "AT+CHANNEL=" },
+  { cmd: "AT+SCAN" }, { cmd: "AT+SYSCFG" }, { cmd: "AT+RSSI=?" },
+  { cmd: "AT+MAC_ADDR=?" }, { cmd: "AT+TXPOWER=" }, { cmd: "AT+ACK_TO=" },
+  { cmd: "AT+UNPAIR=" }, { cmd: "AT+APHIDE=" }, { cmd: "AT+ROAM=" },
+  { cmd: "AT+R_SSID=" }, { cmd: "AT+R_KEY=" }, { cmd: "AT+WAKEUP=" },
+  { cmd: "AT+DSLEEP=" }, { cmd: "AT+SYSDBG=" }, { cmd: "AT+LOADDEF=" },
+  { cmd: "AT+RST" }, { cmd: "AT+VERSION" }, { cmd: "AT+PING=" },
+  { cmd: "AT+TEST_START=" },
 ];
+
+/* 命令库取值："def"=默认方言 / "v2"=泰芯 V2.x；字典 key = "at:<库>:<命令>"。
+ * 注：AT+SYSDBG= 在两个库里说明不同，故 key 必须带库名。 */
+function atHint(lib, cmd) {
+  const k = "at:" + lib + ":" + cmd;
+  const s = OrpahI18n.t(k);
+  return s === k ? "" : s;      // 字典缺键 → 空串
+}
+const cmdLib = (d) => (devV2[d] ? "v2" : "def");
+
+/* 快捷按钮悬停说明：字典 key = "qt:<命令>"。 */
+function qtHint(cmd) {
+  const k = "qt:" + cmd;
+  const s = OrpahI18n.t(k);
+  return s === k ? "" : s;
+}
 
 // 每台设备当前的命令提示库与泰芯 V2.x 真机方言标记（loadBanner 按 /api/info 填充）
 const devCmd = { A: AT_CMDS, B: AT_CMDS };
@@ -90,23 +107,23 @@ const devV2 = { A: false, B: false };
 // 快捷按钮：默认(T-Halow/模拟器方言) vs 泰芯 V2.x 真机方言
 const QUICK_BTNS = {
   def: [
-    ["MODE?", "AT+MODE?", ""], ["CONN", "AT+CONN_STATE", ""],
-    ["RSSI", "AT+RSSI", ""], ["SSID?", "AT+SSID?", ""],
-    ["PAIR=1", "AT+PAIR=1", ""], ["PAIR=0", "AT+PAIR=0", ""],
-    ["WNBCFG", "AT+WNBCFG", ""],
-    ["LMAC=0", "AT+SYSDBG=LMAC,0", "关闭 LMAC 调试打印"],
-    ["RST", "AT+RST", "复位模块（重启固件）"],
+    ["MODE?", "AT+MODE?"], ["CONN", "AT+CONN_STATE"],
+    ["RSSI", "AT+RSSI"], ["SSID?", "AT+SSID?"],
+    ["PAIR=1", "AT+PAIR=1"], ["PAIR=0", "AT+PAIR=0"],
+    ["WNBCFG", "AT+WNBCFG"],
+    ["LMAC=0", "AT+SYSDBG=LMAC,0"],
+    ["RST", "AT+RST"],
   ],
   v2: [
-    ["MODE", "AT+WIFIMODE=?", "查询模式（设模式用 AT+WIFIMODE=ap/sta）"],
-    ["RSSI", "AT+RSSI=?", "查询信号强度（关联后非 0）"],
-    ["SSID?", "AT+SSID=?", "查询 SSID"],
-    ["SCAN", "AT+SCAN", "扫描周围 AP（结果看 UMAC 打印）"],
-    ["PAIR=1", "AT+PAIR=1", "启动快速配对"],
-    ["PAIR=0", "AT+PAIR=0", "停止配对并自动建链"],
-    ["SYSCFG", "AT+SYSCFG", "查看设备参数"],
-    ["LMAC=0", "AT+SYSDBG=LMAC,0", "关闭 LMAC 调试打印"],
-    ["RST", "AT+RST", "复位模块（重启固件）"],
+    ["MODE", "AT+WIFIMODE=?"],
+    ["RSSI", "AT+RSSI=?"],
+    ["SSID?", "AT+SSID=?"],
+    ["SCAN", "AT+SCAN"],
+    ["PAIR=1", "AT+PAIR=1"],
+    ["PAIR=0", "AT+PAIR=0"],
+    ["SYSCFG", "AT+SYSCFG"],
+    ["LMAC=0", "AT+SYSDBG=LMAC,0"],
+    ["RST", "AT+RST"],
   ],
 };
 
@@ -114,10 +131,11 @@ function renderQuick(d) {
   const box = document.querySelector(`.quick[data-dev="${d}"]`);
   if (!box) return;
   box.innerHTML = "";
-  (devV2[d] ? QUICK_BTNS.v2 : QUICK_BTNS.def).forEach(([label, cmd, title]) => {
+  (devV2[d] ? QUICK_BTNS.v2 : QUICK_BTNS.def).forEach(([label, cmd]) => {
     const b = document.createElement("button");
     b.dataset.cmd = cmd;
-    if (title) b.title = title;
+    const t = qtHint(cmd);          // 悬停说明来自字典，缺键则不设 title
+    if (t) b.title = t;
     b.textContent = label;
     b.addEventListener("click", () => sendCmd(d, cmd));
     box.appendChild(b);
@@ -129,7 +147,7 @@ const acState = { A: { list: [], idx: 0 }, B: { list: [], idx: 0 } };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmtTime = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+const fmtTime = () => new Date().toLocaleTimeString(localeOf(), { hour12: false });
 
 function fetchCmd(dev, line, hex) {
   return fetch("/api/command", {
@@ -144,8 +162,8 @@ async function sendCmd(dev, line, hex) {
     // HEX 模式：自动先进入数据模式（AT+TXDATA=<字节数>），再发原始字节，避免漏步
     const hexOnly = line.replace(/\s+/g, "");
     const n = hexOnly.length / 2;
-    if (hexOnly.length % 2 !== 0) { alert("HEX 字节数必须是偶数"); return; }
-    if (n < 14) { alert("以太网帧最短 14 字节（6 目的MAC + 6 源MAC + 2 类型）"); return; }
+    if (hexOnly.length % 2 !== 0) { alert(T("tui_hex_even")); return; }
+    if (n < 14) { alert(T("tui_eth_min")); return; }
     await fetchCmd(dev, "AT+TXDATA=" + n, false);
     await new Promise((r) => setTimeout(r, 600));   // 等 sim 建立数据模式（防轮询/时序竞争）
   }
@@ -154,15 +172,16 @@ async function sendCmd(dev, line, hex) {
 
 /* ---------------- 顶部标题副文字（按目标动态） ---------------- */
 function loadBanner() {
-  fetch("/api/info")
+  // 带 ?lang= → 后端把「设备标签/控制台叙述行」也切到同一语言
+  fetch("/api/info?lang=" + encodeURIComponent(OrpahI18n.lang))
     .then((r) => r.json())
     .then((info) => {
-      if (info && info.sub) $("bannerSub").textContent = info.sub;
       if (info && info.devices) {
+        $("bannerSub").textContent = bannerText(info.devices);
         // 物理互联介质标签：优先显示第一条“真实介质”（串口直连 / UART2 交叉 / RF 空口）
         const links = Object.values(info.devices).map((d) => d.link || "");
         const real = links.find((l) => l && !l.startsWith("TCP"));
-        $("linkLabel").textContent = real || "虚拟空口 (TCP)";
+        $("linkLabel").textContent = linkText(real);
         // 每台设备按方言选命令库 + 渲染快捷按钮（泰芯 V2.x 真机 vs 默认）
         ["A", "B"].forEach((k) => {
           const d = info.devices[k];
@@ -170,6 +189,8 @@ function loadBanner() {
           devCmd[k] = devV2[k] ? CMDS_TAHV2 : AT_CMDS;
           renderQuick(k);
         });
+      } else if (info && info.sub) {
+        $("bannerSub").textContent = info.sub;   // 后端未给结构化字段时回退原文
       }
     })
     .catch(() => {});
@@ -178,8 +199,8 @@ function loadBanner() {
 /* ---------------- SSE ---------------- */
 function connectSSE() {
   const es = new EventSource("/api/events");
-  es.onopen = () => { $("srvstatus").textContent = "已连接"; $("srvstatus").className = "badge ok"; };
-  es.onerror = () => { $("srvstatus").textContent = "重连中…"; $("srvstatus").className = "badge"; };
+  es.onopen = () => { $("srvstatus").textContent = T("tui_srv_ok"); $("srvstatus").className = "badge ok"; };
+  es.onerror = () => { $("srvstatus").textContent = T("tui_srv_retry"); $("srvstatus").className = "badge"; };
   es.onmessage = (e) => {
     let m;
     try { m = JSON.parse(e.data); } catch { return; }
@@ -226,13 +247,13 @@ function updateStatus(d) {
   };
   const connCls = { CONNECTED: "ok", SCANNING: "scan", ASSOCIATING: "scan",
                     PAIRING: "pair" }[s.conn] || "";
-  $(`conn${d}`).textContent = tOr("conn_", s.conn, s.conn || "离线");
+  $(`conn${d}`).textContent = tOr("conn_", s.conn, s.conn || T("conn_OFFLINE"));
   $(`conn${d}`).className = "conn " + connCls;
   const powTxt = tOr("pow_", s.power, null);
   $(`pow${d}`).textContent = powTxt || "--";
   $(`pow${d}`).className = "chip pow " + (s.power === "on" ? "ok" : "off");
   $(`mode${d}`).textContent = tOr("mode_", s.mode, s.mode || "--");
-  $(`type${d}`).textContent = s.type || "--";
+  $(`type${d}`).textContent = typeText(s) || "--";
   // 端口行：串口号 + 固件版本合并成一行（如 “COM6 v2.4.1.3-39777, app:0”）
   $(`port${d}`).textContent = (s.port || "--") + (s.version ? " " + s.version : "");
   $(`ssid${d}`).textContent = s.ssid || "-";
@@ -271,7 +292,7 @@ function flashNode(d) {
 function updateTopology() {
   const a = state.A, b = state.B;
   const linked = (a.conn === "CONNECTED" || b.conn === "CONNECTED");
-  $("linkState").textContent = linked ? "链路已建立 ✓" : "链路断开";
+  $("linkState").textContent = linked ? T("tui_link_up") : T("tui_link_down");
   $("linkState").className = "link-state " + (linked ? "ok" : "");
   // 数据流动画：有连接才流动
   $("linkState").parentElement.querySelector(".flow").classList.toggle("active", linked);
@@ -296,7 +317,7 @@ function renderConsole(d) {
     if (l.kind === "spam") {
       const body = l.open
         ? `<div class="ac-spam-body">${l.lines.map((x) => esc(x)).join("\n")}</div>` : "";
-      return `<div class="ac-spam" data-id="${l.id}"><span class="ac-spam-mark">${l.open ? "▼" : "▶"}</span> 设备自动调试信息</div>${body}`;
+      return `<div class="ac-spam" data-id="${l.id}"><span class="ac-spam-mark">${l.open ? "▼" : "▶"}</span> ${esc(T("tui_spam"))}</div>${body}`;
     }
     const tx = l.dir === "tx";
     const mark = tx ? "→ " : "← ";
@@ -365,7 +386,7 @@ function renderFrames() {
     const dst = b.length >= 6 ? mac(b.slice(0, 6)) : "-";
     const src = b.length >= 12 ? mac(b.slice(6, 12)) : "-";
     const et = b.length >= 14 ? hex(b[12]) + hex(b[13]) : "";
-    const hexline = b.length ? hexStr(b) : "(空)";
+    const hexline = b.length ? hexStr(b) : T("tui_empty");
     const hint = b.length >= 14 ? ETH[et.toLowerCase()] || "0x" + et : "";
     tr.innerHTML =
       `<td>${f.t}</td>` +
@@ -398,7 +419,7 @@ function applyConfig() {
     // 泰芯 V2.x：AT+WIFIMODE（小写）/ AT+ENCRYPT / AT+KEY
     cmds = [`AT+WIFIMODE=${mode.toLowerCase()}`, `AT+SSID=${ssid}`];
     if (key === "WPA-PSK") {
-      if (psk.length < 8) { alert("KEY 需 ≥8 个 ASCII 字符"); return; }
+      if (psk.length < 8) { alert(T("tui_key_min")); return; }
       cmds.push("AT+ENCRYPT=1", `AT+KEY=${psk}`);
     } else {
       cmds.push("AT+ENCRYPT=0");
@@ -406,7 +427,7 @@ function applyConfig() {
   } else {
     cmds = [`AT+MODE=${mode}`, `AT+SSID=${ssid}`];
     if (key === "WPA-PSK") {
-      if (!/^[0-9a-fA-F]{64}$/.test(psk)) { alert("PSK 必须是 64 位 hex"); return; }
+      if (!/^[0-9a-fA-F]{64}$/.test(psk)) { alert(T("tui_psk_hex")); return; }
       cmds.push("AT+KEYMGMT=WPA-PSK", `AT+PSK=${psk}`);
     } else {
       cmds.push("AT+KEYMGMT=NONE");
@@ -432,7 +453,7 @@ function renderAC(d, list) {
   list.forEach((c, i) => {
     const div = document.createElement("div");
     div.className = "ac-item" + (i === s.idx ? " active" : "");
-    div.innerHTML = `<span class="ac-cmd">${esc(c.cmd)}</span><span class="ac-hint">${esc(c.hint)}</span>`;
+    div.innerHTML = `<span class="ac-cmd">${esc(c.cmd)}</span><span class="ac-hint">${esc(atHint(cmdLib(d), c.cmd))}</span>`;
     div.addEventListener("mousedown", (e) => { e.preventDefault(); acPick(d, c.cmd); });
     div.addEventListener("mouseenter", () => { s.idx = i; renderAC(d, list); });
     menu.appendChild(div);
@@ -508,7 +529,8 @@ function bindUI() {
 
   $("btnFrameMonitor").addEventListener("click", () => {
     frameMonitor = !frameMonitor;
-    $("btnFrameMonitor").textContent = "帧监视: " + (frameMonitor ? "开" : "关");
+    $("btnFrameMonitor").textContent = T("tui_fm")
+      .replace("{s}", frameMonitor ? T("tui_fm_on") : T("tui_fm_off"));
     $("btnFrameMonitor").classList.toggle("on", frameMonitor);
     ["A", "B"].forEach((d) => sendCmd(d, frameMonitor ? "AT+SYSDBG=WNB,1" : "AT+SYSDBG=WNB,0"));
   });
@@ -516,6 +538,7 @@ function bindUI() {
 
 /* ---------------- 启动 ---------------- */
 window.addEventListener("load", () => {
+  OrpahI18n.apply();
   // 初始拉一次状态
   fetch("/api/status").then((r) => r.json()).then((st) => {
     Object.keys(st).forEach((d) => { if (st[d]) Object.assign(state[d], st[d]); });
