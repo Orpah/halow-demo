@@ -130,6 +130,112 @@
       "btn_replay": "重放上一条",
       "btn_stale": "超窗上报",
       "id_ctl_hint": "演示：撤销→上报被拒；重放→nonce 去重；超窗→时间窗口拒绝。",
+
+      /* ---- 全局导航（各页共用页头） ---- */
+      "nav_registry": "设备清册",
+      "nav_case": "走失案件",
+      "nav_track": "定位与轨迹",
+      "nav_tools": "工具 ▾",
+      "nav_rssi": "RSSI 定位算法",
+      "nav_sig": "签名工具",
+      "nav_checksum": "校验码工具",
+      "nav_damm32": "Damm32 构造",
+      "nav_home": "← 返回主页",
+      "nav_home_title": "返回主页",
+      "nav_registry_t": "客户端台账（SN↔走失者绑定、状态、首/最近见）",
+      "nav_case_t": "走失案件闭环（以人为单位：立案→发现→找回/撤销→结案）",
+      "nav_track_t": "多路由器测 RSSI → 实时定位 + 运动轨迹",
+      "nav_rssi_t": "RSSI → 距离 → 2/3/多点定位（单次/算法）",
+      "nav_sig_t": "ES256/HS256 数字签名与验签（JCS 预像）",
+      "nav_checksum_t": "SN 校验码计算（Damm32/Luhn32/Mod97）",
+      "nav_damm32_t": "Damm32 校验码构造/验证工具",
+
+      /* ---- 各页文档标题（<html data-i18n-doc-title>） ---- */
+      "doc_index": "ORPAH-over-HaLow L1 演示",
+      "doc_registry": "设备清册 — ORPAH-over-HaLow",
+      "doc_case": "走失案件 — ORPAH-over-HaLow",
+      "doc_track": "定位与轨迹 — ORPAH-over-HaLow",
+      "doc_rssi": "RSSI 定位算法 — ORPAH-over-HaLow",
+      "doc_sig": "签名工具 — ORPAH-over-HaLow",
+      "doc_checksum": "SN 校验码工具 — ORPAH-over-HaLow",
+      "doc_damm32": "Damm32 构造 / 验证工具 — ORPAH-over-HaLow",
+      "sn_link_title": "在设备清册中查看该 SN",
+
+      /* ---- 设备清册 registry.html ---- */
+      "reg_sub": "Orpah ID · 客户端台账（一个走失者可绑多台设备）",
+      "reg_sec1": "1 · 登记",
+      "reg_sec2": "2 · 走失者管理",
+      "reg_sec3": "3 · 设备台账",
+      "reg_hint": "一个走失者可绑多台设备（项链/鞋/眼镜…）；未绑定设备列「—」。最近见时间随上报实时刷新。",
+      "f_name": "姓名",
+      "f_gender": "性别",
+      "f_age": "年龄",
+      "f_height": "身高(cm)",
+      "f_build": "体重/体型",
+      "f_features": "体貌特征",
+      "f_health": "疾病/健康",
+      "f_mental": "精神状态",
+      "f_comm": "沟通能力",
+      "f_photo": "照片",
+      "f_note": "备注",
+      "f_bind_to": "绑定到",
+      "g_unknown": "未知",
+      "g_m": "男",
+      "g_f": "女",
+      "ph_name": "姓名",
+      "ph_age_y": "岁",
+      "ph_cm": "cm",
+      "ph_build": "如 60kg/偏瘦",
+      "ph_features": "如 左臂胎记",
+      "ph_health": "如 阿尔茨海默",
+      "ph_mental": "如 正常/神志不清",
+      "ph_comm": "如 能说姓名",
+      "ph_note": "备注",
+      "ph_search_person": "搜索编号 / 名称 / 备注…",
+      "ph_search_dev": "搜索 SN / 走失者…",
+      "btn_add_person": "添加人员",
+      "btn_add_device": "添加/绑定设备",
+      "btn_save": "保存",
+      "btn_cancel": "取消",
+      "btn_edit": "编辑",
+      "btn_del": "删除",
+      "opt_unbound": "（未绑定）",
+      "opt_all_status": "全部状态",
+      "opt_batch": "批量操作…",
+      "st_active": "启用",
+      "st_disabled": "停用",
+      "st_lost": "丢失",
+      "st_scrapped": "报废",
+      "batch_active": "批量标记启用",
+      "batch_disabled": "批量标记停用",
+      "batch_lost": "批量标记丢失",
+      "batch_scrapped": "批量标记报废",
+      "th_pid": "编号",
+      "th_name": "名称",
+      "th_gender": "性别",
+      "th_age": "年龄",
+      "th_note": "备注",
+      "th_devcnt": "设备数",
+      "th_ops": "操作",
+      "th_chk_all": "全选",
+      "th_person": "走失者",
+      "th_org": "组织",
+      "th_status": "状态",
+      "th_first": "首次见",
+      "th_last": "最近见",
+      "th_stop": "状态操作",
+      "t_yesterday": "昨天",
+      "t_days_ago": "{n}天前",
+      "err_offline": "操作失败：无法连接服务器，请检查网络/服务是否在线",
+      "err_prefix": "操作失败：",
+      "err_unknown": "未知错误",
+      "err_upload": "上传失败：",
+      "err_upload_net": "上传失败，请检查网络/服务",
+      "err_no_pick": "请先勾选要批量操作的设备",
+      "sn_need": "请输入 SN",
+      "sn_bad_format": "格式应为 CC-ORG-UNIQUE[-CHECK]，如 CN-WH01-9AF3C1D2",
+      "confirm_del_dev": "删除设备 {sn}？",
+      "confirm_del_person": "删除走失者「{name}」？其名下设备将解绑。",
     },
     en: {
       "conn_CONNECTED": "Connected",
@@ -242,6 +348,112 @@
       "btn_replay": "Replay last",
       "btn_stale": "Send stale",
       "id_ctl_hint": "Demo: revoke\u2192rejected; replay\u2192nonce dedup; stale\u2192time-window rejected.",
+
+      /* ---- global nav (shared page header) ---- */
+      "nav_registry": "Devices",
+      "nav_case": "Lost cases",
+      "nav_track": "Positioning",
+      "nav_tools": "Tools \u25be",
+      "nav_rssi": "RSSI algorithm",
+      "nav_sig": "Signature tool",
+      "nav_checksum": "Checksum tool",
+      "nav_damm32": "Damm32 builder",
+      "nav_home": "\u2190 Home",
+      "nav_home_title": "Back to home",
+      "nav_registry_t": "Device registry (SN\u2194person binding, status, first/last seen)",
+      "nav_case_t": "Lost-person case loop (per person: open\u2192found\u2192recover/revoke\u2192close)",
+      "nav_track_t": "Multi-router RSSI \u2192 realtime position + trajectory",
+      "nav_rssi_t": "RSSI \u2192 distance \u2192 2/3/multi-point positioning",
+      "nav_sig_t": "ES256/HS256 sign & verify (JCS pre-image)",
+      "nav_checksum_t": "SN check digit (Damm32/Luhn32/Mod97)",
+      "nav_damm32_t": "Damm32 check-digit builder/verifier",
+
+      /* ---- per-page document titles (<html data-i18n-doc-title>) ---- */
+      "doc_index": "ORPAH-over-HaLow L1 demo",
+      "doc_registry": "Device registry \u2014 ORPAH-over-HaLow",
+      "doc_case": "Lost cases \u2014 ORPAH-over-HaLow",
+      "doc_track": "Positioning & trajectory \u2014 ORPAH-over-HaLow",
+      "doc_rssi": "RSSI positioning \u2014 ORPAH-over-HaLow",
+      "doc_sig": "Signature tool \u2014 ORPAH-over-HaLow",
+      "doc_checksum": "SN checksum tool \u2014 ORPAH-over-HaLow",
+      "doc_damm32": "Damm32 builder / verifier \u2014 ORPAH-over-HaLow",
+      "sn_link_title": "View this SN in the device registry",
+
+      /* ---- device registry registry.html ---- */
+      "reg_sub": "Orpah ID \u00b7 device registry (one person can bind many devices)",
+      "reg_sec1": "1 \u00b7 Register",
+      "reg_sec2": "2 \u00b7 Persons",
+      "reg_sec3": "3 \u00b7 Devices",
+      "reg_hint": "One person can bind many devices (necklace / shoes / glasses\u2026); unbound devices show \u201c\u2014\u201d. Last-seen refreshes with each report.",
+      "f_name": "Name",
+      "f_gender": "Gender",
+      "f_age": "Age",
+      "f_height": "Height (cm)",
+      "f_build": "Weight/build",
+      "f_features": "Features",
+      "f_health": "Health",
+      "f_mental": "Mental state",
+      "f_comm": "Communication",
+      "f_photo": "Photo",
+      "f_note": "Note",
+      "f_bind_to": "Bind to",
+      "g_unknown": "Unknown",
+      "g_m": "Male",
+      "g_f": "Female",
+      "ph_name": "Name",
+      "ph_age_y": "yrs",
+      "ph_cm": "cm",
+      "ph_build": "e.g. 60kg / thin",
+      "ph_features": "e.g. birthmark on left arm",
+      "ph_health": "e.g. Alzheimer's",
+      "ph_mental": "e.g. normal / confused",
+      "ph_comm": "e.g. can say name",
+      "ph_note": "Note",
+      "ph_search_person": "Search ID / name / note\u2026",
+      "ph_search_dev": "Search SN / person\u2026",
+      "btn_add_person": "Add person",
+      "btn_add_device": "Add / bind device",
+      "btn_save": "Save",
+      "btn_cancel": "Cancel",
+      "btn_edit": "Edit",
+      "btn_del": "Delete",
+      "opt_unbound": "(unbound)",
+      "opt_all_status": "All statuses",
+      "opt_batch": "Batch\u2026",
+      "st_active": "Active",
+      "st_disabled": "Disabled",
+      "st_lost": "Lost",
+      "st_scrapped": "Scrapped",
+      "batch_active": "Mark active",
+      "batch_disabled": "Mark disabled",
+      "batch_lost": "Mark lost",
+      "batch_scrapped": "Mark scrapped",
+      "th_pid": "ID",
+      "th_name": "Name",
+      "th_gender": "Gender",
+      "th_age": "Age",
+      "th_note": "Note",
+      "th_devcnt": "Devices",
+      "th_ops": "Actions",
+      "th_chk_all": "Select all",
+      "th_person": "Person",
+      "th_org": "Org",
+      "th_status": "Status",
+      "th_first": "First seen",
+      "th_last": "Last seen",
+      "th_stop": "Set status",
+      "t_yesterday": "yesterday",
+      "t_days_ago": "{n}d ago",
+      "err_offline": "Failed: cannot reach the server. Check network / service.",
+      "err_prefix": "Failed: ",
+      "err_unknown": "unknown error",
+      "err_upload": "Upload failed: ",
+      "err_upload_net": "Upload failed. Check network / service.",
+      "err_no_pick": "Select devices to batch-apply first",
+      "sn_need": "Enter a SN",
+      "sn_bad_format": "Format must be CC-ORG-UNIQUE[-CHECK], e.g. CN-WH01-9AF3C1D2",
+      "confirm_del_dev": "Delete device {sn}?",
+      "confirm_del_person": "Delete person \u201c{name}\u201d? Their devices will be unbound.",
     },
   };
 
@@ -272,7 +484,56 @@
     fmt: function (key, n) {
       return String(api.t(key)).replace("{n}", String(n));
     },
+
+    /* 把字典应用到 DOM。约定属性：
+     *   data-i18n            → textContent
+     *   data-i18n-title      → title 属性（悬停提示）
+     *   data-i18n-ph         → placeholder 属性
+     *   data-i18n-doc-title  → document.title（放任一元素上，通常 <html>）
+     * 页面加载后调一次；切语言后再调一次。root 默认 document。
+     */
+    apply: function (root) {
+      root = root || document;
+      function each(sel, fn) {
+        var ns = root.querySelectorAll(sel);
+        for (var i = 0; i < ns.length; i++) fn(ns[i]);
+      }
+      each("[data-i18n]", function (el) {
+        el.textContent = api.t(el.getAttribute("data-i18n"));
+      });
+      each("[data-i18n-title]", function (el) {
+        el.title = api.t(el.getAttribute("data-i18n-title"));
+      });
+      each("[data-i18n-ph]", function (el) {
+        el.placeholder = api.t(el.getAttribute("data-i18n-ph"));
+      });
+      var dt = document.querySelector("[data-i18n-doc-title]");
+      if (dt) document.title = api.t(dt.getAttribute("data-i18n-doc-title"));
+      document.documentElement.lang = api.lang === "en" ? "en" : "zh-CN";
+      bootLangBtn();
+      return api;
+    },
   };
+
+  /* 页头语言切换：页面只需放一个 <button id="langBtn">（内容自动填）。
+   * 切换后写 localStorage 并带 ?lang= 重载，保证动态文案也重新渲染。 */
+  function bootLangBtn() {
+    var b = document.getElementById("langBtn");
+    if (!b || b._wired) return;
+    b._wired = true;
+    b.textContent = api.lang === "en" ? "\u4e2d\u6587" : "EN";
+    b.onclick = function () {
+      var next = api.lang === "en" ? "zh" : "en";
+      api.setLang(next);
+      try {
+        var u = new URL(location.href);
+        u.searchParams.set("lang", next);
+        location.href = u.toString();
+      } catch (e) {
+        location.reload();
+      }
+    };
+  }
 
   global.OrpahI18n = api;
 })(window);

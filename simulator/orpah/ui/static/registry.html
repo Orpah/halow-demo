@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_registry">
 <head>
 <meta charset="utf-8">
 <title>设备清册 — ORPAH-over-HaLow</title>
@@ -57,101 +57,110 @@
 <body>
 <header>
   <div class="brand">
-    <a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
-    <span class="brand-name">设备清册</span>
-    <span class="sub">Orpah ID · 客户端台账（一个走失者可绑多台设备）</span>
-    <a class="btn back" href="case.html">走失案件</a>
-    <a class="btn back" href="index.html">← 返回主页</a>
+    <a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
+    <span class="brand-name" data-i18n="nav_registry">设备清册</span>
+    <span class="sub" data-i18n="reg_sub">Orpah ID · 客户端台账（一个走失者可绑多台设备）</span>
+    <a class="btn back" href="case.html" data-i18n="nav_case">走失案件</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>1 · 登记</h3>
+  <h3 data-i18n="reg_sec1">1 · 登记</h3>
   <div class="row">
-    <label>姓名 <input class="name" id="personName" placeholder="姓名"></label>
-    <label>性别
+    <label><span data-i18n="f_name">姓名</span> <input class="name" id="personName" data-i18n-ph="ph_name" placeholder="姓名"></label>
+    <label><span data-i18n="f_gender">性别</span>
       <select id="personGender">
-        <option value="">未知</option>
-        <option value="男">男</option>
-        <option value="女">女</option>
+        <option value="" data-i18n="g_unknown">未知</option>
+        <option value="男" data-i18n="g_m">男</option>
+        <option value="女" data-i18n="g_f">女</option>
       </select>
     </label>
-    <label>年龄 <input class="age" id="personAge" placeholder="岁"></label>
-    <label>身高(cm) <input class="age" id="personHeight" placeholder="cm"></label>
-    <label>体重/体型 <input class="mid" id="personBuild" placeholder="如 60kg/偏瘦"></label>
+    <label><span data-i18n="f_age">年龄</span> <input class="age" id="personAge" data-i18n-ph="ph_age_y" placeholder="岁"></label>
+    <label><span data-i18n="f_height">身高(cm)</span> <input class="age" id="personHeight" data-i18n-ph="ph_cm" placeholder="cm"></label>
+    <label><span data-i18n="f_build">体重/体型</span> <input class="mid" id="personBuild" data-i18n-ph="ph_build" placeholder="如 60kg/偏瘦"></label>
   </div>
   <div class="row" style="margin-top:8px">
-    <label>体貌特征 <input class="mid" id="personFeatures" placeholder="如 左臂胎记"></label>
-    <label>疾病/健康 <input class="mid" id="personHealth" placeholder="如 阿尔茨海默"></label>
-    <label>精神状态 <input class="mid" id="personMental" placeholder="如 正常/神志不清"></label>
-    <label>沟通能力 <input class="mid" id="personCommunicate" placeholder="如 能说姓名"></label>
+    <label><span data-i18n="f_features">体貌特征</span> <input class="mid" id="personFeatures" data-i18n-ph="ph_features" placeholder="如 左臂胎记"></label>
+    <label><span data-i18n="f_health">疾病/健康</span> <input class="mid" id="personHealth" data-i18n-ph="ph_health" placeholder="如 阿尔茨海默"></label>
+    <label><span data-i18n="f_mental">精神状态</span> <input class="mid" id="personMental" data-i18n-ph="ph_mental" placeholder="如 正常/神志不清"></label>
+    <label><span data-i18n="f_comm">沟通能力</span> <input class="mid" id="personCommunicate" data-i18n-ph="ph_comm" placeholder="如 能说姓名"></label>
   </div>
   <div class="row" style="margin-top:8px">
-    <label>照片 <input type="file" id="personPhotoFile" accept="image/*"></label>
+    <label><span data-i18n="f_photo">照片</span> <input type="file" id="personPhotoFile" accept="image/*"></label>
     <img id="personPhotoThumb" class="thumb" hidden alt="缩略图">
-    <label>备注 <input class="note" id="personNote" placeholder="备注"></label>
-    <button class="btn" id="btnAddPerson">添加人员</button>
+    <label><span data-i18n="f_note">备注</span> <input class="note" id="personNote" data-i18n-ph="ph_note" placeholder="备注"></label>
+    <button class="btn" id="btnAddPerson" data-i18n="btn_add_person">添加人员</button>
   </div>
   <div class="row" style="margin-top:8px">
     <label>SN <input class="sn" id="deviceSn" placeholder="CN-WH01-XXXXXXXX" spellcheck="false"></label>
-    <label>绑定到
-      <select id="addPerson"><option value="">（未绑定）</option></select>
+    <label><span data-i18n="f_bind_to">绑定到</span>
+      <select id="addPerson"><option value="" data-i18n="opt_unbound">（未绑定）</option></select>
     </label>
-    <button class="btn" id="btnAddDevice">添加/绑定设备</button>
+    <button class="btn" id="btnAddDevice" data-i18n="btn_add_device">添加/绑定设备</button>
     <span class="hint" id="snHint"></span>
   </div>
 </section>
 
 <section class="card">
-  <h3>2 · 走失者管理</h3>
+  <h3 data-i18n="reg_sec2">2 · 走失者管理</h3>
   <div class="toolbar">
-    <input id="pq" placeholder="搜索编号 / 名称 / 备注…" spellcheck="false">
+    <input id="pq" data-i18n-ph="ph_search_person" placeholder="搜索编号 / 名称 / 备注…" spellcheck="false">
   </div>
   <table class="reg">
     <thead><tr>
-      <th>编号</th><th>名称</th><th>性别</th><th>年龄</th><th>备注</th><th>设备数</th><th>操作</th>
+      <th data-i18n="th_pid">编号</th><th data-i18n="th_name">名称</th><th data-i18n="th_gender">性别</th><th data-i18n="th_age">年龄</th><th data-i18n="th_note">备注</th><th data-i18n="th_devcnt">设备数</th><th data-i18n="th_ops">操作</th>
     </tr></thead>
     <tbody id="personBody"></tbody>
   </table>
 </section>
 
 <section class="card">
-  <h3>3 · 设备台账</h3>
+  <h3 data-i18n="reg_sec3">3 · 设备台账</h3>
   <div class="toolbar">
-    <input id="q" placeholder="搜索 SN / 走失者…" spellcheck="false">
+    <input id="q" data-i18n-ph="ph_search_dev" placeholder="搜索 SN / 走失者…" spellcheck="false">
     <select id="fStatus">
-      <option value="">全部状态</option>
-      <option value="active">启用</option>
-      <option value="disabled">停用</option>
-      <option value="lost">丢失</option>
-      <option value="scrapped">报废</option>
+      <option value="" data-i18n="opt_all_status">全部状态</option>
+      <option value="active" data-i18n="st_active">启用</option>
+      <option value="disabled" data-i18n="st_disabled">停用</option>
+      <option value="lost" data-i18n="st_lost">丢失</option>
+      <option value="scrapped" data-i18n="st_scrapped">报废</option>
     </select>
     <span style="flex:1"></span>
     <select id="batchStatus">
-      <option value="">批量操作…</option>
-      <option value="active">批量标记启用</option>
-      <option value="disabled">批量标记停用</option>
-      <option value="lost">批量标记丢失</option>
-      <option value="scrapped">批量标记报废</option>
+      <option value="" data-i18n="opt_batch">批量操作…</option>
+      <option value="active" data-i18n="batch_active">批量标记启用</option>
+      <option value="disabled" data-i18n="batch_disabled">批量标记停用</option>
+      <option value="lost" data-i18n="batch_lost">批量标记丢失</option>
+      <option value="scrapped" data-i18n="batch_scrapped">批量标记报废</option>
     </select>
-    <button class="btn" id="btnBatch">应用</button>
+    <button class="btn" id="btnBatch" data-i18n="btn_apply">应用</button>
   </div>
   <table class="reg">
     <thead><tr>
-      <th><input type="checkbox" id="chkAll" title="全选"></th>
-      <th>SN</th><th>走失者</th><th>组织</th><th>状态</th>
-      <th>首次见</th><th>最近见</th><th>状态操作</th><th></th>
+      <th><input type="checkbox" id="chkAll" data-i18n-title="th_chk_all" title="全选"></th>
+      <th>SN</th><th data-i18n="th_person">走失者</th><th data-i18n="th_org">组织</th><th data-i18n="th_status">状态</th>
+      <th data-i18n="th_first">首次见</th><th data-i18n="th_last">最近见</th><th data-i18n="th_stop">状态操作</th><th></th>
     </tr></thead>
     <tbody id="deviceBody"></tbody>
   </table>
-  <p class="hint">一个走失者可绑多台设备（项链/鞋/眼镜…）；未绑定设备列「—」。最近见时间随上报实时刷新。</p>
+  <p class="hint" data-i18n="reg_hint">一个走失者可绑多台设备（项链/鞋/眼镜…）；未绑定设备列「—」。最近见时间随上报实时刷新。</p>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
 const STATUSES = ["active", "disabled", "lost", "scrapped"];
-const STATUS_ZH = { active: "启用", disabled: "停用", lost: "丢失", scrapped: "报废" };
+// 状态/性别展示标签（机器值不变，只翻展示）
+const SL = {
+  active: T("st_active"), disabled: T("st_disabled"),
+  lost: T("st_lost"), scrapped: T("st_scrapped"),
+};
+const GL = { "": T("g_unknown"), "男": T("g_m"), "女": T("g_f") };
+const genderLabel = (v) => GL[v] || v;
 // 协议 §2：CC-ORG-UNIQUE[-CHECK]（CC=ISO 3166-1 alpha-2；ORG/UNIQUE=Crockford Base32）
 const SN_RE = /^[A-Z]{2}-[0-9A-HJKMNP-TV-Z]{2,6}-[0-9A-HJKMNP-TV-Z]{8,16}(-[0-9A-HJKMNP-TV-Z]{1,2})?$/;
 // index.html 报文流 SN 点进来时定位/高亮该设备
@@ -169,8 +178,8 @@ function fmtT(ts) {
   const hms = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   const dayDiff = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (dayDiff <= 0) return hms;
-  if (dayDiff === 1) return `${mmdd} ${hms} · 昨天`;
-  return `${mmdd} ${hms} · ${dayDiff}天前`;
+  if (dayDiff === 1) return `${mmdd} ${hms} · ${T("t_yesterday")}`;
+  return `${mmdd} ${hms} · ${T("t_days_ago").replace("{n}", dayDiff)}`;
 }
 async function api(body) {
   let r;
@@ -182,12 +191,12 @@ async function api(body) {
     r = await resp.json();
   } catch (e) {
     console.error("registry:", e);
-    alert("操作失败：无法连接服务器，请检查网络/服务是否在线");
+    alert(T("err_offline"));
     return { ok: false };
   }
   if (!r.ok) {
     console.error("registry:", r.err);
-    alert("操作失败：" + (r.err || "未知错误"));
+    alert(T("err_prefix") + (r.err || T("err_unknown")));
   }
   return r;
 }
@@ -202,7 +211,7 @@ function render(r) {
   // 绑定下拉（恢复选中）
   const sel = $("addPerson");
   const cur = sel.value;
-  sel.innerHTML = '<option value="">（未绑定）</option>' +
+  sel.innerHTML = `<option value="">${esc(T("opt_unbound"))}</option>` +
     r.persons.map(p => `<option value="${esc(p.pid)}">${esc(p.name)}</option>`).join("");
   if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
 
@@ -226,26 +235,26 @@ function render(r) {
       return `<tr data-pid="${esc(p.pid)}">
         <td class="mono">${esc(p.pid)}</td>
         <td><input class="edit-name" value="${esc(p.name)}"></td>
-        <td>${esc(p.gender || "—")}</td>
+        <td>${esc(p.gender ? genderLabel(p.gender) : "—")}</td>
         <td>${esc(p.age || "—")}</td>
         <td><input class="edit-note" value="${esc(p.note || "")}"></td>
         <td>${cnt}</td>
         <td>
-          <button class="btn sm" data-act="save">保存</button>
-          <button class="btn sm" data-act="cancel">取消</button>
+          <button class="btn sm" data-act="save">${esc(T("btn_save"))}</button>
+          <button class="btn sm" data-act="cancel">${esc(T("btn_cancel"))}</button>
         </td>
       </tr>`;
     }
     return `<tr data-pid="${esc(p.pid)}">
       <td class="mono">${esc(p.pid)}</td>
       <td class="person-name">${esc(p.name)}</td>
-      <td>${esc(p.gender || "—")}</td>
+      <td>${esc(p.gender ? genderLabel(p.gender) : "—")}</td>
       <td>${esc(p.age || "—")}</td>
       <td class="note-cell">${esc(p.note || "—")}</td>
       <td>${cnt}</td>
       <td>
-        <button class="btn sm" data-act="edit">编辑</button>
-        <button class="btn sm danger" data-act="del">删除</button>
+        <button class="btn sm" data-act="edit">${esc(T("btn_edit"))}</button>
+        <button class="btn sm danger" data-act="del">${esc(T("btn_del"))}</button>
       </td>
     </tr>`;
   }).join("");
@@ -266,17 +275,17 @@ function render(r) {
   tbody.innerHTML = rows.map(d => {
     const name = d.person_id ? nameOf(d.person_id) : "—";
     const opts = STATUSES.map(s =>
-      `<option value="${s}" ${s === d.status ? "selected" : ""}>${STATUS_ZH[s]}</option>`).join("");
+      `<option value="${s}" ${s === d.status ? "selected" : ""}>${SL[s]}</option>`).join("");
     return `<tr data-sn="${esc(d.sn)}">
       <td><input type="checkbox" class="chk" data-sn="${esc(d.sn)}"></td>
       <td class="mono">${esc(d.sn)}</td>
       <td class="person-name">${esc(name)}</td>
       <td class="mono">${esc(d.cc)}-${esc(d.org)}</td>
-      <td><span class="badge st-${esc(d.status)}">${STATUS_ZH[d.status] || d.status}</span></td>
+      <td><span class="badge st-${esc(d.status)}">${esc(SL[d.status] || d.status)}</span></td>
       <td class="mono">${fmtT(d.first_seen)}</td>
       <td class="mono">${fmtT(d.last_seen)}</td>
       <td><select class="stsel">${opts}</select></td>
-      <td><button class="btn sm danger" data-act="del">删除</button></td>
+      <td><button class="btn sm danger" data-act="del">${esc(T("btn_del"))}</button></td>
     </tr>`;
   }).join("");
 
@@ -299,7 +308,7 @@ function render(r) {
   tbody.querySelectorAll("button[data-act='del']").forEach(b => {
     b.onclick = async () => {
       const sn = b.closest("tr").dataset.sn;
-      if (!confirm(`删除设备 ${sn}？`)) return;
+      if (!confirm(T("confirm_del_dev").replace("{sn}", sn))) return;
       await api({ action: "remove_device", sn });
       load();
     };
@@ -328,7 +337,8 @@ function render(r) {
         paused = false;
         render(cache);
       } else if (act === "del") {
-        if (!confirm(`删除走失者「${p ? p.name : pid}」？其名下设备将解绑。`)) return;
+        if (!confirm(T("confirm_del_person")
+            .replace("{name}", p ? p.name : pid))) return;
         await api({ action: "remove_person", pid });
         load();
       }
@@ -395,19 +405,19 @@ $("personPhotoFile").onchange = async () => {
       const t = $("personPhotoThumb");
       t.src = r.url; t.hidden = false;
     } else {
-      alert("上传失败：" + (r.err || "未知错误"));
+      alert(T("err_upload") + (r.err || T("err_unknown")));
     }
   } catch (e) {
     console.error("upload:", e);
-    alert("上传失败，请检查网络/服务");
+    alert(T("err_upload_net"));
   }
 };
 $("btnAddDevice").onclick = async () => {
   const sn = $("deviceSn").value.trim().toUpperCase();
   const hint = $("snHint");
-  if (!sn) { hint.textContent = "请输入 SN"; hint.className = "hint err"; return; }
+  if (!sn) { hint.textContent = T("sn_need"); hint.className = "hint err"; return; }
   if (!SN_RE.test(sn)) {
-    hint.textContent = "格式应为 CC-ORG-UNIQUE[-CHECK]，如 CN-WH01-9AF3C1D2";
+    hint.textContent = T("sn_bad_format");
     hint.className = "hint err";
     return;
   }
@@ -420,7 +430,7 @@ $("btnBatch").onclick = async () => {
   const status = $("batchStatus").value;
   if (!status) return;
   const sns = [...document.querySelectorAll("#deviceBody .chk:checked")].map(c => c.dataset.sn);
-  if (!sns.length) { alert("请先勾选要批量操作的设备"); return; }
+  if (!sns.length) { alert(T("err_no_pick")); return; }
   await api({ action: "set_status_many", sns, status });
   $("batchStatus").value = "";
   load();
@@ -429,6 +439,7 @@ $("q").oninput = () => render(cache);
 $("fStatus").onchange = () => render(cache);
 $("pq").oninput = () => render(cache);
 
+OrpahI18n.apply();
 schedule();
 </script>
 </body>

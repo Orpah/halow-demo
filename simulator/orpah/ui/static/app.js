@@ -19,11 +19,9 @@ const connZh = v => {
   return s === "conn_" + v ? (v || "?") : s;   // 字典无此键 → 回退机器值
 };
 
-/* ---------- 语言应用（静态 data-i18n） ---------- */
+/* ---------- 语言应用（静态 data-i18n / title / placeholder / 文档标题） ---------- */
 function applyI18n() {
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    el.textContent = OrpahI18n.t(el.getAttribute("data-i18n"));
-  });
+  OrpahI18n.apply();
   // 按钮文案可能被状态切换，统一由 data-i18n 管理即可；这里再补 pause 态
   $("btnPause").textContent = T(paused ? "btn_resume" : "btn_pause");
 }
@@ -104,7 +102,7 @@ function renderRows(rows) {
       const a = document.createElement("a");
       a.href = "registry.html?sn=" + encodeURIComponent(r.sn);
       a.textContent = r.sn;
-      a.title = "在设备清册中查看该 SN";
+      a.title = T("sn_link_title");
       a.className = lostSns.has(r.sn) ? "snlink lost" : "snlink";
       snCell.appendChild(a);
     } else {
