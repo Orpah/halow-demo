@@ -366,3 +366,16 @@ applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，�
 connect();
 setInterval(refresh, 1000);
 refresh();
+
+/* ---------- 顶部「工具」下拉菜单 ---------- */
+const toolsBtn = $("toolsBtn");
+if (toolsBtn) {
+  toolsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("toolsMenu").classList.toggle("open");
+  });
+  document.addEventListener("click", () => $("toolsMenu").classList.remove("open"));
+  $("toolsMenu").querySelectorAll(".menu-list a").forEach(a => {
+    a.addEventListener("click", () => $("toolsMenu").classList.remove("open"));
+  });
+}

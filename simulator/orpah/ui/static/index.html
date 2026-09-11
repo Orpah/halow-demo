@@ -13,10 +13,15 @@
     <a class="btn" href="registry.html" title="客户端台账（SN↔走失者绑定、状态、首/最近见）">设备清册</a>
     <a class="btn" href="case.html" title="走失案件闭环（以人为单位：立案→发现→找回/撤销→结案）">走失案件</a>
     <a class="btn" href="track.html" title="多路由器测 RSSI → 实时定位 + 运动轨迹">定位与轨迹</a>
-    <a class="btn" href="rssi.html" title="RSSI → 距离 → 2/3/多点定位（单次/算法）">RSSI 定位算法</a>
-    <a class="btn" href="sig.html" title="ES256/HS256 数字签名与验签（JCS 预像）">签名工具</a>
-    <a class="btn" href="checksum.html" title="SN 校验码计算（Damm32/Luhn32/Mod97）">校验码工具</a>
-    <a class="btn" href="damm32.html" title="Damm32 校验码构造/验证工具">Damm32 构造</a>
+    <div class="menu" id="toolsMenu">
+      <button class="btn" id="toolsBtn">工具 ▾</button>
+      <div class="menu-list">
+        <a href="rssi.html" title="RSSI → 距离 → 2/3/多点定位（单次/算法）">RSSI 定位算法</a>
+        <a href="sig.html" title="ES256/HS256 数字签名与验签（JCS 预像）">签名工具</a>
+        <a href="checksum.html" title="SN 校验码计算（Damm32/Luhn32/Mod97）">校验码工具</a>
+        <a href="damm32.html" title="Damm32 校验码构造/验证工具">Damm32 构造</a>
+      </div>
+    </div>
     <span id="srvstatus" class="badge">--</span>
     <button id="btnPause" class="btn" data-i18n="btn_pause">暂停上报</button>
     <button id="btnReset" class="btn" data-i18n="btn_clear">清空列表</button>
