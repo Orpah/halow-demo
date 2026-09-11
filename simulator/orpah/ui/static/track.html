@@ -163,6 +163,7 @@ let tick = 0;
 let dsMode = "sim";         // sim | real（真实上报 IoTDB 时序）
 let realSamples = [];       // [{t,rssi,seq,router_id}]，时间升序
 let realTimer = null;
+let realSeq = 0;            // 请求序号（丢弃过期响应，防改 SN/条数时串台）
 let client = { x: 0, y: 0 };
 let heading = 0;            // 直线/圆周用
 const trueHist = [], estHist = [];
@@ -490,6 +491,7 @@ async function refreshSnList() {
 }
 
 async function loadReal() {
+  const my = ++realSeq;
   const sn = $("dsSn").value;
   const info = $("dsInfo");
   if (!sn) {
@@ -500,6 +502,7 @@ async function loadReal() {
   const limit = Math.min(5000, Math.max(10, parseInt($("dsLimit").value) || 200));
   try {
     const r = await fetch(`/api/ts/query?sn=${encodeURIComponent(sn)}&limit=${limit}`).then(x => x.json());
+    if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = (r.ok && r.rows) ? r.rows.slice().reverse() : [];   // IoTDB 按时间倒序返回 → 翻正
     if (!r.ok) {
       info.textContent = "IoTDB 不可达（服务未启动？）—— 切回模拟模式仍可演示。";
@@ -511,6 +514,7 @@ async function loadReal() {
         `多路由器（各自带 router_id + 已知坐标）上报后才可三边定位。`;
     }
   } catch (e) {
+    if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = [];
     info.textContent = "IoTDB 查询失败：" + e;
   }

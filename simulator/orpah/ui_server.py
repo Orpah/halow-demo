@@ -441,7 +441,7 @@ class OrpahApp:
         elif action == "set_sn" and sn:
             if self.client:
                 self.client.sn = sn
-                self._ensure_id_device()   # 立即重建 Orpah ID 设备，清掉旧 SN 残留
+                self._ensure_id_device()   # 按新 SN 重建 Orpah ID 设备并重注册密钥
         elif action == "every" and every and every > 0:
             self.every = float(every)
         elif action == "mark" and sn and self.srv:
@@ -600,8 +600,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, json.dumps({"ok": False,
                         "err": "绑定的走失者不存在"}).encode())
                     return
-                APP.registry.register(sn, person_id=pid,
-                                      org=req.get("org"), cc=req.get("cc"))
+                # org/cc 一律由服务端从 SN 解析（契约见 API.md §1），不信任前端传值
+                APP.registry.register(sn, person_id=pid, org=None, cc=None)
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "remove_device":
                 APP.registry.remove_device(req.get("sn", ""))
@@ -664,8 +664,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if n > MAX:
             self._send(400, json.dumps({"ok": False, "err": "图片超过 5MB 限制"}).encode())
             return
-        # 无/非法 Content-Length（chunked 等）→ 读到 EOF，最多 MAX+1 字节
-        data = self.rfile.read(n) if n >= 0 else self.rfile.read(MAX + 1)
+        # 无/非法 Content-Length（chunked 等）→ 最多读 MAX+1 字节。
+        # 必须带套接字超时：keep-alive 连接上等不到 EOF 会永久挂住该连接线程。
+        if n < 0:
+            try:
+                self.connection.settimeout(10.0)
+                data = self.rfile.read(MAX + 1)
+            except (TimeoutError, OSError):
+                self._send(400, json.dumps({"ok": False,
+                    "err": "读取超时（无 Content-Length 且客户端未关流）"}).encode())
+                return
+            finally:
+                try:
+                    self.connection.settimeout(None)
+                except OSError:
+                    pass
+        else:
+            data = self.rfile.read(n)
         if not data:
             self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
             return
@@ -768,6 +783,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"ok": True, "algo": algo,
                     "valid": _verify_of(algo, body)}).encode())
             elif action == "table":
+                if algo != "damm32":
+                    self._send(200, json.dumps({"ok": False,
+                        "err": f"{algo} 没有拟群表（仅 damm32）"}).encode())
+                    return
                 T = d32._TABLE
                 okv, checks = d32.verify_table(T)
                 self._send(200, json.dumps({"ok": True, "algo": "damm32",
