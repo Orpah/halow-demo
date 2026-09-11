@@ -187,7 +187,11 @@ simulator/
     ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）
     ├── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
     ├── demo_l3.py        # L3 多 Router 漫游/去重 + SN 校验验收（2×Router）
-    └── demo_l4.py        # L3b Router 主动拉表验收（启动/缓存未命中拉取）
+    ├── demo_l4.py        # L3b Router 主动拉表验收（启动/缓存未命中拉取）
+    ├── demo_spoof.py     # 防 spoof 真·端到端（攻击注入空口，Server 侧断言）
+    ├── demo_hw1.py       # 【未真机验证】阶段二真机自检：板卡代次/族、关联、跨空口 UDP、raw 0x88B5 透传
+    └── docs/
+        └── real-hw-stage2.md   # 上机手册 + 五组验证清单（不预设通路；烧录由用户执行）
 ```
 
 ### sim.py host 数据口（本次给模拟器加的最小扩展）
@@ -226,6 +230,9 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
    （同/跨 Router 重发不计数不回执、不切回旧 Router）、SN 校验（非法 → FORMAT-ERR）→ PASS。
 5. L3b：`demo_l4.py` → mark 后启动 Router 主动拉表追平、清缓存后 REQ 同步拉取首问即
    权威、变更推送仍生效且不重复拉取 → PASS。
+6. 真机（阶段二，**需硬件**）：按 `docs/real-hw-stage2.md` 的五组清单上机；`demo_hw1.py`
+   负责能自动判的部分（固件代次/族、关联状态、跨空口 UDP、raw `0x88B5` 透传）。
+   **两者均未经真机验证**，烧录/上机由用户执行。
 
 ## 下一步（L2.5/L4+）
 
