@@ -103,26 +103,26 @@ class Verdicts:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sn", default="CN-WH01-9AF3C1D2",
-                    help="受害设备（被冒充对象）的 SN")
+                    help="被冒充设备（合法设备）的 SN")
     args = ap.parse_args()
 
     stop = threading.Event()
     verdicts = Verdicts()
 
-    # ---- 密钥库：只登记受害者一把钥（攻击者不在库里）----
-    victim = oid.Device(sn=args.sn, se_sn="ATECC608B-DEMO")
+    # ---- 密钥库：只登记合法设备一把钥（攻击者不在库里）----
+    legit_dev = oid.Device(sn=args.sn, se_sn="ATECC608B-DEMO")
     attacker = oid.Device(cc="CN", org="WH01")      # 攻击者自造一对钥匙
     ks = oid.KeyStore()
-    ks.register(victim, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
+    ks.register(legit_dev, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
     used = oid.NonceCache()
 
     print("=" * 74)
     print("  无认证空口防 spoof 端到端演示")
     print("=" * 74)
-    print(f"  受害设备 SN : {victim.sn}")
-    print(f"  攻击者 SN   : {attacker.sn}（未登记 → 服务器不认识）")
-    print(f"  链路        : Client→STA→空口→AP→Router→UDP:{UDP_SRV}→Server")
-    print(f"  用例数      : {len(spoof.CASES)}（含 1 条合法对照）")
+    print(f"  被冒充设备 SN : {legit_dev.sn}")
+    print(f"  攻击者 SN    : {attacker.sn}（未登记 → 服务器不认识）")
+    print(f"  链路          : Client→STA→空口→AP→Router→UDP:{UDP_SRV}→Server")
+    print(f"  用例数        : {len(spoof.CASES)}（含 1 条合法对照）")
     print()
 
     # ---- 起链路（与 demo_l2 同构）----
@@ -138,7 +138,7 @@ def main():
     if not router.start():
         print("  Router 连不上 AP host 口，退出")
         return 2
-    client = ClientHost(sta_port=HOST_B, sn=victim.sn)
+    client = ClientHost(sta_port=HOST_B, sn=legit_dev.sn)
     if not client.connect():
         print("  Client 连不上 STA host 口，退出")
         return 2
@@ -155,9 +155,9 @@ def main():
         for kind, *_ in spoof.CASES:
             _, _, expect, note = spoof.case_info(kind)
             if kind == "revoked":
-                ks.revoke(victim.sn)          # 该用例需要"已吊销"这个状态
+                ks.revoke(legit_dev.sn)       # 该用例需要"已吊销"这个状态
             report, expect, note = spoof.build_case(
-                kind, victim, int(time.time()), attacker=attacker,
+                kind, legit_dev, int(time.time()), attacker=attacker,
                 used_nonce=replay_nonce)
             nonce = report["payload"]["nonce"]
             if kind == "legit":

@@ -38,7 +38,8 @@ CASES = [
      "设备用自己那把钥匙签，服务器验签通过 —— 没有它，下面的'拒绝'说明不了任何问题"),
     ("sig_foreign", "伪造签名（用别人的钥匙）", "forged signature (foreign key)",
      "signature_invalid",
-     "攻击者自己生成一对钥匙，签一条**声称是受害者 SN** 的报文 —— 服务器拿受害者的公钥验，过不了"),
+     "攻击者自己生成一对钥匙，签一条**声称是被冒充设备 SN** 的报文 —— "
+     "服务器拿被冒充设备的公钥验，过不了"),
     ("ts_tamper", "篡改时间戳", "tampered timestamp",
      "signature_invalid",
      "把 ts 挪到时间窗**内**（仍在 300 s 窗口里）→ 说明拦住它的不是时间窗，而是签名"),
@@ -99,7 +100,7 @@ def _legit(dev, now, ts=None, nonce=None):
 def build_case(kind, dev, now, attacker=None, used_nonce=None):
     """构造一条攻击报文 → (report, expect, note_zh)。
 
-    dev      = 受害者设备（`oid.Device`，其公钥在服务器密钥库里）
+    dev      = 合法设备（= **被冒充对象**，其公钥在服务器密钥库里）
     attacker = 攻击者设备（自己生成钥匙，SN 未登记）；缺省时现造一个
     used_nonce = 「replay」用例用的那条**已用过**的 nonce（由调用方从真实上报里取）
     """
@@ -113,7 +114,7 @@ def build_case(kind, dev, now, attacker=None, used_nonce=None):
     if kind == "sig_foreign":
         atk = attacker or oid.Device(cc="CN", org="WH01")
         r = _legit(atk, now)                      # 攻击者用自己的钥匙签
-        r["payload"]["sn"] = dev.sn               # ……但声称是受害者的 SN
+        r["payload"]["sn"] = dev.sn               # ……但声称是被冒充设备的 SN
         return r, expect, note
 
     if kind == "ts_tamper":

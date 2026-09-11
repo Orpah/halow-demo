@@ -56,7 +56,7 @@ ck("合法对照通过且 trust=high",
 ck("改 ts / 改观测 / 改 hdr 都落在签名这一道（不是靠时间窗兜）",
    all(by[k]["got"] == "signature_invalid"
        for k in ("ts_tamper", "obs_tamper", "level_downgrade")))
-ck("用别人钥匙签受害者 SN → signature_invalid",
+ck("用别人的钥匙签被冒充设备的 SN → signature_invalid",
    by["sig_foreign"]["got"] == "signature_invalid")
 ck("校验位错不查库就被挡", by["bad_check"]["got"] == "bad_check")
 ck("免签冒充被压到 level3", by["alg_none"]["got"] == "none_requires_level3")
