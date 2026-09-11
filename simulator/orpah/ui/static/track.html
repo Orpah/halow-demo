@@ -80,13 +80,8 @@
       </select>
     </label>
     <label><span data-i18n="tk_tiles">瓦片源</span>
-      <select id="tileSrc">
-        <option value="osm" selected>OpenStreetMap</option>
-        <option value="opentopo">OpenTopoMap</option>
-        <option value="carto">CartoDB Voyager</option>
-        <option value="esri">Esri World Imagery</option>
-        <option value="custom" data-i18n="tk_tile_custom">自定义</option>
-      </select>
+      <!-- 选项由 buildTileOptions() 按界面语言生成（中/英两套列表 + 默认项不同）；CartoDB 已移除 -->
+      <select id="tileSrc"></select>
     </label>
     <label><span data-i18n="tk_tile_url">自定义瓦片 URL</span> <input id="tileUrl" style="width:340px" placeholder="https://…/{z}/{x}/{y}.png"></label>
   </div>
@@ -315,21 +310,54 @@ function stepOnce() {
 }
 
 /* ---- 地图（Leaflet，用户指定瓦片源）----
-   每个源三要素：url + attr（署名，必须可见）+ note（条款说明键，走字典 zh/en）。
-   各源许可/条款差别很大，尤其 osm.org 官方瓦片禁止离线/预取，且无 SLA —— 见 ROADMAP §七。 */
+   每个源：url + attr（署名，必须可见）+ note（条款说明键）+ labels（**底图地名语言**）。
+     labels："local" = 用当地语言标注（中国境内即中文）/ "none" = 无地名 / "user" = 自定义自负责。
+   各源许可条款差别很大，尤其 osm.org 官方瓦片禁止离线/预取，且无 SLA —— 见 ROADMAP §七。
+   **列表按界面语言给不同的一套**：栅格瓦片的地名是画在图里的像素、没有语言参数，
+   所以英文界面不能默认给一张“中国地图 + 中文地名”——无地名的卫星图置默认，带地名的标出提醒。 */
 const TILE_PROVIDERS = {
-  osm: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-         attr: "© OpenStreetMap contributors", note: "tile_note_osm" },
-  opentopo: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+  osm: { name: "OpenStreetMap",
+         url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+         attr: "© OpenStreetMap contributors", note: "tile_note_osm", labels: "local" },
+  opentopo: { name: "OpenTopoMap",
+              url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
               // OpenTopoMap 官方要求的署名文本（不能简写成 © OpenTopoMap (CC-BY-SA)）
               attr: "Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)",
-              note: "tile_note_opentopo" },
-  carto: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-           attr: "© OpenStreetMap contributors © CARTO", note: "tile_note_carto" },
-  esri: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-          attr: "© Esri", note: "tile_note_esri" },
-  custom: { url: "", attr: "", note: "tile_note_custom" },
+              note: "tile_note_opentopo", labels: "local" },
+  esri: { name: "Esri World Imagery",
+          url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          attr: "© Esri", note: "tile_note_esri", labels: "none" },
+  custom: { i18nName: "tk_tile_custom", url: "", attr: "",
+            note: "tile_note_custom", labels: "user" },
 };
+/* 顺序 = 列表顺序，第一项即本语言的默认。
+   CartoDB Voyager 已移除：其栅格端点现在必须 API key，实测整图是 "API KEY REQUIRED" 水印。 */
+const TILE_ORDER = { zh: ["osm", "opentopo", "esri", "custom"],
+                     en: ["esri", "osm", "opentopo", "custom"] };
+function tileLabel(key) {
+  const p = TILE_PROVIDERS[key];
+  let s = p.i18nName ? T(p.i18nName) : p.name;
+  // 英文界面：地名为当地语言的源（中国境内会显示中文）明确标出，免得又以为是 i18n 没做
+  if (OrpahI18n.lang === "en" && p.labels === "local") {
+    s += " " + T("tile_labels_local_short");
+  }
+  return s;
+}
+function buildTileOptions() {
+  const sel = $("tileSrc");
+  if (!sel) return;
+  const keys = TILE_ORDER[OrpahI18n.lang] || TILE_ORDER.zh;
+  const keep = sel.value;                 // 用户选过的、仍在本语言列表里的就保留
+  sel.innerHTML = "";
+  for (const key of keys) {
+    const o = document.createElement("option");
+    o.value = key;
+    o.textContent = tileLabel(key);
+    sel.appendChild(o);
+  }
+  sel.value = keys.indexOf(keep) >= 0 ? keep : keys[0];
+  refreshTileNote();
+}
 function refreshTileNote() {
   const el = $("tileNote");
   if (!el) return;
@@ -1036,7 +1064,7 @@ $("stationBody").onchange = async (e) => {
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
 OrpahI18n.apply();
-refreshTileNote();
+buildTileOptions();      // 必须早于任何 ensureMap：它决定本语言的默认瓦片源
 refreshSnList();
 draw(); updateStat(null);
 </script>

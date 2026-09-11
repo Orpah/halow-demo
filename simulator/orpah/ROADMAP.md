@@ -91,7 +91,13 @@
 - **OpenTopoMap** = CC-BY-SA 3.0：可商用、免许可费；需按官方文本署名
   （`Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)`，
   不能简写），且衍生作品需相同方式共享。
-- **CARTO / Esri**：商业服务商，生产使用前需单独确认条款（可能需账号/付费）。
+- **CARTO**：**已从「瓦片源」列表移除** —— 其栅格端点现在必须 API key，实测整图返回
+  `API KEY REQUIRED — carto.com/basemaps/apikey` 水印；且其地名也是当地语言，解决不了英文界面的地名问题。
+- **Esri**：商业服务商，生产使用前需单独确认条款（可能需账号/付费）；World Imagery 是卫星影像、**无地名**。
+- **底图地名语言**：栅格瓦片是预渲染图片，地名是像素，**没有 `lang` 参数** ——
+  中国境内用 OSM/OpenTopoMap 必然是中文。故「瓦片源」列表**按界面语言给不同的一套**：
+  中文界面街道图优先（地名中文是优点），英文界面把无地名的 Esri 置默认、带地名的标出 ⚠ 提醒。
+  真要英文地名只能走**矢量瓦片**（MapLibre GL + 样式指定 `name:en`）或自建栅格瓦片。
 - **结论**：本库演示用法（网页内嵌 + attribution 控件 + 可自定义源）合规；
   但**产品化与离线场景不得依赖 OSM 官方瓦片**。
 
