@@ -68,9 +68,10 @@ CASES = [
      None,
      "xport 由路由器追加、**不进签名预像** → 验签通过。如实展示：防 spoof 只保护设备声明，"
      "路由器侧测量需要路由器身份来保护（见 ROADMAP 开放问题）"),
-    # ⚠ 此用例会改密钥库状态（revoke），**必须放最后**；
-    #   且注意 `unrevoke` 会把各代转成 retired → 之后再验签就是 unknown_device，
-    #   演示里“恢复”后需重新 issue/rotate 才能再签过（keys.html 已注明 unrevoke 仅演示用）。
+    # ⚠ 此用例会改**密钥库状态**（revoke）：用**活密钥库**的调用方（`demo_spoof.py` 的 server、
+    #   页面 /api/ctl）必须把它排在最后 —— `unrevoke` 会把各代置成 retired，
+    #   而 retired 不参与验签 → 之后的用例会集体变成 `unknown_device`。
+    #   离线自检 `spoof.run()` 对该用例用**临时库**，与顺序无关（见该函数说明）。
     ("revoked", "已吊销设备", "revoked device",
      "revoked",
      "被撤销的 SN 用**仍然正确**的签名上报 → 吊销表拦下（不靠签名）"),
@@ -174,28 +175,35 @@ def build_case(kind, dev, now, attacker=None, used_nonce=None):
 
 
 def run(dev, ks, now, used_nonces=None, attacker=None, replay_nonce=None,
-        verbose=False):
+        verbose=False, order=None):
     """把全部用例过一遍 `oid.verify_report` → [{kind, zh, expect, got, ok, note}]。
 
     只做**离线裁决**（不起链路）：适合单测与"防线清单"展示；
     真·端到端（经空口注入）见 `demo_spoof.py`。
+
+    **与用例顺序无关**："已吊销"用例在一个**临时 keystore** 里把该 SN 吊销，
+    传进来的 `ks` 全程不动。为什么必须如此：`unrevoke` 会把各代密钥置为 `retired`，
+    而 `retired` 不参与验签（`verify_keys` 只收 active / 未过期 grace）→ 一旦
+    "先跑 revoked 再 unrevoke"，后面所有用例都会变成 `unknown_device`（顺序一变就集体误判）。
+    `order` 可自定义遍历顺序（测试用它证明顺序无关）。
     """
     used = used_nonces if used_nonces is not None else oid.NonceCache()
+    kinds = list(order) if order else [c[0] for c in CASES]
+    # 临时库：同一个 SN、同一套钥匙（demo_key 由 (sn, gen) 确定派生）+ 已吊销
+    ks_revoked = oid.KeyStore()
+    ks_revoked.register(dev)
+    ks_revoked.revoke(dev.sn)
     rows = []
     # 「replay」需要一条**已用过**的 nonce：先真跑一条合法报文把它记进去
     if replay_nonce is None:
         probe = _legit(dev, now)
         replay_nonce = probe["payload"]["nonce"]
         oid.verify_report(probe, ks, now=now, used_nonces=used)
-    for kind, *_ in CASES:
-        # 「已吊销」本身是被测状态：该用例前吊销、其余用例前恢复（否则后面全变 revoked）
-        if kind == "revoked":
-            ks.revoke(dev.sn)
-        elif ks.is_revoked(dev.sn):
-            ks.unrevoke(dev.sn)
+    for kind in kinds:
         report, expect, note = build_case(kind, dev, now, attacker=attacker,
                                          used_nonce=replay_nonce)
-        v = oid.verify_report(report, ks, now=now, used_nonces=used)
+        v = oid.verify_report(report, ks_revoked if kind == "revoked" else ks,
+                              now=now, used_nonces=used)
         got = None if v.get("accepted") else v.get("error")
         rows.append({"kind": kind, "zh": case_info(kind)[0],
                      "expect": expect, "got": got,

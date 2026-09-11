@@ -125,6 +125,13 @@ def main():
     print(f"  用例数        : {len(spoof.CASES)}（含 1 条合法对照）")
     print()
 
+    # ⚠ 本脚本跑在**活密钥库**（server 拿着它）上：「已吊销」用例会留下吊销状态，
+    #   而 `unrevoke` 会把各代置成 retired（之后验签全变 unknown_device）→ 它必须最后跑。
+    #   顺序被改了就**当场报错**，不要静默给出错误结论。
+    if spoof.CASES[-1][0] != "revoked":
+        print("  [FATAL] spoof.CASES 的最后一项必须是 revoked（见 spoof.py 该条注释）")
+        return 2
+
     # ---- 起链路（与 demo_l2 同构）----
     coreA = sim.Core("Router-AP", "AP", CONSOLE_A, LINK_A, None, host_port=HOST_A)
     coreB = sim.Core("Client-STA", "STA", CONSOLE_B, LINK_B,

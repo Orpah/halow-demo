@@ -82,6 +82,23 @@ ck("xport 只加在最外层（hdr/payload/sig 逐个不变 → 所以验签照�
    bool(r_xt.get("xport")) and all(r_xt[k] == before[k] for k in before),
    str(r_xt.get("xport"))[:60])
 
+print("== 5. 顺序无关（revoked 用临时库，不污染传进来的 keystore） ==")
+ks3 = oid.KeyStore()
+ks3.register(dev, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
+rev_first = ["revoked"] + [k for k in spoof.KINDS if k != "revoked"]
+rows3 = spoof.run(dev, ks3, now, attacker=attacker, order=rev_first)
+bad3 = [r for r in rows3 if not r["ok"]]
+ck("把 revoked 排到最前，逐条结论不变",
+   not bad3, "；".join(f"{r['kind']}={r['got']}" for r in bad3))
+probe, _, _ = spoof.build_case("legit", dev, now)
+v = oid.verify_report(probe, ks3, now=now, used_nonces=oid.NonceCache())
+ck("跑完一轮后主库仍能正常验签（没被 unrevoke 转成 retired）",
+   bool(v.get("accepted")), f"got={v.get('error')}")
+ck("revoked 排最前 vs 排最后，逐条 (kind, 裁决) 完全一致",
+   sorted((r["kind"], r["got"]) for r in rows)
+   == sorted((r["kind"], r["got"]) for r in rows3),
+   "（与第 2 节的默认顺序对比；两侧顺序不同，故按集合比）")
+
 print()
 if FAIL:
     print(f"失败 {len(FAIL)} 项：" + "；".join(FAIL))
