@@ -35,6 +35,7 @@
   .stat .k { color: var(--mut); }
   .stat .v-ok { color: var(--grn); }
   .stat .v-err { color: var(--org); }
+  .stat .v-bad { color: var(--red); }
 </style>
 </head>
 <body>
@@ -144,13 +145,14 @@
     <thead><tr>
       <th>#</th><th data-i18n="tk_st_name">名称</th><th>x (m)</th><th>y (m)</th>
       <th data-i18n="tk_st_window">观测窗口</th><th data-i18n="tk_st_rssi">观测 RSSI</th>
-      <th data-i18n="tk_st_dist">距离</th><th></th>
+      <th data-i18n="tk_st_dist">距离</th><th data-i18n="tk_st_res">残差</th><th></th>
     </tr></thead>
     <tbody id="stationBody"></tbody>
   </table>
   <p class="hint" data-i18n="tk_st_hint">打点 = 此刻无人机在该站位（自动收尾上一个站位的窗口）；窗口内所有 report 的 RSSI 取中位数作为该站位观测。「绑定」把最新一条 report 的 RSSI 直接指派给该站位。至少 2 个站位有观测才能定位。</p>
   <canvas id="canvasLoc" width="620" height="420"></canvas>
   <p class="hint" data-i18n="tk_st_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=定位估计、灰点=无观测站位。坐标与上方 A/n 换算共用。</p>
+  <p class="hint" data-i18n="tk_st_quality_hint">残差 = 测量距离 − 估计点到该站位的距离；RMS 越小越可信。GDOP 反映站位几何（越小越好；站位数不足、近共线或都在同一侧时 GDOP 会很大甚至无解，此时估计点不可信）。</p>
 </section>
 
 <section class="card">
@@ -171,6 +173,8 @@
     <div><span class="k" data-i18n="tk_lab_time">最新时间：</span><span id="stTime">-</span></div>
     <div><span class="k" data-i18n="tk_lab_meta">seq / router：</span><span id="stMeta">-</span></div>
     <div><span class="k" data-i18n="tk_lab_loc">定位估计：</span><span class="v-ok" id="stLoc">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_res">定位残差：</span><span id="stRes">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_gdop">几何质量：</span><span id="stGdop">-</span></div>
     <div><span class="k" data-i18n="tk_lab_used">参与定位：</span><span id="stUsed">-</span></div>
   </div>
   <p class="hint" id="hint3" data-i18n="tk_hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
@@ -643,12 +647,79 @@ function winText(s) {
   return fmtTime(s.t0) + " → " + (s.t1 ? fmtTime(s.t1) : T("tk_st_now"));
 }
 
+/* 定位质量：残差 + 几何强度
+   残差 = 测量距离 − 估计点到该站位的距离；RMS 越小越可信。
+   GDOP = sqrt(trace((HᵀH)^-1))，H 为估计点到各站位的单位向量：
+   站位数不足、近共线、或都在同一侧时 HᵀH 降秩 → GDOP 极大/无解（估计点不可信）。
+   没有残差/几何指标时，恒定 RSSI 这类退化输入会给出一个看着很正常、实际无意义的坐标。 */
+function qualityOf(obs, est) {
+  if (!est || obs.length < 2) return null;
+  let sum2 = 0;
+  const per = {};
+  obs.forEach(o => {
+    const d = Math.hypot(est.x - o.s.x, est.y - o.s.y);
+    const r = o.dist - d;                       // 测量 − 估计
+    per[o.s.sid] = r;
+    sum2 += r * r;
+  });
+  const rms = Math.sqrt(sum2 / obs.length);
+  let a = 0, b = 0, c = 0;
+  obs.forEach(o => {
+    const dx = o.s.x - est.x, dy = o.s.y - est.y;
+    const L = Math.hypot(dx, dy) || 1e-6;
+    const ux = dx / L, uy = dy / L;
+    a += ux * ux; b += ux * uy; c += uy * uy;
+  });
+  const det = a * c - b * b;
+  const gdop = Math.abs(det) > 1e-9 ? Math.sqrt((a + c) / det) : null;
+  return { rms, per, gdop, medDist: median(obs.map(o => o.dist)) };
+}
+
+function median(vals) {
+  const v = vals.slice().sort((x, y) => x - y);
+  if (!v.length) return 0;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/* 站位布局条件数（与估计点无关）：经典最小二乘矩阵 A（行 = 2(xj-x0), 2(yj-y0)）
+   的 λmax/λmin；∞ = 完全共线。**解不出来时**用它区分「站位几何不行」还是「距离环不相交」。 */
+function layoutCond(obs) {
+  if (obs.length < 2) return null;
+  const x0 = obs[0].s.x, y0 = obs[0].s.y;
+  let a00 = 0, a01 = 0, a11 = 0;
+  for (let j = 1; j < obs.length; j++) {
+    const ax = 2 * (obs[j].s.x - x0), ay = 2 * (obs[j].s.y - y0);
+    a00 += ax * ax; a01 += ax * ay; a11 += ay * ay;
+  }
+  const tr = a00 + a11, det = a00 * a11 - a01 * a01;
+  const disc = Math.max(tr * tr / 4 - det, 0);
+  const l1 = tr / 2 + Math.sqrt(disc), l2 = tr / 2 - Math.sqrt(disc);
+  if (l2 <= 1e-12) return Infinity;          // 完全共线
+  return Math.sqrt(l1 / l2);
+}
+
+/* 等级：good / fair / bad（null = 无法判定） */
+function gdopGrade(g) {
+  if (g === null || g === undefined || !isFinite(g)) return "bad";
+  if (g <= 1.5) return "good";
+  if (g <= 4) return "fair";
+  return "bad";
+}
+function resGrade(rms, medDist) {
+  const base = Math.max(medDist || 0, 1);
+  if (rms <= 0.2 * base) return "good";
+  if (rms <= 0.6 * base) return "fair";
+  return "bad";
+}
+
 /* 不整表重建（loadReal 每 2s 轮询）：只在站位集合变化时重建行，
    否则就地改单元格与输入框（用户正在编辑的 input 不覆盖）。 */
 function renderStations() {
   const tbody = $("stationBody");
   if (!tbody) return;
   const { obs, est } = computeLoc();
+  const q = qualityOf(obs, est);
   const bySid = {};
   obs.forEach(o => { bySid[o.s.sid] = o; });
   const sig = stations.map(s => s.sid).join("|");
@@ -657,7 +728,7 @@ function renderStations() {
     tbody.innerHTML = "";
     if (!stations.length) {
       const tr = document.createElement("tr");
-      tr.innerHTML = '<td colspan="8" class="hint">' + T("tk_st_empty") + "</td>";
+      tr.innerHTML = '<td colspan="9" class="hint">' + T("tk_st_empty") + "</td>";
       tbody.appendChild(tr);
     } else {
       for (const s of stations) {
@@ -671,6 +742,7 @@ function renderStations() {
           '<td class="mono stwin"></td>' +
           '<td class="mono stobs"></td>' +
           '<td class="mono stdist"></td>' +
+          '<td class="mono stres"></td>' +
           '<td><button class="btn sm stpunch"></button> ' +
           '<button class="btn sm stbind"></button> ' +
           '<button class="btn sm stunbind"></button> ' +
@@ -690,6 +762,9 @@ function renderStations() {
         (o.src === "bind" ? T("tk_st_src_bind") : "n=" + o.n)
       : "—";
     tr.querySelector(".stdist").textContent = o ? o.dist.toFixed(1) + " m" : "—";
+    const re = tr.querySelector(".stres");
+    const r = (q && o && q.per[o.s.sid] !== undefined) ? q.per[o.s.sid] : null;
+    re.textContent = r === null ? "—" : (r >= 0 ? "+" : "−") + Math.abs(r).toFixed(1) + " m";
     const pu = tr.querySelector(".stpunch");
     pu.textContent = T("tk_st_punch");
     pu.disabled = (s.t0 !== null && s.t0 !== undefined &&
@@ -710,9 +785,41 @@ function renderStations() {
   drawLoc(obs, est);
   $("stUsed").textContent = T("tk_st_used_fmt")
     .replace("{n}", obs.length).replace("{t}", stations.length);
-  $("stLoc").textContent = est
-    ? "( " + est.x.toFixed(1) + ", " + est.y.toFixed(1) + " )"
-    : T("tk_st_need2");
+  // 定位结果 + 质量：没有质量指标时，退化输入（如恒定 RSSI）会给出看着正常、实际无意义的坐标
+  const eLoc = $("stLoc"), eRes = $("stRes"), eGd = $("stGdop");
+  const cond = layoutCond(obs);
+  if (est) {
+    eLoc.textContent = "( " + est.x.toFixed(1) + ", " + est.y.toFixed(1) + " )";
+    eLoc.className = "v-ok";
+  } else {
+    eLoc.textContent = obs.length < 2 ? T("tk_st_need2") : T("tk_st_nosol");
+    eLoc.className = "v-err";
+  }
+  if (q) {
+    const rg = resGrade(q.rms, q.medDist);
+    eRes.textContent = T("tk_res_fmt").replace("{v}", q.rms.toFixed(1))
+      + " · " + T("tk_g_" + rg);
+    eRes.className = "v-" + (rg === "good" ? "ok" : (rg === "fair" ? "err" : "bad"));
+  } else {
+    eRes.textContent = "-"; eRes.className = "";
+  }
+  if (!est) {
+    // 观测够但解不出来 → 说清楚是站位几何还是测量不自洽，不能再说「需要 2 个站位」
+    if (obs.length < 2) {
+      eGd.textContent = "-"; eGd.className = "";
+    } else if (cond === Infinity) {
+      eGd.textContent = T("tk_st_cond_inf"); eGd.className = "v-bad";
+    } else {
+      eGd.textContent = T("tk_st_cond_fmt").replace("{v}", cond.toFixed(2))
+        + " · " + T("tk_st_nox"); eGd.className = "v-bad";
+    }
+  } else {
+    const gg = gdopGrade(q.gdop);
+    eGd.textContent = T("tk_gdop_fmt")
+      .replace("{v}", q.gdop === null ? "∞" : q.gdop.toFixed(2))
+      .replace("{q}", T("tk_g_" + gg));
+    eGd.className = "v-" + (gg === "good" ? "ok" : (gg === "fair" ? "err" : "bad"));
+  }
 }
 
 /* 站位 + 距离环 + 定位估计（真实模式专用画布，不碰模拟模式的 draw()） */
