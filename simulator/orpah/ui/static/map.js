@@ -82,3 +82,95 @@ function currentTileUrl() {
   const key = $("tileSrc").value;
   return key === "custom" ? $("tileUrl").value.trim() : TILE_PROVIDERS[key].url;
 }
+
+/* ---- 底图图层 + 离线回落（两页共用：各页 ensureMap() 调 addBaseLayer(map) 即可）----
+   为什么需要回落：OSM 官方瓦片政策**禁止离线/预取**（见 ROADMAP §二/§七），本 demo 因此
+   **不带离线底图包**；但无网时地图不能变成一片空白 —— 找人靠的是轨迹/距离环/定位估计，
+   底图只是背景参考。
+   做法：瓦片连续取不到且一张都没成功 → 判定离线 → 换成**本地自绘网格底图** + 比例尺 +
+   明确提示（含「重试底图」）。网格是 canvas 现画的，**不含任何第三方数据** → 无许可问题。
+   判据是「连续 BASE_ERR_LIMIT 张失败 且 成功数为 0」，所以个别瓦片 404（某些源在高 zoom
+   没有数据）不会误判。 */
+let baseMap = null, baseTiles = null, baseGrid = null, baseNote = null, baseScale = null;
+let baseOffline = false, baseErr = 0, baseOk = 0;
+const BASE_ERR_LIMIT = 4;
+
+function addBaseLayer(map) {
+  baseMap = map;
+  baseErr = 0; baseOk = 0;
+  const url = currentTileUrl();
+  if (!url) { goOffline(); return; }            // 自定义源没填 URL：不用等失败
+  const p = TILE_PROVIDERS[$("tileSrc").value] || TILE_PROVIDERS.custom;
+  baseTiles = L.tileLayer(url, { attribution: p.attr || "", maxZoom: 19 });
+  baseTiles.on("tileerror", () => {
+    if (baseOffline) return;
+    if (++baseErr >= BASE_ERR_LIMIT && baseOk === 0) goOffline();
+  });
+  baseTiles.on("tileload", () => { baseOk++; baseErr = 0; });
+  baseTiles.addTo(map);
+}
+
+/* 本地自绘网格底图（深色，与页面主题一致；每 64 px 一格） */
+function offlineGridLayer() {
+  const Grid = L.GridLayer.extend({
+    createTile() {
+      const size = this.getTileSize();
+      const cv = document.createElement("canvas");
+      cv.width = size.x; cv.height = size.y;
+      const g = cv.getContext("2d");
+      g.fillStyle = "#0e131a"; g.fillRect(0, 0, size.x, size.y);
+      g.strokeStyle = "#22303f"; g.lineWidth = 1;
+      g.beginPath();
+      for (let x = 0; x <= size.x; x += size.x / 4) {
+        g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, size.y);
+      }
+      for (let y = 0; y <= size.y; y += size.y / 4) {
+        g.moveTo(0, y + 0.5); g.lineTo(size.x, y + 0.5);
+      }
+      g.stroke();
+      return cv;
+    },
+  });
+  return new Grid({ maxZoom: 19 });
+}
+
+function offlineNoteControl() {
+  const ctl = L.control({ position: "bottomleft" });
+  ctl.onAdd = function () {
+    const box = L.DomUtil.create("div");
+    box.id = "mapOfflineNote";
+    box.style.cssText = "background:rgba(13,17,23,.94);border:1px solid #d29922;color:#e6edf3;" +
+      "padding:6px 8px;border-radius:4px;font:12px/1.5 ui-monospace,Consolas,monospace;max-width:330px";
+    box.title = T("map_offline_note_title");
+    box.appendChild(document.createTextNode(T("map_offline_note")));
+    const b = document.createElement("button");
+    b.id = "mapOfflineRetry";
+    b.className = "btn";
+    b.style.cssText = "display:block;margin-top:5px;cursor:pointer";
+    b.textContent = T("map_offline_retry");
+    b.onclick = () => retryBase();
+    box.appendChild(b);
+    L.DomEvent.disableClickPropagation(box);      // 点提示框/按钮不要拖动地图
+    return box;
+  };
+  return ctl;
+}
+
+function goOffline() {
+  if (baseOffline || !baseMap) return;
+  baseOffline = true;
+  if (baseTiles) { baseTiles.remove(); baseTiles = null; }
+  baseGrid = offlineGridLayer().addTo(baseMap);
+  baseScale = L.control.scale({ imperial: false, position: "bottomright" }).addTo(baseMap);
+  baseNote = offlineNoteControl().addTo(baseMap);
+}
+
+function retryBase() {
+  if (!baseMap) return;
+  baseOffline = false; baseErr = 0; baseOk = 0;
+  if (baseGrid) { baseGrid.remove(); baseGrid = null; }
+  if (baseNote) { baseNote.remove(); baseNote = null; }
+  addBaseLayer(baseMap);                          // 比例尺留着（离线/在线都有用）
+}
+
+function baseOfflineNow() { return baseOffline; }

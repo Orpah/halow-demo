@@ -285,17 +285,12 @@ function stepOnce() {
   updateStat(est);
 }
 
-/* ---- 地图（Leaflet，用户指定瓦片源）----
-   每个源：url + attr（署名，必须可见）+ note（条款说明键）+ labels（**底图地名语言**）。
-     labels："local" = 用当地语言标注（中国境内即中文）/ "none" = 无地名 / "user" = 自定义自负责。
-   各源许可条款差别很大，尤其 osm.org 官方瓦片禁止离线/预取，且无 SLA —— 见 ROADMAP §七。
-   **列表按界面语言给不同的一套**：栅格瓦片的地名是画在图里的像素、没有语言参数，
-   所以英文界面不能默认给一张“中国地图 + 中文地名”——无地名的卫星图置默认，带地名的标出提醒。 */
+/* ---- 地图（Leaflet）----
+   底图源列表 / 条款说明 / 基点与坐标换算 / **离线回落**都在 **map.js**（单一源，与回放页共用；
+   那是合规相关的东西，抄两份迟早漂移）。本页只保留自己的图层管理。 */
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
 let lRings = [], lEstLoc = null, lEllipse = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计 / 95% 置信椭圆
 
-/* 底图源列表 / 条款说明 / 基点与坐标换算都在 **map.js**（单一源，与回放页共用；
-   那是合规相关的东西，抄两份迟早漂移）。本页只保留自己的图层管理。 */
 /* 地图上的测点来源：模拟模式 = 测点表；真实模式 = 站位表。
    不区分模式的话，真实模式地图会画出模拟模式的默认测点（而且不会报错）。 */
 function mapPoints() {
@@ -324,8 +319,7 @@ function refreshRouters() {
 function ensureMap() {
   if (lmap) return;
   lmap = L.map("map").setView([baseLat(), baseLng()], 16);
-  const prov = TILE_PROVIDERS[$("tileSrc").value];
-  L.tileLayer(currentTileUrl(), { attribution: prov.attr || "", maxZoom: 19 }).addTo(lmap);
+  addBaseLayer(lmap);            // 底图 + 离线回落都在 map.js（单一源）
   lTruePath = L.polyline([], { color: "#3fb950", weight: 2 }).addTo(lmap);
   lEstPath = L.polyline([], { color: "#f85149", weight: 2 }).addTo(lmap);
   lTrueMarker = L.marker([0, 0]).addTo(lmap);

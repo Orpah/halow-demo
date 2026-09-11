@@ -237,8 +237,7 @@ function mapActive() { return $("view") && $("view").value === "map"; }
 function ensureMap() {
   if (lmap) return;
   lmap = L.map("map").setView([baseLat(), baseLng()], 16);
-  const p = TILE_PROVIDERS[$("tileSrc").value] || TILE_PROVIDERS.custom;
-  L.tileLayer(currentTileUrl(), { attribution: p.attr || "", maxZoom: 19 }).addTo(lmap);
+  addBaseLayer(lmap);            // 底图 + 离线回落都在 map.js（单一源）
 }
 
 /* 站位标记：只在「站位集合 / 基点」变化时重建（否则每帧重建会把 tooltip 打断） */
