@@ -5,6 +5,16 @@
 <title>ORPAH-over-HaLow L1 演示</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="style.css?v=20260910a">
+<style>
+  /* 告警：徽标按最高等级着色，列表项同色 */
+  #alertBadge.crit { color: var(--red); border-color: var(--red); }
+  #alertBadge.warn { color: var(--org); border-color: var(--org); }
+  .alert-list { margin: 4px 0 0; padding-left: 18px; }
+  .alert-list li { margin: 4px 0; font-size: 13px; }
+  .alert-list li.crit { color: var(--red); }
+  .alert-list li.warn { color: var(--org); }
+  .alert-list .since { color: var(--mut); }
+</style>
 </head>
 <body>
 <header>
@@ -23,11 +33,18 @@
       </div>
     </div>
     <button class="btn" id="langBtn" title="中文 / English"></button>
+    <span class="badge" id="alertBadge" hidden data-i18n-title="alert_title" title="告警"></span>
     <span id="srvstatus" class="badge">--</span>
     <button id="btnPause" class="btn" data-i18n="btn_pause">暂停上报</button>
     <button id="btnReset" class="btn" data-i18n="btn_clear">清空列表</button>
   </div>
 </header>
+
+<!-- ============ 告警（规则引擎见 alerts.py；无告警时整卡隐藏） ============ -->
+<section class="card" id="alertCard" hidden>
+  <h3 data-i18n="alert_title">告警</h3>
+  <ul class="alert-list" id="alertList"></ul>
+</section>
 
 <!-- ============ 拓扑（3 节点：客户端 / 路由器 / 服务器；链路标方向与帧数） ============ -->
 <section id="topology" class="card">

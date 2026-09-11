@@ -433,6 +433,69 @@ if ($("btnEvtRefresh")) {
   refreshEvents();
 }
 
+/* ---------- 告警（规则引擎在 alerts.py；本页只轮询 + 渲染） ----------
+   后端只回 {kind, level, key, msg(i18n 键), since, ...数据} —— 文案由本页本地化，
+   免得又变成"后端文案不跟语言走"。
+   红点用轮询（3s）而不是 SSE：比 1s 的 /api/status 慢一档，规则评估很轻。 */
+let alertKeys = new Set();     // 上一轮的告警 key：用来判断"新告警"
+
+/* 持续时长：紧凑且语言无关（1h2m / 3m20s / 45s） */
+function fmtGap(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return h + "h" + m + "m";
+  if (m) return m + "m" + s + "s";
+  return s + "s";
+}
+
+/* 用告警自带字段填 msg 模板 */
+function alertText(a) {
+  const data = Object.assign({}, a);
+  delete data.msg;
+  if (data.gap !== undefined) data.gap = fmtGap(data.gap);
+  let s = T(a.msg);
+  Object.keys(data).forEach(k => { s = s.split("{" + k + "}").join(String(data[k])); });
+  return s;
+}
+
+function renderAlerts(r) {
+  const badge = $("alertBadge"), card = $("alertCard"), ul = $("alertList");
+  if (!badge || !card || !ul) return;
+  const list = r.alerts || [], counts = r.counts || {}, n = counts.total || 0;
+  badge.hidden = !n;
+  badge.textContent = n ? "⚠ " + n : "";
+  badge.className = "badge" + (counts.crit ? " crit" : (n ? " warn" : ""));
+  card.hidden = !n;
+  ul.innerHTML = "";
+  list.forEach(a => {
+    const li = document.createElement("li");
+    li.className = a.level;
+    const age = fmtGap(Date.now() / 1000 - a.since);
+    li.innerHTML = esc(alertText(a)) +
+      ' <span class="since">· ' + esc(T("alert_age").replace("{v}", age)) + "</span>";
+    ul.appendChild(li);
+  });
+  // 出现"上一轮没有的告警"→ 徽标闪一下（比弹窗轻，不打断演示）
+  const keys = new Set(list.map(a => a.key));
+  const isNew = n > 0 && [...keys].some(k => !alertKeys.has(k));
+  alertKeys = keys;
+  if (isNew) {
+    badge.style.boxShadow = "0 0 10px 2px currentColor";
+    setTimeout(() => { badge.style.boxShadow = ""; }, 1500);
+  }
+}
+
+async function refreshAlerts() {
+  try {
+    const r = await fetch("/api/alerts").then(x => x.json());
+    if (r && r.ok) renderAlerts(r);
+  } catch (e) { /* 服务器未就绪 */ }
+}
+if ($("alertBadge")) {
+  setInterval(refreshAlerts, 3000);
+  refreshAlerts();
+}
+
 /* ---------- 顶部「工具」下拉菜单 ---------- */
 const toolsBtn = $("toolsBtn");
 if (toolsBtn) {

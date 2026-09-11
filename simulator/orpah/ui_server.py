@@ -50,6 +50,7 @@ import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实�
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
 import stations as sta                     # noqa: E402  定位站位（无人机悬停测点）
+import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 import damm32 as d32                      # noqa: E402  校验算法单一源
 import luhn32 as l32                      # noqa: E402
@@ -529,6 +530,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/stations":
             self._send(200, json.dumps(APP.stations.to_dict()).encode())
+            return
+        if self.path == "/api/alerts":
+            # 无状态评估：每次用当前快照重算活跃告警（规则见 alerts.py）
+            al = alr.evaluate(APP.registry, APP.cases, APP.id_reports)
+            self._send(200, json.dumps({"ok": True, "counts": alr.summary(al),
+                                        "alerts": al}).encode())
             return
         if self.path.startswith("/api/ts/query"):
             self._api_ts_query()
