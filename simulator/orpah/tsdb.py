@@ -32,6 +32,7 @@ class Tsdb:
         self.available = False
         self._lock = threading.Lock()
         self._last_try = 0.0
+        self._retry_delay = 1.0
         if self.enabled:
             self._connect()
 
@@ -54,15 +55,19 @@ class Tsdb:
             self.available = False
 
     def _ensure(self):
-        """确保连接可用；不可用则节流重连（每 10s 最多一次）。"""
+        """确保连接可用；不可用则指数退避重连（1s→2s→…→10s 上限）。"""
         if self.available:
             return True
         if not self.enabled:
             return False
-        if time.time() - self._last_try < 10:
+        if time.time() - self._last_try < self._retry_delay:
             return False
         self._last_try = time.time()
         self._connect()
+        if self.available:
+            self._retry_delay = 1.0
+        else:
+            self._retry_delay = min(self._retry_delay * 2, 10.0)
         return self.available
 
     @staticmethod
@@ -90,14 +95,17 @@ class Tsdb:
             self.available = False
             return False
 
-    def write_event(self, etype, sn="", detail=""):
-        """写一条业务事件（case_mark/case_found/case_close/found 等）。"""
+    def write_event(self, etype, sn="", detail="", ts=None):
+        """写一条业务事件（case_mark/case_found/case_close/found 等）。
+
+        ts 可选：传入业务发生时间（如 missing_at），否则用当前时间。
+        """
         if not self._ensure() or self.session is None:
             return False
         try:
             with self._lock:
                 self.session.insert_record(
-                    "root.orpah.events", int(time.time() * 1000),
+                    "root.orpah.events", int((ts or time.time()) * 1000),
                     ["etype", "sn", "detail"],
                     [TSDataType.TEXT, TSDataType.TEXT, TSDataType.TEXT],
                     [etype, sn or "", detail or ""])
@@ -108,7 +116,10 @@ class Tsdb:
 
     # ---------------- 查询 ----------------
     def query_report(self, sn, limit=100):
-        """查询某设备最近上报点 → [{t(ms), rssi, seq, router_id}]。"""
+        """查询某设备最近上报点 → [{t(ms), rssi, seq, router_id}]。
+
+        无数据时返回空列表 []；IoTDB 未就绪/查询失败返回 None。
+        """
         if not self._ensure() or self.session is None:
             return None
         try:

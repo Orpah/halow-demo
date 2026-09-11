@@ -416,6 +416,7 @@ class OrpahApp:
         elif action == "set_sn" and sn:
             if self.client:
                 self.client.sn = sn
+                self._ensure_id_device()   # 立即重建 Orpah ID 设备，清掉旧 SN 残留
         elif action == "every" and every and every > 0:
             self.every = float(every)
         elif action == "mark" and sn and self.srv:
@@ -566,8 +567,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, json.dumps({"ok": False,
                         "err": "SN 校验位错误"}).encode())
                     return
-                APP.registry.register(sn,
-                                      person_id=req.get("person_id") or None,
+                pid = req.get("person_id") or None
+                if pid is not None and APP.registry.get_person(pid) is None:
+                    self._send(200, json.dumps({"ok": False,
+                        "err": "绑定的走失者不存在"}).encode())
+                    return
+                APP.registry.register(sn, person_id=pid,
                                       org=req.get("org"), cc=req.get("cc"))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "remove_device":
@@ -620,7 +625,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, json.dumps({"ok": False,
                                         "err": "仅支持 jpg/png/webp/gif"}).encode())
             return
-        n = int(self.headers.get("Content-Length", 0))
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            n = 0
         if n <= 0:
             self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
             return
@@ -668,8 +676,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                 APP.srv.mark_tracked(sn, note=f"case:{c.case_id}")
                         APP.tsdb.write_event("case_mark", sn=",".join(sns),
                                              detail=c.case_id)
-                    self._send(200, json.dumps({"ok": True, "dup": dup,
-                                                "case_id": c.case_id}).encode())
+                    resp = {"ok": True, "dup": dup, "case_id": c.case_id}
+                    if dup:
+                        resp["existing_case_id"] = c.case_id
+                    self._send(200, json.dumps(resp).encode())
             elif action == "close":
                 outcome_val = req.get("outcome", "")
                 if outcome_val not in ("closed", "revoked"):
@@ -747,15 +757,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 }).encode())
                 return
             sig = req.get("sig")
+            note = None
             if alg == "ES256":
                 ok = bool(sig) and dev.pubkey is not None and oid._verify_es256(dev.pubkey, preimage, sig)
             elif alg == "HS256":
                 ok = bool(sig) and oid._verify_hs256(dev.hmac_key, preimage, sig)
             elif alg == "none":
-                ok = sig is None
+                ok = False
+                note = "none 算法无签名，不视为已验证"
             else:
                 ok = False
-            self._send(200, json.dumps({"ok": True, "verified": ok}).encode())
+            resp = {"ok": True, "verified": ok}
+            if note:
+                resp["note"] = note
+            self._send(200, json.dumps(resp).encode())
             return
         self._send(200, json.dumps({"ok": False, "err": f"unknown action: {action}"}).encode())
 

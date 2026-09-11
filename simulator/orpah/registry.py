@@ -292,6 +292,10 @@ class Registry:
         p = self.persons.get(person_id)
         return p.name if p else None
 
+    def get_person(self, pid):
+        """按 pid 取 Person；不存在返回 None。"""
+        return self.persons.get(pid)
+
     def lost_sns(self):
         """当前「丢失」态设备 SN 列表（供 index 标红）。"""
         return [d.sn for d in self.devices.values() if d.status == STATUS_LOST]
