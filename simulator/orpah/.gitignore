@@ -2,4 +2,8 @@
 ui/static/uploads/
 
 # SQLite 数据库（运行时持久化，不随仓库提交）
+# 连 rollback journal / WAL 临时文件一起忽略（事务中会短暂出现）
 orpah.db
+orpah.db-journal
+orpah.db-wal
+orpah.db-shm
