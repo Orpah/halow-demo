@@ -599,8 +599,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 APP.registry.set_status(req.get("sn", ""), req.get("status", ""))
                 self._send(200, json.dumps({"ok": True}).encode())
             elif action == "set_status_many":
-                APP.registry.set_statuses(req.get("sns", []), req.get("status", ""))
-                self._send(200, json.dumps({"ok": True}).encode())
+                ok, missing = APP.registry.set_statuses(req.get("sns", []),
+                                                        req.get("status", ""))
+                self._send(200, json.dumps({"ok": True, "updated": ok,
+                                            "missing": missing}).encode())
             else:
                 self._send(200, json.dumps({"ok": False,
                                             "err": f"unknown action: {action}"}).encode())
@@ -625,17 +627,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, json.dumps({"ok": False,
                                         "err": "仅支持 jpg/png/webp/gif"}).encode())
             return
+        MAX = 5 * 1024 * 1024
+        cl = self.headers.get("Content-Length")
         try:
-            n = int(self.headers.get("Content-Length", 0) or 0)
+            n = int(cl) if cl is not None else -1
         except (TypeError, ValueError):
-            n = 0
-        if n <= 0:
-            self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
-            return
-        if n > 5 * 1024 * 1024:
+            n = -1
+        if n > MAX:
             self._send(400, json.dumps({"ok": False, "err": "图片超过 5MB 限制"}).encode())
             return
-        data = self.rfile.read(n)
+        # 无/非法 Content-Length（chunked 等）→ 读到 EOF，最多 MAX+1 字节
+        data = self.rfile.read(n) if n >= 0 else self.rfile.read(MAX + 1)
+        if not data:
+            self._send(400, json.dumps({"ok": False, "err": "空文件"}).encode())
+            return
+        if len(data) > MAX:
+            self._send(400, json.dumps({"ok": False, "err": "图片超过 5MB 限制"}).encode())
+            return
         up = os.path.join(STATIC_DIR, "uploads")
         os.makedirs(up, exist_ok=True)
         fname = f"{uuid.uuid4().hex}.{ext}"
