@@ -142,9 +142,10 @@
 
 <script>
 "use strict";
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
-const POLY = 0x23;   // p(t) = t^5 + t + 1
+let CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";  // 后端返回后覆盖
+let CI = {};
+function rebuildCI() { CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i; }
+rebuildCI();
 
 // ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
 const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
@@ -154,82 +155,42 @@ const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":
   "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
   "HK":"中国香港","MO":"中国澳门" };
 
-function gfMul(a, b) {
-  let r = 0;
-  for (let i = 0; i < 5; i++) {
-    if (b & 1) r ^= a;
-    b >>= 1;
-    a <<= 1;
-    if (a & 0x20) a ^= POLY;
+/* ---- 拟群表与算法全部走后端 /api/checksum（单一源：damm32.py）---- */
+async function apiChecksum(params) {
+  try {
+    return await fetch("/api/checksum?" + new URLSearchParams(params)).then(r => r.json());
+  } catch (e) {
+    console.error("checksum:", e);
+    return { ok: false, err: "后端不可达" };
   }
-  return r & 0x1F;
 }
 
-function buildTable() {
-  const T = [];
-  for (let x = 0; x < 32; x++) {
-    const row = [];
-    for (let y = 0; y < 32; y++) row.push(gfMul(2, x ^ y));
-    T.push(row);
-  }
-  return T;
-}
-const T = buildTable();
-
-function isLatin() {
-  for (let i = 0; i < 32; i++) {
-    const r = new Set(T[i]), c = new Set();
-    for (let j = 0; j < 32; j++) c.add(T[j][i]);
-    if (r.size !== 32 || c.size !== 32) return false;
-    for (let v = 0; v < 32; v++) if (!r.has(v) || !c.has(v)) return false;
-  }
-  return true;
-}
-function diagZero() { for (let i = 0; i < 32; i++) if (T[i][i] !== 0) return false; return true; }
-function adjcond() {
-  for (let s = 0; s < 32; s++)
-    for (let d = 0; d < 32; d++)
-      for (let e = 0; e < 32; e++)
-        if (d !== e && T[T[s][d]][e] === T[T[s][e]][d]) return false;
-  return true;
-}
-
-function checkDigit(digits) {
-  let s = 0;
-  for (const d of digits) s = T[s][d];
-  return T[s].indexOf(0);
-}
-function validate(digits) {
-  let s = 0;
-  for (const d of digits) s = T[s][d];
-  return s === 0;
-}
-
-function digitsOf(sn) {
-  const out = [];
-  for (const ch of sn) {
+function validOrgUnique(s) {
+  if (!s) return false;
+  for (const ch of s) {
     if (ch === "-") continue;
-    const u = ch.toUpperCase();
-    if (!(u in CI)) return null;
-    out.push(CI[u]);
+    if (!(ch.toUpperCase() in CI)) return false;
   }
-  return out;
+  return true;
 }
 
-/* ---- 性质卡片 ---- */
-(function renderProps() {
-  const latin = isLatin(), diag = diagZero(), adj = adjcond();
-  const items = [["拉丁方（行/列皆排列）", latin],
-                 ["主对角线全 0", diag],
-                 ["相邻换位检出条件", adj],
-                 ["综合（弱全反对称拟群）", latin && diag && adj]];
+/* ---- 性质卡片（后端判定）---- */
+function renderProps(checks, valid) {
+  const items = [["拉丁方（行/列皆排列）", checks.latin],
+                 ["主对角线全 0", checks.diag_zero],
+                 ["相邻换位检出条件", checks.adjacent_transposition],
+                 ["综合（弱全反对称拟群）", valid]];
   document.getElementById("propRow").innerHTML = items.map(([k, v]) =>
     `<div class="prop"><div class="k">${k}</div><div class="v ${v ? "ok" : "bad"}">${v ? "✓ 通过" : "✗ 失败"}</div></div>`).join("");
-})();
+}
 
-/* ---- 表格 ---- */
-(function renderTable() {
+/* ---- 表格（后端构建的拟群）---- */
+async function loadTable() {
+  const r = await apiChecksum({ action: "table", algo: "damm32" });
   const el = document.getElementById("t32");
+  if (!r.ok) { el.innerHTML = `<tbody><tr><td>后端不可达：${r.err}</td></tr></tbody>`; return; }
+  CROCKFORD = r.crockford; rebuildCI();
+  renderProps(r.checks, r.valid);
   let h = "<thead><tr><th class=\"corner\">x\\y</th>";
   for (let y = 0; y < 32; y++) h += `<th>${y}</th>`;
   h += "</tr></thead><tbody>";
@@ -237,33 +198,34 @@ function digitsOf(sn) {
     h += `<tr><th class="row">${x}</th>`;
     for (let y = 0; y < 32; y++) {
       const cls = (x === y) ? "diag" : (x === 0 ? "row0" : "");
-      h += `<td class="${cls}">${T[x][y]}</td>`;
+      h += `<td class="${cls}">${r.quasigroup[x][y]}</td>`;
     }
     h += "</tr>";
   }
   el.innerHTML = h + "</tbody>";
-})();
+}
 
 /* ---- 校验位（只算 ORG-UNIQUE，不含 CC）---- */
-function refresh() {
+let reqSeq = 0;
+async function refresh() {
+  const my = ++reqSeq;
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
-  const d = digitsOf(org);
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
         ver = document.getElementById("verifyOut");
-  if (!d || d.length === 0) {
+  if (!validOrgUnique(org)) {
     out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
     return;
   }
-  const c = checkDigit(d);
-  const ch = CROCKFORD[c];
-  out.textContent = ch;
-  full.textContent = cc + "-" + org + "-" + ch;
-  const ok = validate(d.concat([c]));
-  ver.textContent = ok ? "✓ 通过" : "✗ 失败";
-  ver.className = ok ? "ok" : "bad";
+  const r = await apiChecksum({ action: "compute", algo: "damm32", org_unique: org });
+  if (my !== reqSeq) return;             // 丢弃过期响应
+  if (!r.ok) { out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = ""; return; }
+  out.textContent = r.check;
+  full.textContent = cc + "-" + org + "-" + r.check;
+  ver.textContent = r.valid ? "✓ 通过" : "✗ 失败";
+  ver.className = r.valid ? "ok" : "bad";
 }
 document.getElementById("orgUnique").addEventListener("input", refresh);
 document.getElementById("ccInput").addEventListener("input", refresh);
@@ -273,25 +235,24 @@ document.getElementById("ccInput").addEventListener("keydown", (e) => {
     document.getElementById("orgUnique").focus();
   }
 });
+loadTable();
 refresh();
 
 /* ---- 单字符替换演示 ---- */
-document.getElementById("btnDemo").addEventListener("click", () => {
+document.getElementById("btnDemo").addEventListener("click", async () => {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
-  const d = digitsOf(org);
   const out = document.getElementById("demoResult");
-  if (!d || d.length === 0) { out.textContent = "非法输入"; return; }
-  const c = checkDigit(d);
-  const ch = CROCKFORD[c];
-  const last = d.length - 1;
-  const flipped = CROCKFORD[(d[last] + 1) % 32];
+  if (!validOrgUnique(org)) { out.textContent = "非法输入"; return; }
+  const r = await apiChecksum({ action: "compute", algo: "damm32", org_unique: org });
+  if (!r.ok) { out.textContent = "非法输入"; return; }
+  const idx = CROCKFORD.indexOf(org.slice(-1));
+  const flipped = CROCKFORD[(Math.max(idx, 0) + 1) % 32];
   const badOrg = org.slice(0, -1) + flipped;
-  const badD = digitsOf(badOrg);
-  const badOk = validate(badD.concat([c]));
+  const bad = await apiChecksum({ action: "verify", algo: "damm32", body: badOrg + "-" + r.check });
   out.textContent =
-    `原始  ${cc}-${org}-${ch}   → 校验 ${validate(d.concat([c])) ? "通过" : "失败"}\n` +
-    `改一位 ${cc}-${badOrg}-${ch} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+    `原始  ${cc}-${org}-${r.check}   → 校验 ${r.valid ? "通过" : "失败"}\n` +
+    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${bad.valid ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
 });
 
 /* ---- 全量穷举 ---- */
@@ -299,44 +260,13 @@ document.getElementById("btnBrute").addEventListener("click", async function () 
   const hint = document.getElementById("bruteHint");
   this.disabled = true;
   const maxlen = parseInt(this.dataset.run, 10);
-  hint.textContent = "正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个串，可能需数秒）";
-  await new Promise(r => setTimeout(r, 30));   // 让 UI 先刷新
-  const t0 = performance.now();
-  let misses = null, count = 0;
-  outer:
-  for (let L = 1; L <= maxlen; L++) {
-    const digits = new Array(L).fill(0);
-    const total = Math.pow(32, L);
-    for (let idx = 0; idx < total; idx++) {
-      count++;
-      const c = checkDigit(digits);
-      for (let p = 0; p < L; p++) {
-        const orig = digits[p];
-        for (let v = 0; v < 32; v++) {
-          if (v === orig) continue;
-          digits[p] = v;
-          if (checkDigit(digits) === c) { misses = ["single", digits.slice(), p, v]; break outer; }
-        }
-        digits[p] = orig;
-      }
-      for (let p = 0; p < L - 1; p++) {
-        if (digits[p] === digits[p + 1]) continue;
-        [digits[p], digits[p + 1]] = [digits[p + 1], digits[p]];
-        if (checkDigit(digits) === c) { misses = ["transposition", digits.slice(), p]; break outer; }
-        [digits[p], digits[p + 1]] = [digits[p + 1], digits[p]];
-      }
-      // 递增到下一串（32 进制）
-      for (let p = L - 1; p >= 0; p--) {
-        if (++digits[p] < 32) break;
-        digits[p] = 0;
-      }
-    }
-  }
-  const ms = (performance.now() - t0).toFixed(0);
-  if (misses) {
-    hint.textContent = `发现漏检：${JSON.stringify(misses)}（耗时 ${ms} ms）—— 该拟群不满足 Damm 检出条件！`;
+  hint.textContent = "后端正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个，约 1 秒）";
+  const r = await apiChecksum({ action: "brute", algo: "damm32", n: 32, maxlen });
+  if (!r.ok) { hint.textContent = "后端不可达：" + r.err; this.disabled = false; return; }
+  if (r.miss) {
+    hint.textContent = `发现漏检：${JSON.stringify(r.miss)}（耗时 ${r.ms} ms）—— 该拟群不满足 Damm 检出条件！`;
   } else {
-    hint.textContent = `✓ 穷举 ${count} 个串（长度 ≤ ${maxlen}）完毕：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${ms} ms）`;
+    hint.textContent = `✓ 后端穷举完毕（长度 ≤ ${maxlen}）：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${r.ms} ms）`;
   }
   this.disabled = false;
 });

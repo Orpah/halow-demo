@@ -98,8 +98,8 @@
 <script>
 "use strict";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
-const POLY = 0x23;   // p(t) = t^5 + t + 1
+const CI = {};
+for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
 
 // ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
 const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
@@ -109,81 +109,23 @@ const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":
   "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
   "HK":"中国香港","MO":"中国澳门" };
 
-/* ---- Damm32：拟群 T[x][y] = 2·(x⊕y)，GF(2^5)、p(t)=t^5+t+1 ---- */
-function gfMul(a, b) {
-  let r = 0;
-  for (let i = 0; i < 5; i++) {
-    if (b & 1) r ^= a;
-    b >>= 1;
-    a <<= 1;
-    if (a & 0x20) a ^= POLY;
+/* ---- 算法全部走后端 /api/checksum（单一源：damm32.py / luhn32.py / mod97.py）---- */
+async function apiChecksum(params) {
+  try {
+    return await fetch("/api/checksum?" + new URLSearchParams(params)).then(r => r.json());
+  } catch (e) {
+    console.error("checksum:", e);
+    return { ok: false, err: "后端不可达" };
   }
-  return r & 0x1F;
-}
-const T = (function buildTable() {
-  const t = [];
-  for (let x = 0; x < 32; x++) {
-    const row = [];
-    for (let y = 0; y < 32; y++) row.push(gfMul(2, x ^ y));
-    t.push(row);
-  }
-  return t;
-})();
-function damm32CheckDigit(digits) {
-  let s = 0;
-  for (const d of digits) s = T[s][d];
-  return T[s].indexOf(0);
-}
-function damm32Validate(digits) {
-  let s = 0;
-  for (const d of digits) s = T[s][d];
-  return s === 0;
 }
 
-/* ---- Luhn mod 32：从右往左隔位翻倍，模 32 ---- */
-function luhnSum(digits) {
-  let s = 0, dbl = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    const d = digits[i];
-    if (dbl) { const d2 = d * 2; s += Math.floor(d2 / 32) + (d2 % 32); }
-    else s += d;
-    dbl = !dbl;
-  }
-  return s;
-}
-function luhn32CheckDigit(digits) {
-  for (let c = 0; c < 32; c++)
-    if (luhnSum(digits.concat([c])) % 32 === 0) return c;
-  return 0;  // 理论不可达
-}
-function luhn32Validate(digits) { return luhnSum(digits) % 32 === 0; }
-
-/* ---- Mod 97（IBAN 思路）：字母 A=10..Z=35、数字 0-9 ---- */
-function mod97(s) {
-  let r = 0;
+function validOrgUnique(s) {
+  if (!s) return false;
   for (const ch of s) {
     if (ch === "-") continue;
-    const c = ch.charCodeAt(0);
-    if (ch >= "0" && ch <= "9") r = (r * 10 + (c - 48)) % 97;
-    else if (ch >= "A" && ch <= "Z") r = (r * 100 + (c - 55)) % 97;
+    if (!(ch.toUpperCase() in CI)) return false;
   }
-  return r;
-}
-function mod97Check(s) {
-  return String(98 - mod97(s + "00")).padStart(2, "0");
-}
-function mod97Validate(s) { return mod97(s) === 1; }
-
-/* ---- 通用 ---- */
-function digitsOf(s) {
-  const out = [];
-  for (const ch of s) {
-    if (ch === "-") continue;
-    const u = ch.toUpperCase();
-    if (!(u in CI)) return null;
-    out.push(CI[u]);
-  }
-  return out;
+  return true;
 }
 
 const ALGO_NOTE = {
@@ -193,29 +135,23 @@ const ALGO_NOTE = {
 };
 let activeAlgo = "damm32";
 
-function compute(org) {
-  const d = digitsOf(org);
-  if (!d || d.length === 0) return null;
-  if (activeAlgo === "damm32") {
-    const c = damm32CheckDigit(d);
-    return { check: CROCKFORD[c], digits: d, ok: damm32Validate(d.concat([c])) };
-  }
-  if (activeAlgo === "luhn32") {
-    const c = luhn32CheckDigit(d);
-    return { check: CROCKFORD[c], digits: d, ok: luhn32Validate(d.concat([c])) };
-  }
-  const check = mod97Check(org);
-  return { check, digits: d, ok: mod97Validate(org + "-" + check) };
+async function compute(org) {
+  if (!validOrgUnique(org)) return null;
+  const r = await apiChecksum({ action: "compute", algo: activeAlgo, org_unique: org });
+  return r.ok ? { check: r.check, ok: r.valid } : null;
 }
 
-function refresh() {
+let reqSeq = 0;
+async function refresh() {
+  const my = ++reqSeq;
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
         ver = document.getElementById("verifyOut");
-  const r = compute(org);
+  const r = await compute(org);
+  if (my !== reqSeq) return;             // 丢弃过期响应（快速输入防乱序）
   if (!r) {
     out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
     return;
@@ -227,22 +163,20 @@ function refresh() {
 }
 
 /* ---- 单字符替换演示（改 ORG-UNIQUE 末位） ---- */
-document.getElementById("btnDemo").addEventListener("click", () => {
+document.getElementById("btnDemo").addEventListener("click", async () => {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
-  const r = compute(org);
+  const r = await compute(org);
   const out = document.getElementById("demoResult");
   if (!r) { out.textContent = "非法输入"; return; }
-  const flipped = CROCKFORD[(r.digits[r.digits.length - 1] + 1) % 32];
+  const idx = CROCKFORD.indexOf(org.slice(-1));
+  const flipped = CROCKFORD[(Math.max(idx, 0) + 1) % 32];
   const badOrg = org.slice(0, -1) + flipped;
-  const badD = digitsOf(badOrg);
-  let badOk;
-  if (activeAlgo === "damm32") badOk = damm32Validate(badD.concat([damm32CheckDigit(r.digits)]));
-  else if (activeAlgo === "luhn32") badOk = luhn32Validate(badD.concat([luhn32CheckDigit(r.digits)]));
-  else badOk = mod97Validate(badOrg + "-" + r.check);
+  const bad = await apiChecksum({ action: "verify", algo: activeAlgo,
+                                  body: badOrg + "-" + r.check });
   out.textContent =
     `原始  ${cc}-${org}-${r.check}   → 校验 ${r.ok ? "通过" : "失败"}\n` +
-    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${badOk ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${bad.valid ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
 });
 
 /* ---- tab 切换 ---- */

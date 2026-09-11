@@ -50,6 +50,31 @@ import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实�
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
+import damm32 as d32                      # noqa: E402  校验算法单一源
+import luhn32 as l32                      # noqa: E402
+import mod97 as m97                       # noqa: E402
+
+
+def _check_of(algo, org_unique):
+    """算校验位（ORG-UNIQUE，不含 CC）——统一走 Python 参考实现。"""
+    if algo == "damm32":
+        return d32.damm32_check(org_unique)
+    if algo == "luhn32":
+        return l32.luhn32_check(org_unique)
+    if algo == "mod97":
+        return m97.mod97_check(org_unique)
+    raise ValueError(f"未知算法: {algo}")
+
+
+def _verify_of(algo, body):
+    """校验 ORG-UNIQUE-CHECK（不含 CC）。"""
+    if algo == "damm32":
+        return d32.damm32_verify(body)
+    if algo == "luhn32":
+        return l32.luhn32_verify(body)
+    if algo == "mod97":
+        return m97.mod97_verify(body)
+    raise ValueError(f"未知算法: {algo}")
 
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
@@ -487,6 +512,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/api/ts/query"):
             self._api_ts_query()
             return
+        if self.path.startswith("/api/checksum"):
+            self._api_checksum()
+            return
         if self.path == "/api/events":
             self._sse()
             return
@@ -709,6 +737,53 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send(200, json.dumps({"ok": False,
                                             "err": f"unknown action: {action}"}).encode())
+        except Exception as e:
+            self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
+
+    def _api_checksum(self):
+        """校验码工具：算法单一源（damm32.py / luhn32.py / mod97.py）。
+
+        GET /api/checksum?action=compute&algo=damm32&org_unique=WH01-9AF3C1D2
+            action=verify&algo=luhn32&body=WH01-9AF3C1D2-E
+            action=table&algo=damm32            → 32×32 拟群表 + 性质
+            action=brute&algo=damm32&n=32&maxlen=3 → 穷举验证
+        """
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+
+        def g(k, d=""):
+            return (qs.get(k) or [d])[0]
+
+        action = g("action", "compute")
+        algo = g("algo", "damm32").lower()
+        try:
+            if action == "compute":
+                org = g("org_unique").strip().upper()
+                check = _check_of(algo, org)
+                self._send(200, json.dumps({"ok": True, "algo": algo,
+                    "org_unique": org, "check": check,
+                    "valid": _verify_of(algo, org + "-" + check)}).encode())
+            elif action == "verify":
+                body = g("body").strip().upper()
+                self._send(200, json.dumps({"ok": True, "algo": algo,
+                    "valid": _verify_of(algo, body)}).encode())
+            elif action == "table":
+                T = d32._TABLE
+                okv, checks = d32.verify_table(T)
+                self._send(200, json.dumps({"ok": True, "algo": "damm32",
+                    "crockford": d32.CROCKFORD, "quasigroup": T,
+                    "valid": okv, "checks": checks}).encode())
+            elif action == "brute":
+                n = int(g("n", "32") or 32)
+                maxlen = int(g("maxlen", "3") or 3)
+                t0 = time.time()
+                miss = d32.brute_verify(d32._TABLE, n, maxlen)
+                ms = int((time.time() - t0) * 1000)
+                self._send(200, json.dumps({"ok": True,
+                    "miss": (list(miss) if miss else None), "ms": ms}).encode())
+            else:
+                self._send(200, json.dumps({"ok": False,
+                    "err": f"unknown action: {action}"}).encode())
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
