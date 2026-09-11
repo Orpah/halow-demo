@@ -319,6 +319,7 @@ const TILE_PROVIDERS = {
   custom: { url: "", attr: "" },
 };
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
+let lRings = [], lEstLoc = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计
 
 function baseLat() { return parseFloat($("baseLat").value); }
 function baseLng() { return parseFloat($("baseLng").value); }
@@ -331,14 +332,23 @@ function currentTileUrl() {
   const key = $("tileSrc").value;
   return key === "custom" ? $("tileUrl").value.trim() : TILE_PROVIDERS[key].url;
 }
+/* 地图上的测点来源：模拟模式 = 测点表；真实模式 = 站位表。
+   不区分模式的话，真实模式地图会画出模拟模式的默认测点（而且不会报错）。 */
+function mapPoints() {
+  return dsMode === "real"
+    ? stations.map(s => ({ x: s.x, y: s.y, label: (s.name || s.sid) }))
+    : readAnchors().map(a => ({ x: a.x, y: a.y, label: a.x + ", " + a.y }));
+}
 function refreshRouters() {
   if (!lmap) return;
+  const pts = mapPoints();
+  mapSig = pts.map(p => p.x + "," + p.y + "," + p.label).join("|");
   lRouters.forEach(m => m.remove());
   lRouters = [];
-  for (const a of readAnchors()) {
+  for (const a of pts) {
     lRouters.push(L.circleMarker(toLatLng(a.x, a.y), {
       color: "#58a6ff", radius: 6, fillColor: "#58a6ff", fillOpacity: 0.85,
-    }).addTo(lmap).bindTooltip(`${a.x}, ${a.y}`));
+    }).addTo(lmap).bindTooltip(a.label));
   }
 }
 function ensureMap() {
@@ -350,10 +360,15 @@ function ensureMap() {
   lEstPath = L.polyline([], { color: "#f85149", weight: 2 }).addTo(lmap);
   lTrueMarker = L.marker([0, 0]).addTo(lmap);
   lEstMarker = L.marker([0, 0]).addTo(lmap);
+  lRings = [];
+  lEstLoc = null;        // 懒创建（Path 没有 setOpacity，用 add/remove 控制显隐）
   refreshRouters();
 }
 function drawMap() {
   ensureMap();
+  lTrueMarker.setOpacity(1); lEstMarker.setOpacity(1);
+  if (lEstLoc) { lmap.removeLayer(lEstLoc); lEstLoc = null; }
+  lRings.forEach(r => r.remove()); lRings = [];
   if ($("showTrue").checked) lTruePath.setLatLngs(trueHist.map(p => toLatLng(p.x, p.y)));
   lEstPath.setLatLngs(estHist.map(p => toLatLng(p.x, p.y)));
   const lt = trueHist[trueHist.length - 1], le = estHist[estHist.length - 1];
@@ -442,13 +457,24 @@ $("btnAdd").onclick = () => {
 $("pathType").onchange = () => { client = { x: 0, y: 0 }; heading = 0; trueHist.length = 0; estHist.length = 0; draw(); };
 
 /* 视图/瓦片/基点切换 */
-$("view").onchange = () => {
-  $("map").style.display = $("view").value === "map" ? "block" : "none";
-  $("canvas").style.display = $("view").value === "map" ? "none" : "block";
-  if ($("view").value === "map") { ensureMap(); draw(); }
-};
-$("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; } if ($("view").value === "map") ensureMap(); };
-$("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; } if ($("view").value === "map") ensureMap(); };
+/* 视图切换：模拟=轨迹画布 / 真实=站位画布  ⇄  地理地图 */
+function applyView() {
+  const mapView = $("view").value === "map";
+  $("map").style.display = mapView ? "block" : "none";
+  $("canvas").style.display = mapView ? "none" : "block";
+  $("canvasLoc").style.display = mapView ? "none" : "block";
+  if (dsMode === "real") {
+    $("hint3").textContent = mapView ? T("tk_hint3_realm") : T("tk_hint3_real");
+    renderStations();       // 真实模式：画布与地图都由它刷新（drawMapLoc 内部 ensureMap）
+    return;
+  }
+  if (!mapView) return;
+  ensureMap();
+  draw();
+}
+$("view").onchange = applyView;
+$("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } if ($("view").value === "map") applyView(); };
+$("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } if ($("view").value === "map") applyView(); };
 $("baseLat").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 $("baseLng").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 
@@ -783,6 +809,10 @@ function renderStations() {
     setInp(".sty", s.y);
   });
   drawLoc(obs, est);
+  // 地图视图（真实模式）：站位标记变了就重画，并刷新距离环/估计
+  const msig = mapPoints().map(p => p.x + "," + p.y + "," + p.label).join("|");
+  if (lmap && msig !== mapSig) refreshRouters();
+  if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est);
   $("stUsed").textContent = T("tk_st_used_fmt")
     .replace("{n}", obs.length).replace("{t}", stations.length);
   // 定位结果 + 质量：没有质量指标时，退化输入（如恒定 RSSI）会给出看着正常、实际无意义的坐标
@@ -852,13 +882,38 @@ function drawLoc(obs, est) {
   if (est) cross(ctx, cx + est.x * SCALE, cy - est.y * SCALE, "#f85149");
 }
 
+/* 真实模式地图视图：站位 + 距离环（半径 = 估计距离，米）+ 定位估计。
+   同时清掉模拟轨迹/标记 —— 它们在地图上没有意义。 */
+function drawMapLoc(obs, est) {
+  ensureMap();
+  lTruePath.setLatLngs([]); lEstPath.setLatLngs([]);
+  lTrueMarker.setOpacity(0); lEstMarker.setOpacity(0);
+  lRings.forEach(r => r.remove());
+  lRings = obs.map(o => L.circle(toLatLng(o.s.x, o.s.y), {
+    radius: o.dist, color: "#58a6ff", weight: 1, opacity: 0.45, fill: false,
+  }).addTo(lmap));
+  if (est) {
+    const ll = toLatLng(est.x, est.y);
+    if (!lEstLoc) {
+      lEstLoc = L.circleMarker(ll, {
+        color: "#f85149", radius: 7, weight: 2,
+        fillColor: "#f85149", fillOpacity: 0.9,
+      }).addTo(lmap);
+    } else {
+      lEstLoc.setLatLng(ll);
+    }
+  } else if (lEstLoc) {
+    lmap.removeLayer(lEstLoc); lEstLoc = null;
+  }
+}
+
 function applyMode() {
   dsMode = $("dsMode").value;
   const real = dsMode === "real";
   $("rowSimPath").style.display = real ? "none" : "";
   $("rowSimRun").style.display = real ? "none" : "";
   $("head1").textContent = real ? T("tk_sec1_real") : T("tk_sec1");
-  $("cardMap").style.display = real ? "none" : "";
+  $("cardMap").style.display = "";      // 两模式都留着：真实模式也有地图视图（站位/距离环/估计）
   $("cardAnchors").style.display = real ? "none" : "";
   $("cardStations").style.display = real ? "" : "none";
   $("statSim").style.display = real ? "none" : "";
@@ -868,15 +923,14 @@ function applyMode() {
   if (realTimer) { clearInterval(realTimer); realTimer = null; }
   if (real) {
     if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = T("tk_run"); }
-    $("view").value = "canvas";
-    $("map").style.display = "none";
-    $("canvas").style.display = "block";
     refreshSnList().then(loadReal);
     loadStations();
     if ($("dsAuto").checked) realTimer = setInterval(loadReal, 2000);
   } else {
+    refreshRouters();          // 回模拟模式 → 地图标记换回测点表
     draw(); updateStat(null);
   }
+  applyView();
 }
 
 $("dsMode").onchange = applyMode;
