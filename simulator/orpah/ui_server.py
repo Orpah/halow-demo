@@ -543,6 +543,8 @@ import socketserver                                      # noqa: E402
 STATIC_DIR = os.path.join(HERE, "ui", "static")
 # ui_i18n.js 单一源在 halow-demo 主 UI（simulator/tools/ui/static），这里只读不复制
 TOOLS_STATIC_DIR = os.path.join(HERE, "..", "tools", "ui", "static")
+# 回放单次返回的上报点上限（防一把抱走整库；超了页面提示 truncated）
+REPLAY_MAX_POINTS = 20000
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -588,6 +590,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/ts/events"):
             self._api_ts_events()
+            return
+        if self.path.startswith("/api/replay"):
+            self._api_replay()
             return
         if self.path.startswith("/api/checksum"):
             self._api_checksum()
@@ -1014,6 +1019,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps(resp).encode())
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
+
+    def _api_replay(self):
+        """GET /api/replay?sn=<SN>[&from=<ms>&to=<ms>&minutes=N][&evlimit=N]
+
+        回放数据源：**IoTDB 时间窗**（重启不丢、按时间升序） ——
+        `points` = 该设备在该窗内的上报点；`events` = 该窗内的业务事件（发布/发现/验签/立案/密钥…）。
+        定位计算**不在服务端**：页面拿 points + 站位表用 pos.js 自己算（与实时页同一内核）。
+
+        窗口上限（防一把抱走整库）：`REPLAY_MAX_MIN`（默认 720 分 = 12h）。
+        点数/事件数也有上限，超了置 `truncated`。
+        """
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        sn = (qs.get("sn") or [""])[0].strip()
+        if not sn:
+            self._send(200, json.dumps({"ok": False, "code": "no_sn",
+                                        "err": "no_sn"}).encode())
+            return
+        now_ms = int(time.time() * 1000)
+        try:
+            to_ms = int((qs.get("to") or [now_ms])[0])
+            minutes = int((qs.get("minutes") or [30])[0])
+            ev_limit = int((qs.get("evlimit") or [2000])[0])
+        except ValueError:
+            self._send(200, json.dumps({"ok": False, "code": "bad_param",
+                                        "err": "bad_param"}).encode())
+            return
+        minutes = min(max(minutes, 1), 720)          # 1 分 ~ 12 小时
+        from_q = (qs.get("from") or [""])[0].strip()
+        from_ms = int(from_q) if from_q.isdigit() else to_ms - minutes * 60_000
+        if from_ms > to_ms:                          # 容错：反了就换过来
+            from_ms, to_ms = to_ms, from_ms
+        if to_ms - from_ms > 720 * 60_000:
+            from_ms = to_ms - 720 * 60_000
+
+        points = APP.tsdb.query_report_range(sn, from_ms, to_ms,
+                                             limit=REPLAY_MAX_POINTS)
+        events = APP.tsdb.query_events_range(from_ms, to_ms, limit=ev_limit)
+        ts_ok = points is not None
+        ev_ok = events is not None
+        out = {
+            "ok": ts_ok,                # points 拿不到 = IoTDB 未就绪（页面按此提示）
+            "sn": sn,
+            "from": from_ms, "to": to_ms,
+            "points": points or [],
+            "events": (events or []) if ev_ok else [],
+            "counts": {"points": len(points or []),
+                       "events": len(events or [])},
+            "truncated": bool(points and len(points) >= REPLAY_MAX_POINTS),
+            "events_ok": ev_ok,
+        }
+        self._send(200, json.dumps(out).encode())
 
     def _api_checksum(self):
         """校验码工具：算法单一源（damm32.py / luhn32.py / mod97.py）。

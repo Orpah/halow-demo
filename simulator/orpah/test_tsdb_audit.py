@@ -28,6 +28,7 @@ class FakeSession:
         self.deletes = []
         self.query_sql = []
         self.rows = []            # [(ts, [etype, sn, detail, actor])]
+        self.cols = ["etype", "sn", "detail", "actor"]
 
     def insert_record(self, path, ts, meas, types, vals):
         self.inserts.append((path, ts, list(meas), list(vals)))
@@ -37,12 +38,18 @@ class FakeSession:
 
     def execute_query_statement(self, sql):
         self.query_sql.append(sql)
-        return FakeDataset(self.rows)
+        # 列名随 SQL 变：上报点取 3 列，事件取 4 列（_read_rows 靠列名建字段）
+        self.cols = (["rssi", "seq", "router_id"] if "rssi" in sql
+                     else ["etype", "sn", "detail", "actor"])
+        return FakeDataset(self.rows, self.cols)
 
 
 class FakeField:
     def __init__(self, v):
-        self.value = v if v is None else str(v).encode()
+        if v is None or isinstance(v, (int, float)):
+            self.value = v                      # 数值列（rssi/seq）原样返回
+        else:
+            self.value = str(v).encode()
 
 
 class FakeRow:
@@ -57,13 +64,13 @@ class FakeRow:
 
 
 class FakeDataset:
-    def __init__(self, rows):
+    def __init__(self, rows, cols=None):
         self._rows = [FakeRow(t, v) for t, v in rows]
         self._i = 0
+        self._cols = cols or ["etype", "sn", "detail", "actor"]
 
     def get_column_names(self):
-        return ["Time", "root.orpah.events.etype", "root.orpah.events.sn",
-                "root.orpah.events.detail", "root.orpah.events.actor"]
+        return ["Time"] + ["root.orpah.events." + c for c in self._cols]
 
     def has_next(self):
         return self._i < len(self._rows)
@@ -133,12 +140,45 @@ t = fresh(days=7)
 t.purge_events()
 want = int((time.time() - 7 * 86400) * 1000)
 ck("days=7 生效", abs(t.session.deletes[-1][1] - want) < 5000)
+
+print("== 4. 时间窗查询（回放用） ==")
+t = fresh()
+out = t.query_report_range("CN-WH01-A", 1000, 2000)
+ck("上报点窗：时间写进 WHERE（索引原生）",
+   "WHERE time >= 1000 AND time <= 2000" in t.session.query_sql[-1], t.session.query_sql[-1])
+ck("上报点窗：按时间升序（回放按序消费）",
+   "ORDER BY time ASC" in t.session.query_sql[-1], t.session.query_sql[-1])
+ck("无数据返回空列表（非 None）", out == [], repr(out))
+
+t = fresh(rows=[(1000, [-55, 7, "R1"]), (1500, [-60, 8, "R2"])])
+out = t.query_report_range("CN-WH01-A", 2000, 1000)          # 上下界传反
+ck("上下界传反自动纠正", "time >= 1000 AND time <= 2000" in t.session.query_sql[-1],
+   t.session.query_sql[-1])
+ck("上报点字段映射 rssi/seq/router_id",
+   out and out[0] == {"t": 1000, "rssi": -55, "seq": 7, "router_id": "R1"}, str(out[:1]))
+
+rows = [(1000, ["publish", "", "n=1", None]),
+        (2000, ["case_mark", "CN-WH01-A", "C1", "shijh"])]
+t = fresh(rows=rows)
+out = t.query_events_range(500, 1500)
+ck("事件窗：时间写进 WHERE", "WHERE time >= 500 AND time <= 1500" in t.session.query_sql[-1],
+   t.session.query_sql[-1])
+ck("事件窗：升序", "ORDER BY time ASC" in t.session.query_sql[-1])
+ck("事件窗：老行 actor 归一为空串", out and out[0].get("actor") == "", repr(out[:1]))
+out = t.query_events_range(500, 2500, etype="case_mark")
+ck("事件窗：etype 仍本地过滤", len(out) == 1 and out[0]["etype"] == "case_mark", str(out))
+ck("事件窗：limit 截断", len(t.query_events_range(500, 2500, limit=1)) == 1)
+
+t = fresh()
+t.available = False
+ck("未就绪 → 两个窗查询都返回 None（页面据此提示 IoTDB 不可达）",
+   t.query_report_range("X", 0, 1) is None and t.query_events_range(0, 1) is None)
 t = fresh(days=30)
 t.available = False
 t.session = None
 ck("未连库 → 不清理不报错", t.purge_events() is None)
 
-print("== 4. 环境变量解析 ==")
+print("== 5. 环境变量解析 ==")
 ck("默认 30 天", tsdb.EVENT_RETENTION_DAYS == 30, str(tsdb.EVENT_RETENTION_DAYS))
 ck("空串回退默认", tsdb._env_int("ORPAH_NOT_SET_XYZ", 30) == 30)
 import os

@@ -37,6 +37,21 @@
   改完请跑 `python orpah/test_keys.py`（生命周期单测）+ `python orpah/demo_id.py`（端到端验收）；
   实在要换算法就删 `orpah.db` 重新播种（会一并清掉清册/案件/站位）。
 - **orpah 进程不要改客户端 SN 做测试**（会真的造出新的密钥代次并写进密钥库/审计）。
+- **IoTDB 查询：时间可进 `WHERE`，值不行（2026-09-12，回放要按窗取数）**：
+  - **时间过滤写进 SQL**（`WHERE time >= <ms> AND time <= <ms>` + `ORDER BY time ASC`）——
+    时间戳是 IoTDB 的原生索引，准确且快。`tsdb.query_report_range` / `query_events_range`
+    就是这么取「某设备某时间窗」的（回放用，见 `orpah/API.md` §10）。
+  - **值过滤（etype/sn）不要写进 WHERE**，在本地筛（`query_events*` 就是多取几倍再 filter）——
+    树模型对「非投影列」做值过滤不可靠（历史坑）。两件事别混。
+  - 历史回读一律**倒序**（最近优先），回放窗口一律**升序**（按时间轴消费）。
+- **回放页硬规则（2026-09-12）**：
+  - **定位算法只有一份**：`orpah/ui/static/pos.js`（`trilaterate`/`wlsLocate`/`ellipseOf`/
+    `obsOfStation`/`qualityOf`…）。`track.html` 与 `replay.html` 都用它 —— 别在页面里
+    再抄一份算法（回放与实时必须逐位一致）。
+  - **不看未来**：`obsOfStation` 内置 `p.t <= t`，回放某时刻只能用该时刻**之前**的样本。
+    加任何「预取/缓存未来样本」的优化都会破坏这条。
+  - 页面切换语言会带 `?lang=` **整页重载**（`ui_i18n.js` 的设计），因此 JS 动态写出的文案
+    切语言后自动刷新，不用各页自己监听。
 - **`host/sim.py` 新增「host 数据口」**（`--host <port>` / `Core(host_port=)`，缺省不启用）：
   语义 = SPI MACBUS `DATA_TX`(host 注入→空口转发) / `DATA_RX`(收帧推 host)；帧格式同空口
   `AA 55 TYPE LEN CRC payload`。不加参数完全不影响原有行为（24 项回归仍过）。

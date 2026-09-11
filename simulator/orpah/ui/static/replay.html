@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-i18n-doc-title="doc_replay">
+<head>
+<meta charset="utf-8">
+<title>回放 — ORPAH-over-HaLow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css?v=20260912b">
+<style>
+  .back { margin-left: 10px; }
+  .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row label { display: flex; align-items: center; gap: 6px; }
+  .row input, .row select {
+    background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .row input[type=number] { width: 80px; }
+  canvas { background: #0d1117; border: 1px solid var(--bd); border-radius: 8px;
+           margin-top: 10px; display: block; max-width: 100%; }
+  .plyr { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .plyr input[type=range] { flex: 1; min-width: 220px; accent-color: var(--acc); }
+  .clock { font-size: 13px; color: var(--mut); }
+  .clock b { color: var(--txt); font-size: 15px; }
+  .stat { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; }
+  .stat .cell { display: flex; flex-direction: column; gap: 2px; }
+  .stat .k { color: var(--mut); font-size: 12px; }
+  .stat .v { font-size: 13px; }
+  .v-ok { color: var(--grn); } .v-err { color: var(--org); } .v-bad { color: var(--red); }
+  ul.tl { list-style: none; margin: 8px 0 0; padding: 0; max-height: 320px; overflow: auto; }
+  ul.tl li { display: flex; gap: 10px; align-items: baseline; font-size: 12px;
+             padding: 3px 6px; border-left: 3px solid transparent; border-radius: 4px; }
+  ul.tl li .t { color: var(--mut); }
+  ul.tl li .ty { min-width: 108px; }
+  ul.tl li .ac { color: var(--acc); }
+  ul.tl li.future { opacity: .38; }
+  ul.tl li.cur { background: #161b22; border-left-color: var(--acc); }
+  ul.tl li.sec .ty { color: var(--red); }
+  ul.tl li.warn .ty { color: var(--org); }
+  ul.tl li.ok .ty { color: var(--grn); }
+  .hint.err { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a>
+    <span class="brand-name" data-i18n="nav_replay">回放</span>
+    <span class="sub" data-i18n="rp_sub">事后按时间段复盘：定位轨迹 + 业务事件 + 安全事件</span>
+    <a class="btn back" href="track.html" data-i18n="nav_track">定位与轨迹</a>
+    <a class="btn back" href="keys.html" data-i18n="nav_keys">密钥管理</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
+  </div>
+</header>
+
+<!-- ============ 0 · 数据源与时间段（数据来自 IoTDB 时间窗，重启不丢） ============ -->
+<section class="card">
+  <h3 data-i18n="rp_sec0">0 · 数据源与时间段</h3>
+  <div class="row">
+    <label><span data-i18n="rp_sn">设备 SN</span>
+      <select id="rpSn" style="min-width:260px"></select></label>
+    <label><span data-i18n="rp_from">起始</span>
+      <input id="rpFrom" type="datetime-local" step="60"></label>
+    <label><span data-i18n="rp_to">结束</span>
+      <input id="rpTo" type="datetime-local" step="60"></label>
+    <button class="btn" id="rpLoad" data-i18n="rp_load">拉取</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <span class="hint" data-i18n="rp_preset">快捷：</span>
+    <button class="btn sm" data-min="10">10</button>
+    <button class="btn sm" data-min="30">30</button>
+    <button class="btn sm" data-min="60">60</button>
+    <button class="btn sm" data-min="180">180</button>
+    <span class="hint" data-i18n="rp_preset_unit">分钟（结束 = 现在）</span>
+    <label>A <input id="rpA" type="number" step="0.1" value="-40"></label>
+    <label>n <input id="rpN" type="number" step="0.1" value="2.5"></label>
+  </div>
+  <p class="hint" id="rpInfo"></p>
+  <p class="hint" data-i18n="rp_hint">回放读 IoTDB 时间窗（重启不丢）；定位用与实时页**同一个**内核（pos.js），站位按当时的悬停时间窗取 RSSI 中位数。回放只看某时刻**之前**的样本 —— 不会"看到未来"。</p>
+</section>
+
+<!-- ============ 1 · 回放 ============ -->
+<section class="card">
+  <h3 data-i18n="rp_sec1">1 · 回放</h3>
+  <div class="plyr">
+    <button class="btn primary" id="rpPlay" data-i18n="rp_play">▶ 播放</button>
+    <label><span data-i18n="rp_speed">速度</span>
+      <select id="rpSpeed">
+        <option value="1">1×</option><option value="5">5×</option>
+        <option value="20">20×</option><option value="60" selected>60×</option>
+        <option value="300">300×</option><option value="1200">1200×</option>
+      </select></label>
+    <input id="rpSeek" type="range" min="0" max="1000" value="0">
+    <span class="clock"><b id="rpClock">--:--:--</b> <span id="rpSpan"></span></span>
+  </div>
+  <canvas id="canvasReplay" width="620" height="420"></canvas>
+  <p class="hint" data-i18n="rp_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、灰点=当时无观测的站位。</p>
+  <div class="stat mono">
+    <div class="cell"><span class="k" data-i18n="rp_lab_used">参与定位</span><span class="v" id="rpUsed">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_loc">定位估计</span><span class="v v-ok" id="rpLoc">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_res">残差 RMS</span><span class="v" id="rpRes">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_gdop">GDOP</span><span class="v" id="rpGdop">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_rad">搜索半径</span><span class="v" id="rpRad">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_obs">当时 RSSI</span><span class="v" id="rpObs">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_last">最近事件</span><span class="v" id="rpLast">-</span></div>
+  </div>
+</section>
+
+<!-- ============ 2 · 事件时间线 ============ -->
+<section class="card">
+  <h3 data-i18n="rp_sec2">2 · 事件时间线</h3>
+  <div class="row">
+    <label><input type="checkbox" id="rpOnlySec"> <span data-i18n="rp_only_sec">只看安全事件（验签/密钥）</span></label>
+    <span class="hint" id="rpEvInfo"></span>
+  </div>
+  <ul class="tl" id="rpTimeline"></ul>
+</section>
+
+<script src="ui_i18n.js"></script>
+<script src="pos.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+const SCALE = 4;                       // 米 → 像素（与实时页同一比例）
+function clockOf(ms) {
+  const d = new Date(ms), p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function dateTimeOf(ms) {
+  const d = new Date(ms), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function msOfInput(v) { const ms = Date.parse(v); return isNaN(ms) ? null : ms; }
+function durLeft(sec) {                // 与实时页同一套时长词条
+  sec = Math.max(0, Math.floor(sec || 0));
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const vals = { d, h, m, s };
+  let out = T(d ? "dur_dh" : (h ? "dur_hm" : (m ? "dur_ms" : "dur_s")));
+  Object.keys(vals).forEach(k => { out = out.split("{" + k + "}").join(String(vals[k])); });
+  return out;
+}
+
+/* 事件类型 → 展示名 / 颜色档（与事件历史同一套词条 evt_type_*） */
+const SEC_TYPES = new Set(["id_report", "id_reject", "key_issue", "key_rotate",
+                           "key_retire", "key_revoke", "key_unrevoke"]);
+function evtLabel(v) {
+  const s = T("evt_type_" + v);
+  return s === "evt_type_" + v ? (v || "?") : s;
+}
+function evtClass(v) {
+  if (v === "id_reject" || v === "key_revoke") return "sec";
+  if (v === "case_mark" || v === "case_open" || v === "case_close") return "warn";
+  if (v === "found" || v === "case_found") return "ok";
+  return "";
+}
+
+const S = {                          // 回放状态
+  sn: "", from: 0, to: 0,
+  points: [], events: [], stations: [],
+  t: 0, playing: false, timer: null,
+  subs: {},                          // sid → 该站位窗口内的样本（预筛，避免逐帧扫全量）
+  trail: [],                         // 已回放出的估计点（画轨迹）
+  lastEvT: -1,
+};
+
+/* ---------------- 拉取 ---------------- */
+function rpInfo(msg, cls) {
+  $("rpInfo").textContent = msg || "";
+  $("rpInfo").className = "hint" + (cls ? " " + cls : "");
+}
+
+async function loadSnList() {
+  try {
+    const r = await fetch("/api/registry").then(x => x.json());
+    const opts = (r.devices || []).map(d => {
+      const p = (r.persons || []).find(x => x.pid === d.person_id);
+      return { sn: d.sn, label: d.sn + (p ? " · " + p.name : "") + " · " + (d.status || "") };
+    });
+    $("rpSn").innerHTML = opts.map(o =>
+      `<option value="${esc(o.sn)}">${esc(o.label)}</option>`).join("");
+  } catch (e) { /* 离线时保持空 */ }
+}
+
+async function loadReplay() {
+  const sn = $("rpSn").value;
+  if (!sn) { rpInfo(T("rp_no_sn"), "err"); return; }
+  const from = msOfInput($("rpFrom").value), to = msOfInput($("rpTo").value);
+  if (from === null || to === null || to <= from) { rpInfo(T("rp_bad_range"), "err"); return; }
+  stop();
+  rpInfo(T("rp_loading"));
+  try {
+    const [rep, st] = await Promise.all([
+      fetch(`/api/replay?sn=${encodeURIComponent(sn)}&from=${from}&to=${to}`).then(x => x.json()),
+      fetch("/api/stations").then(x => x.json()),
+    ]);
+    if (!rep.ok) { rpInfo(T("rp_offline"), "err"); return; }
+    S.sn = sn; S.from = rep.from; S.to = rep.to;
+    S.points = rep.points || [];
+    S.events = rep.events || [];
+    S.stations = st.stations || [];
+    S.t = S.from; S.trail = []; S.lastEvT = -1;
+    /* 预筛：把样本按站位窗口分组一次（obsOfStation 仍做语义判断，这里只是省掉逐帧扫全量） */
+    S.subs = {};
+    for (const s of S.stations) {
+      const t1 = (s.t1 === null || s.t1 === undefined) ? Infinity : s.t1;
+      S.subs[s.sid] = (s.t0 === null || s.t0 === undefined)
+        ? [] : S.points.filter(p => p.t >= s.t0 && p.t < t1);
+    }
+    $("rpEvInfo").textContent = T("rp_counts")
+      .replace("{p}", S.points.length).replace("{e}", S.events.length)
+      + (rep.truncated ? " · " + T("rp_truncated") : "");
+    renderTimeline();
+    render();
+    rpInfo("");
+  } catch (e) {
+    rpInfo(T("err_offline"), "err");
+  }
+}
+
+/* ---------------- 回放推进 ---------------- */
+function tick() {
+  const speed = parseFloat($("rpSpeed").value) || 60;
+  S.t += 100 * speed;                     // 每 100ms 帧推进 速度×0.1s
+  if (S.t >= S.to) { S.t = S.to; stop(); }
+  render();
+}
+function play() {
+  if (!S.points.length && !S.events.length) return;
+  if (S.t >= S.to) S.t = S.from, S.trail = [];
+  S.playing = true;
+  $("rpPlay").textContent = T("rp_pause");
+  if (S.timer) clearInterval(S.timer);
+  S.timer = setInterval(tick, 100);
+}
+function stop() {
+  S.playing = false;
+  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  $("rpPlay").textContent = T("rp_play");
+}
+
+/* ---------------- 渲染 ---------------- */
+function obsAtNow() {
+  const A = parseFloat($("rpA").value), n = parseFloat($("rpN").value);
+  const out = [];
+  for (const s of S.stations) {
+    const o = obsOfStation(s, S.subs[s.sid] || [], S.t);   // 共用语义：绑定优先 / 窗口内中位数 / 不见未来
+    if (o) out.push({ s, rssi: o.rssi, n: o.n, src: o.src, dist: distFromRssi(o.rssi, A, n) });
+  }
+  return out;
+}
+
+function render() {
+  const obs = obsAtNow();
+  const estLin = obs.length >= 2
+    ? trilaterate(obs.map(x => ({ x: x.s.x, y: x.s.y })), obs.map(x => x.dist),
+                  S.trail.length ? S.trail[S.trail.length - 1] : null)
+    : null;
+  const wls = obs.length >= 2 ? wlsLocate(obs, estLin) : null;
+  const est = (wls && wls.ok) ? { x: wls.x, y: wls.y } : estLin;
+  const q = qualityOf(obs, est);
+  const ell = (wls && wls.ok) ? wls.ellipse : null;
+
+  if (est) {
+    const last = S.trail[S.trail.length - 1];
+    if (!last || Math.hypot(last.x - est.x, last.y - est.y) > 1e-6) S.trail.push(est);
+    if (S.trail.length > 4000) S.trail.shift();
+  }
+  draw(obs, est, ell);
+
+  /* 面板 */
+  $("rpUsed").textContent = T("rp_st_used_fmt")
+    .replace("{n}", obs.length).replace("{t}", S.stations.length);
+  $("rpLoc").textContent = est ? `( ${est.x.toFixed(1)}, ${est.y.toFixed(1)} )` : T("rp_nosol");
+  $("rpLoc").className = "v " + (est ? "v-ok" : "v-bad");
+  $("rpRes").textContent = q ? T("rp_res_fmt").replace("{v}", q.rms.toFixed(1)) : "-";
+  $("rpGdop").textContent = (q && q.gdop !== null)
+    ? q.gdop.toFixed(2) + " (" + T("tk_g_" + gdopGrade(q.gdop)) + ")" : "-";
+  $("rpRad").textContent = ell ? T("rp_rad_fmt").replace("{v}", ell.radius.toFixed(1)) : "-";
+  $("rpObs").textContent = obs.length
+    ? obs.map(o => (o.s.name || o.s.sid) + " " + o.rssi.toFixed(0)).join(" · ") : "-";
+  const ev = lastEvent();
+  $("rpLast").textContent = ev
+    ? clockOf(ev.t) + " " + evtLabel(ev.etype) + (ev.sn ? " " + ev.sn : "") : "-";
+
+  /* 进度与时刻 */
+  const span = Math.max(S.to - S.from, 1);
+  $("rpSeek").value = Math.round((S.t - S.from) / span * 1000);
+  $("rpClock").textContent = clockOf(S.t);
+  $("rpSpan").textContent = T("rp_span_fmt").replace("{v}", durLeft(span / 1000));
+  renderTimeline();
+}
+
+function lastEvent() {
+  let last = null;
+  for (const e of S.events) { if (e.t <= S.t) last = e; else break; }
+  return last;
+}
+
+function draw(obs, est, ell) {
+  const c = $("canvasReplay"), ctx = c.getContext("2d");
+  const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#1c2128"; ctx.lineWidth = 1;
+  for (let gx = 0; gx <= W; gx += 50) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+  for (let gy = 0; gy <= H; gy += 50) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+  ctx.strokeStyle = "#30363d";
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+
+  const seen = {};
+  obs.forEach(o => { seen[o.s.sid] = 1; });
+  S.stations.forEach(s => {                          // 当时无观测 → 灰点
+    if (seen[s.sid]) return;
+    ctx.fillStyle = "rgba(139,148,158,.55)";
+    ctx.fillRect(cx + s.x * SCALE - 3, cy - s.y * SCALE - 3, 6, 6);
+  });
+  obs.forEach(o => {                                 // 站位 + 距离环
+    const sx = cx + o.s.x * SCALE, sy = cy - o.s.y * SCALE;
+    ctx.strokeStyle = "rgba(88,166,255,.30)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(sx, sy, o.dist * SCALE, 0, 2 * Math.PI); ctx.stroke();
+    ctx.fillStyle = "#58a6ff";
+    ctx.fillRect(sx - 4, sy - 4, 8, 8);
+    ctx.fillStyle = "#c9d1d9"; ctx.font = "11px monospace";
+    ctx.fillText(o.s.name || o.s.sid, sx + 7, sy - 7);
+  });
+  if (S.trail.length > 1) {                          // 已回放出的估计轨迹
+    ctx.strokeStyle = "#f85149"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    S.trail.forEach((p, i) => {
+      const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
+      if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+    });
+    ctx.stroke();
+  }
+  if (est) {
+    if (ell) {                                       // 95% 置信椭圆
+      const pts = ellipsePoints(ell, est.x, est.y);
+      ctx.save();
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
+        if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = "rgba(210,153,34,.16)";
+      ctx.strokeStyle = "rgba(210,153,34,.85)";
+      ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    const X = cx + est.x * SCALE, Y = cy - est.y * SCALE;   // 估计点
+    ctx.strokeStyle = "#f85149"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(X - 7, Y - 7); ctx.lineTo(X + 7, Y + 7);
+    ctx.moveTo(X - 7, Y + 7); ctx.lineTo(X + 7, Y - 7);
+    ctx.stroke();
+  }
+}
+
+/* ---------------- 事件时间线 ---------------- */
+function renderTimeline() {
+  const only = $("rpOnlySec").checked;
+  const list = only ? S.events.filter(e => SEC_TYPES.has(e.etype)) : S.events;
+  const ul = $("rpTimeline");
+  if (!list.length) {
+    ul.innerHTML = `<li class="hint">${esc(T("rp_ev_none"))}</li>`;
+    return;
+  }
+  /* 只重建结构变化时（事件集合/筛选变了）；"已发生/未发生"就地改 class，避免每帧重建 */
+  const sig = list.length + "|" + only + "|" + (list[0] ? list[0].t : 0);
+  if (ul.dataset.sig !== sig) {
+    ul.dataset.sig = sig;
+    ul.innerHTML = list.map(e =>
+      `<li class="${evtClass(e.etype)}" data-t="${e.t}">` +
+      `<span class="t">${clockOf(e.t)}</span>` +
+      `<span class="ty">${esc(evtLabel(e.etype))}</span>` +
+      `<span>${esc(e.sn || "")}</span>` +
+      `<span>${esc(e.detail || "")}</span>` +
+      `<span class="ac">${esc(e.actor && e.actor !== "system" ? e.actor : "")}</span></li>`
+    ).join("");
+  }
+  let curIdx = -1;
+  [...ul.children].forEach((li, i) => {
+    const t = +li.dataset.t || 0;
+    li.classList.toggle("future", t > S.t);
+    if (t <= S.t) curIdx = i;
+  });
+  [...ul.children].forEach((li, i) => li.classList.toggle("cur", i === curIdx));
+  if (curIdx >= 0 && !S.playing) { /* 停着时也把当前条滚进视野 */ }
+  const cur = ul.children[curIdx];
+  if (cur && S.playing) {
+    const box = ul, r = cur.offsetTop;
+    if (r < box.scrollTop || r > box.scrollTop + box.clientHeight - 24) box.scrollTop = r - box.clientHeight / 2;
+  }
+}
+
+/* ---------------- 交互 ---------------- */
+$("rpPlay").onclick = () => { S.playing ? stop() : play(); };
+$("rpLoad").onclick = loadReplay;
+$("rpSn").onchange = loadReplay;
+$("rpSeek").oninput = () => {
+  const span = Math.max(S.to - S.from, 1);
+  S.t = S.from + (+$("rpSeek").value / 1000) * span;
+  S.trail = [];                       // 跳转后轨迹重画（不能留下"未来"的轨迹）
+  render();
+};
+$("rpOnlySec").onchange = () => { $("rpTimeline").dataset.sig = ""; renderTimeline(); };
+document.querySelectorAll("[data-min]").forEach(b => {
+  b.onclick = () => {
+    const now = Date.now();
+    $("rpTo").value = dateTimeOf(now);
+    $("rpFrom").value = dateTimeOf(now - (+b.dataset.min) * 60000);
+    loadReplay();
+  };
+});
+
+/* 初始化：最近 30 分钟 */
+(async () => {
+  const now = Date.now();
+  $("rpTo").value = dateTimeOf(now);
+  $("rpFrom").value = dateTimeOf(now - 30 * 60000);
+  OrpahI18n.apply();
+  await loadSnList();
+  if ($("rpSn").value) await loadReplay();
+})();
+</script>
+</body>
+</html>

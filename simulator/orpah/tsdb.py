@@ -214,6 +214,45 @@ class Tsdb:
             out.append(r)
         return out[:limit]
 
+    # ---------------- 时间窗查询（回放用） ----------------
+    # 注意：值过滤（etype/sn）不能写进 WHERE（树模型对非投影列不可靠，见 query_events 注释），
+    # 但**时间**过滤是 IoTDB 的原生索引，写 WHERE 既准又快 —— 回放必须靠它按窗口取数。
+    def query_report_range(self, sn, t0_ms, t1_ms, limit=20000):
+        """某时间窗内的上报点，**按时间升序**（回放按时间轴顺序消费）。
+
+        返回 [{t(ms), rssi, seq, router_id}]；无数据 []；IoTDB 未就绪 None。
+        """
+        if not self._ensure() or self.session is None:
+            return None
+        lo, hi = int(min(t0_ms, t1_ms)), int(max(t0_ms, t1_ms))
+        return self._read_rows(
+            f"SELECT rssi, seq, router_id FROM {self._sn_path(sn)} "
+            f"WHERE time >= {lo} AND time <= {hi} "
+            f"ORDER BY time ASC LIMIT {max(1, int(limit))}")
+
+    def query_events_range(self, t0_ms, t1_ms, limit=5000, etype="", sn=""):
+        """某时间窗内的事件，**按时间升序**。etype/sn 仍本地过滤（多取 5 倍再筛）。"""
+        if not self._ensure() or self.session is None:
+            return None
+        lo, hi = int(min(t0_ms, t1_ms)), int(max(t0_ms, t1_ms))
+        fetch = max(1, int(limit)) * (5 if (etype or sn) else 1)
+        rows = self._read_rows(
+            f"SELECT etype, sn, detail, actor FROM root.orpah.events "
+            f"WHERE time >= {lo} AND time <= {hi} "
+            f"ORDER BY time ASC LIMIT {fetch}")
+        if rows is None:
+            return None
+        out = []
+        for r in rows:
+            if etype and r.get("etype") != etype:
+                continue
+            if sn and r.get("sn") != sn:
+                continue
+            if not r.get("actor"):               # 老行无 actor 列 → None
+                r["actor"] = ""
+            out.append(r)
+        return out[:max(1, int(limit))]
+
     def purge_events(self, days=None):
         """按保留期限清理事件历史 → 返回截止时间(ms)，未执行返回 None。
 

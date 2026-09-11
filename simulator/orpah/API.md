@@ -356,3 +356,44 @@ register/issue ──> active ──rotate──> grace ──宽限到期(sweep
 - **审计**：每个变更都写 `key_*` 事件（带 `actor`），见 §5。
 - **本页只管密钥**：不做组织/角色/权限（见 `ROADMAP.md` §〇 范围原则）。
 
+---
+
+## 10. `/api/replay`（按时间段回放）
+
+回放页 `replay.html` 的**唯一**数据入口：把「某设备在某时间窗内的上报点」+「该窗内的业务事件」
+一次性取回，前端按时间轴播放。**定位不在服务端算** —— 页面拿 `points` + `/api/stations` 用
+`pos.js`（与实时页**同一个**内核）逐帧求解，所以回放出来的数与实时页逐位一致，不存在两套定位。
+
+### GET `/api/replay?sn=<SN>&from=<epoch ms>&to=<epoch ms>`
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `sn` | ✅ | 设备 SN；缺 → `{"ok":false,"code":"no_sn"}` |
+| `from` / `to` | 建议 | epoch 毫秒；缺 `from` 时用 `to - minutes×60000`；非数字 → 按缺省处理 |
+| `minutes` | 可选 | 省略 `from` 时的窗宽（默认 **30**，钳到 1…720） |
+| `evlimit` | 可选 | 事件条数上限（默认 2000） |
+
+窗口上限 **12 小时**（超了把 `from` 抬到 `to-12h`）；`from > to` 自动交换。
+数据全部来自 **IoTDB 时间窗**（`WHERE time >= x AND time <= y`，时间过滤是原生索引，
+与 §5 里「值过滤不能进 WHERE」是两件事）→ 重启不丢、天然的按时间切片。
+
+```json
+{"ok":true,"sn":"CN-WH01-9AF3C1D2","from":1789143060000,"to":1789144860000,
+ "points":[{"t":1789143061000,"rssi":-55.0,"seq":22,"router_id":""}],
+ "events":[{"t":1789143060000,"etype":"publish","sn":"CN-WH01-9AF3C1D2","detail":"n=1","actor":"system"}],
+ "counts":{"points":795,"events":828},
+ "truncated":false,"events_ok":true}
+```
+
+- `points`/`events` 均**按时间升序**（回放顺序消费；与 §5 的倒序历史查询相反）。
+- `ok=false` = 上报点拿不到（IoTDB 未就绪）→ 页面提示「IoTDB 不可达」。
+- `events_ok=false` 但 `ok=true` = 上报点可用、事件查询失败（页面照常回放，只是时间线空）。
+- `truncated=true` = 命中点数 ≥ `REPLAY_MAX_POINTS`（20000）被截断，页面提示缩小时间段。
+- 事件是**全局表**（`root.orpah.events` 不分设备，见 §5），故未知 SN 也能拿到事件、
+  只是 `points:[]`。
+- 回放**不看未来**：前端只用 `ts <= 当前光标` 的样本（`pos.js` 的 `obsOfStation` 已内置）。
+
+> 回放页本身不再有后端契约：播放/暂停/倍速/拖动进度条、轨迹与 95% 椭圆绘制、
+> 事件时间线「已发生/未发生」全在 `replay.html` 内完成。
+
+
