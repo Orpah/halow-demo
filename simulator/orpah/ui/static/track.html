@@ -185,6 +185,7 @@
 </section>
 
 <script src="ui_i18n.js"></script>
+<script src="map.js"></script>
 <script src="pos.js"></script>
 <script>
 "use strict";
@@ -290,69 +291,11 @@ function stepOnce() {
    各源许可条款差别很大，尤其 osm.org 官方瓦片禁止离线/预取，且无 SLA —— 见 ROADMAP §七。
    **列表按界面语言给不同的一套**：栅格瓦片的地名是画在图里的像素、没有语言参数，
    所以英文界面不能默认给一张“中国地图 + 中文地名”——无地名的卫星图置默认，带地名的标出提醒。 */
-const TILE_PROVIDERS = {
-  osm: { name: "OpenStreetMap",
-         url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-         attr: "© OpenStreetMap contributors", note: "tile_note_osm", labels: "local" },
-  opentopo: { name: "OpenTopoMap",
-              url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-              // OpenTopoMap 官方要求的署名文本（不能简写成 © OpenTopoMap (CC-BY-SA)）
-              attr: "Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)",
-              note: "tile_note_opentopo", labels: "local" },
-  esri: { name: "Esri World Imagery",
-          url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-          attr: "© Esri", note: "tile_note_esri", labels: "none" },
-  custom: { i18nName: "tk_tile_custom", url: "", attr: "",
-            note: "tile_note_custom", labels: "user" },
-};
-/* 顺序 = 列表顺序，第一项即本语言的默认。
-   CartoDB Voyager 已移除：其栅格端点现在必须 API key，实测整图是 "API KEY REQUIRED" 水印。 */
-const TILE_ORDER = { zh: ["osm", "opentopo", "esri", "custom"],
-                     en: ["esri", "osm", "opentopo", "custom"] };
-function tileLabel(key) {
-  const p = TILE_PROVIDERS[key];
-  let s = p.i18nName ? T(p.i18nName) : p.name;
-  // 英文界面：地名为当地语言的源（中国境内会显示中文）明确标出，免得又以为是 i18n 没做
-  if (OrpahI18n.lang === "en" && p.labels === "local") {
-    s += " " + T("tile_labels_local_short");
-  }
-  return s;
-}
-function buildTileOptions() {
-  const sel = $("tileSrc");
-  if (!sel) return;
-  const keys = TILE_ORDER[OrpahI18n.lang] || TILE_ORDER.zh;
-  const keep = sel.value;                 // 用户选过的、仍在本语言列表里的就保留
-  sel.innerHTML = "";
-  for (const key of keys) {
-    const o = document.createElement("option");
-    o.value = key;
-    o.textContent = tileLabel(key);
-    sel.appendChild(o);
-  }
-  sel.value = keys.indexOf(keep) >= 0 ? keep : keys[0];
-  refreshTileNote();
-}
-function refreshTileNote() {
-  const el = $("tileNote");
-  if (!el) return;
-  const p = TILE_PROVIDERS[$("tileSrc").value] || TILE_PROVIDERS.custom;
-  el.textContent = T(p.note);
-}
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
 let lRings = [], lEstLoc = null, lEllipse = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计 / 95% 置信椭圆
 
-function baseLat() { return parseFloat($("baseLat").value); }
-function baseLng() { return parseFloat($("baseLng").value); }
-function toLatLng(x, y) {
-  const lat0 = baseLat();
-  const mLat = 110540, mLng = 111320 * Math.cos(lat0 * Math.PI / 180);
-  return [lat0 + y / mLat, baseLng() + x / mLng];
-}
-function currentTileUrl() {
-  const key = $("tileSrc").value;
-  return key === "custom" ? $("tileUrl").value.trim() : TILE_PROVIDERS[key].url;
-}
+/* 底图源列表 / 条款说明 / 基点与坐标换算都在 **map.js**（单一源，与回放页共用；
+   那是合规相关的东西，抄两份迟早漂移）。本页只保留自己的图层管理。 */
 /* 地图上的测点来源：模拟模式 = 测点表；真实模式 = 站位表。
    不区分模式的话，真实模式地图会画出模拟模式的默认测点（而且不会报错）。 */
 function mapPoints() {

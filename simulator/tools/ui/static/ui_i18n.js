@@ -567,6 +567,7 @@
       "rp_res_fmt": "{v} m",
       "rp_rad_fmt": "{v} m（95% 覆盖，沿最长轴）",
       "rp_legend": "蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、灰点=当时无观测的站位。",
+      "rp_legend_map": "地图视图：蓝点=站位、蓝圈=距离环（半径即测距）、红点=该时刻定位估计、黄虚线多边形=95% 置信椭圆、红线=已回放轨迹（**跨无观测缺口会断开**，不会画成一段直路）。地图瓦片需联网。",
       "rp_only_sec": "只看安全事件（验签/密钥）",
       "rp_ev_none": "该时间段没有事件。",
 
@@ -1365,6 +1366,7 @@
       "rp_res_fmt": "{v} m",
       "rp_rad_fmt": "{v} m (95% coverage, along major axis)",
       "rp_legend": "Blue square = station, blue ring = its distance ring, red cross = estimate at that instant, dashed yellow ellipse = 95% confidence, red line = replayed track so far, grey dot = station with no observation then.",
+      "rp_legend_map": "Map view: blue dot = station, blue ring = distance ring (radius is the measured range), red dot = estimate at that instant, dashed yellow polygon = 95% confidence ellipse, red line = replayed track (it BREAKS across observation gaps instead of drawing a straight shortcut). Tiles need internet.",
       "rp_only_sec": "Security events only (signature / keys)",
       "rp_ev_none": "No events in this window.",
 

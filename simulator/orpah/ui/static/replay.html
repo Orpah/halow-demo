@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>回放 — ORPAH-over-HaLow</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1.9.4">
 <link rel="stylesheet" href="style.css?v=20260912b">
 <style>
   .back { margin-left: 10px; }
@@ -43,6 +44,8 @@
   ul.tl li.warn .ty { color: var(--org); }
   ul.tl li.ok .ty { color: var(--grn); }
   .hint.err { color: var(--red); }
+  #map { height: 420px; border-radius: 8px; margin-top: 10px; }
+  .leaflet-container { background: #0d1117; }
 </style>
 </head>
 <body>
@@ -106,8 +109,28 @@
     <span class="hint" id="rpValid"></span>
   </div>
   <p class="hint" data-i18n="rp_bar_legend">进度条：绿=可定位（≥2 台有观测）· 橙=仅 1 台（信息不足）· 灰=无观测。无效段保留不删（“某段时间完全没被任何路由器听到”本身就是线索）。</p>
+  <div class="row">
+    <label><span data-i18n="tk_view">视图</span>
+      <select id="view">
+        <option value="canvas" selected data-i18n="tk_view_canvas">画布（本地坐标）</option>
+        <option value="map" data-i18n="tk_view_map">地图（真实地理）</option>
+      </select></label>
+    <label><span data-i18n="tk_tiles">瓦片源</span><select id="tileSrc"></select></label>
+    <label><span data-i18n="tk_tile_url">自定义瓦片 URL</span>
+      <input id="tileUrl" style="width:280px" placeholder="https://…/{z}/{x}/{y}.png"></label>
+  </div>
+  <p class="hint" id="tileNote"></p>
+  <div class="row">
+    <label><span data-i18n="tk_base_lat">基点纬度</span>
+      <input id="baseLat" type="number" step="any" value="40.0777583"></label>
+    <label><span data-i18n="tk_base_lng">基点经度</span>
+      <input id="baseLng" type="number" step="any" value="117.2688556"></label>
+    <span class="hint" data-i18n="tk_map_hint">本地坐标 (0,0) 对应的真实经纬度；地图视图按此锚点 + 米/度换算。地图瓦片需联网。</span>
+  </div>
   <canvas id="canvasReplay" width="620" height="420"></canvas>
+  <div id="map" style="display:none"></div>
   <p class="hint" data-i18n="rp_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、灰点=当时无观测的站位。</p>
+  <p class="hint" data-i18n="rp_legend_map">地图视图：蓝点=站位、蓝圈=距离环（半径即测距）、红点=该时刻定位估计、黄虚线多边形=95% 置信椭圆、红线=已回放轨迹（**跨无观测缺口会断开**，不会画成一段直路）。地图瓦片需联网。</p>
   <div class="stat mono">
     <div class="cell"><span class="k" data-i18n="rp_lab_used">参与定位</span><span class="v" id="rpUsed">-</span></div>
     <div class="cell"><span class="k" data-i18n="rp_lab_loc">定位估计</span><span class="v v-ok" id="rpLoc">-</span></div>
@@ -130,6 +153,8 @@
 </section>
 
 <script src="ui_i18n.js"></script>
+<script src="vendor/leaflet/leaflet.js?v=1.9.4"></script>
+<script src="map.js"></script>
 <script src="pos.js"></script>
 <script>
 "use strict";
@@ -179,6 +204,97 @@ const S = {                          // 回放状态
   seg: null,                         // 有效时段分段（obsSegments 结果）
   trail: [],                         // 已回放出的估计点（画轨迹；null = 缺口断开）
 };
+
+/* ---- 地图视图（Leaflet）----
+   底图源 / 条款说明 / 本地坐标→经纬度换算都在 **map.js**（与实时页共用单一源）。
+   本页只保留自己的图层：回放的轨迹要**跨缺口断开**、站位固定、另有 95% 椭圆。 */
+let lmap = null, lMarks = [], lRings = [], lEst = null, lEll = null, lRuns = [];
+let mapSig = "";                     // 标记签名（站位集合 + 基点）；基点变必须重画
+let mapFitDone = false;               // 每次载入数据/换基点后，只自动框景一次（之后不抢用户平移）
+
+function mapActive() { return $("view") && $("view").value === "map"; }
+
+function ensureMap() {
+  if (lmap) return;
+  lmap = L.map("map").setView([baseLat(), baseLng()], 16);
+  const p = TILE_PROVIDERS[$("tileSrc").value] || TILE_PROVIDERS.custom;
+  L.tileLayer(currentTileUrl(), { attribution: p.attr || "", maxZoom: 19 }).addTo(lmap);
+}
+
+/* 站位标记：只在「站位集合 / 基点」变化时重建（否则每帧重建会把 tooltip 打断） */
+function refreshMapMarks() {
+  if (!lmap) return;
+  const sig = baseLat() + "," + baseLng() + "|"
+    + S.stations.map(s => s.sid + ":" + s.x + "," + s.y + ":" + (s.name || "")).join("|");
+  if (sig === mapSig) return;
+  mapSig = sig;
+  lMarks.forEach(m => m.remove());
+  lMarks = S.stations.map(s => L.circleMarker(toLatLng(s.x, s.y), {
+    color: "#58a6ff", radius: 6, fillColor: "#58a6ff", fillOpacity: 0.85,
+  }).addTo(lmap).bindTooltip(s.name || s.sid));
+}
+
+/* 轨迹：S.trail 里的 null = 缺口 → 拆成多段折线（不能画成一条直线走过去） */
+function trailRuns() {
+  const runs = [];
+  let cur = [];
+  for (const p of S.trail) {
+    if (!p) { if (cur.length) runs.push(cur); cur = []; continue; }
+    cur.push(toLatLng(p.x, p.y));
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
+function drawMapView(obs, est, ell) {
+  ensureMap();
+  refreshMapMarks();
+  lRings.forEach(r => r.remove());
+  lRings = obs.map(o => L.circle(toLatLng(o.s.x, o.s.y), {
+    radius: o.dist, color: "#58a6ff", weight: 1, opacity: 0.45, fill: false,
+  }).addTo(lmap));
+  if (lEll) { lmap.removeLayer(lEll); lEll = null; }
+  if (est && ell) {
+    lEll = L.polygon(ellipsePoints(ell, est.x, est.y).map(p => toLatLng(p.x, p.y)), {
+      color: "#d29922", weight: 1.5, opacity: 0.9, dashArray: "5 4",
+      fillColor: "#d29922", fillOpacity: 0.16,
+    }).addTo(lmap);
+  }
+  if (est) {
+    const ll = toLatLng(est.x, est.y);
+    if (!lEst) {
+      lEst = L.circleMarker(ll, { color: "#f85149", radius: 7, weight: 2,
+                                  fillColor: "#f85149", fillOpacity: 0.9 }).addTo(lmap);
+    } else { lEst.setLatLng(ll); }
+  } else if (lEst) { lmap.removeLayer(lEst); lEst = null; }
+  const runs = trailRuns();
+  while (lRuns.length > runs.length) lRuns.pop().remove();
+  runs.forEach((pts, i) => {
+    if (!lRuns[i]) lRuns[i] = L.polyline([], { color: "#f85149", weight: 2 }).addTo(lmap);
+    lRuns[i].setLatLngs(pts);
+  });
+}
+
+/* 自动框住「场景」：站位 + 已回放轨迹。
+   演示场景只有几十米，默认 zoom 16 下整个场景只有十几像素（看起来像啥也没画）→ 开地图时
+   fitBounds 到数据范围。只在**载入数据/换基点后**做一次，否则每帧都会把用户的手动平移拉回去。 */
+function fitScene() {
+  if (!lmap) return;
+  const pts = S.stations.map(s => toLatLng(s.x, s.y));
+  S.trail.forEach(p => { if (p) pts.push(toLatLng(p.x, p.y)); });
+  if (pts.length < 2) return;
+  lmap.fitBounds(L.latLngBounds(pts), { padding: [24, 24], maxZoom: 19 });
+}
+
+function applyView() {
+  const mapView = mapActive();
+  $("map").style.display = mapView ? "block" : "none";
+  $("canvasReplay").style.display = mapView ? "none" : "block";
+  if (!mapView) return;
+  ensureMap();
+  if (!mapFitDone) { fitScene(); mapFitDone = true; }
+  render();                       // 立刻按当前时刻重画（不等下一帧）
+}
 
 /* ---------------- 拉取 ---------------- */
 function rpInfo(msg, cls) {
@@ -230,6 +346,7 @@ async function loadReplay() {
     S.events = rep.events || [];
     S.stations = st.stations || [];
     S.t = S.from; S.trail = [];
+    mapFitDone = false;                   // 新数据 → 下次开地图重新框景
     const nObs = Object.keys(S.obs).reduce((a, k) => a + (S.obs[k] || []).length, 0);
     $("rpEvInfo").textContent = T("rp_counts")
       .replace("{p}", S.points.length).replace("{e}", S.events.length)
@@ -353,6 +470,7 @@ function render() {
     if (S.trail.length > 4000) S.trail.shift();
   }
   draw(obs, est, ell);
+  if (mapActive()) drawMapView(obs, est, ell);
 
   /* 面板 */
   $("rpUsed").textContent = T("rp_st_used_fmt")
@@ -384,6 +502,7 @@ function lastEvent() {
 }
 
 function draw(obs, est, ell) {
+  if (mapActive()) return;          // 地图视图下不画本画布（省一半开销）
   const c = $("canvasReplay"), ctx = c.getContext("2d");
   const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
   ctx.clearRect(0, 0, W, H);
@@ -497,6 +616,19 @@ $("rpSeek").oninput = () => {
   render();
 };
 $("rpSkip").onchange = () => { $("rpValid").title = ""; };
+$("view").onchange = applyView;
+/* 换瓦片源 / 改基点：地图图层必须重建（地图对象本身先销毁释放瓦片） */
+$("tileSrc").onchange = () => { resetMap(); };
+$("tileUrl").onchange = () => { resetMap(); };
+$("baseLat").onchange = () => { resetMap(); };
+$("baseLng").onchange = () => { resetMap(); };
+function resetMap() {
+  if (lmap) { lmap.remove(); lmap = null; }
+  lMarks = []; lRings = []; lRuns = []; lEst = null; lEll = null; mapSig = "";
+  mapFitDone = false;
+  refreshTileNote();
+  if (mapActive()) applyView();
+}
 /* 宽度变化（窗口缩放、时钟文字变长变短、字体加载）就重画：
    否则像素缓冲宽度会滞后于显示宽度 → 颜色位置错位 */
 if (window.ResizeObserver) {
@@ -518,6 +650,7 @@ document.querySelectorAll("[data-min]").forEach(b => {
   const now = Date.now();
   $("rpTo").value = dateTimeOf(now);
   $("rpFrom").value = dateTimeOf(now - 30 * 60000);
+  buildTileOptions();          // 必须早于任何 ensureMap：它决定本语言的默认瓦片源
   OrpahI18n.apply();
   await loadSnList();
   if ($("rpSn").value) await loadReplay();
