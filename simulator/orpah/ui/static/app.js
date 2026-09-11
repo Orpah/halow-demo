@@ -18,6 +18,11 @@ const connZh = v => {
   const s = OrpahI18n.t("conn_" + v);
   return s === "conn_" + v ? (v || "?") : s;   // 字典无此键 → 回退机器值
 };
+/* 报文流「节点」列：后端 stage 是机器值 client/router/server → 字典 node_*（拓扑图同一套词条） */
+const nodeLabel = v => {
+  const s = OrpahI18n.t("node_" + v);
+  return s === "node_" + v ? (v || "-") : s;   // 字典无此键 → 回退机器值
+};
 
 /* ---------- 语言应用（静态 data-i18n / title / placeholder / 文档标题） ---------- */
 function applyI18n() {
@@ -151,7 +156,7 @@ function renderFlow(flow) {
       `<td>${esc(e.t)}</td><td>${FLOW_ZH[e.dir] || esc(e.dir)}</td>` +
       `<td>${esc(e.type)}</td><td>${esc(e.sn)}</td>` +
       `<td>${esc(e.status === undefined ? "-" : e.status)}</td>` +
-      `<td>${esc(e.stage || "-")}</td>`;
+      `<td>${esc(nodeLabel(e.stage))}</td>`;
     tbody.appendChild(tr);
   });
 }

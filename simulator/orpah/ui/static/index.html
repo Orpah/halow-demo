@@ -83,7 +83,7 @@
   <table id="flowTable">
     <thead><tr>
       <th data-i18n="th_time">时间</th><th data-i18n="th_dir">方向</th>
-      <th data-i18n="th_mtype">报文</th><th>sn</th>
+      <th data-i18n="th_mtype">报文</th><th data-i18n="th_sn">SN</th>
       <th data-i18n="th_status">状态</th><th data-i18n="th_node">节点</th>
     </tr></thead>
     <tbody id="flowList"></tbody>
@@ -148,12 +148,13 @@
     <label><span data-i18n="evt_type">类型</span>
       <select id="evtType">
         <option value="" data-i18n="evt_all">全部</option>
-        <option value="publish">publish</option>
-        <option value="found">found</option>
-        <option value="id_report">id_report</option>
-        <option value="case_mark">case_mark</option>
-        <option value="case_found">case_found</option>
-        <option value="case_close">case_close</option>
+        <!-- 选项显示走字典 evt_type_*（与下方事件列表同一套中文标签）；value 保持机器值，筛选不受影响 -->
+        <option value="publish" data-i18n="evt_type_publish">publish</option>
+        <option value="found" data-i18n="evt_type_found">found</option>
+        <option value="id_report" data-i18n="evt_type_id_report">id_report</option>
+        <option value="case_mark" data-i18n="evt_type_case_mark">case_mark</option>
+        <option value="case_found" data-i18n="evt_type_case_found">case_found</option>
+        <option value="case_close" data-i18n="evt_type_case_close">case_close</option>
       </select>
     </label>
     <label><span data-i18n="evt_limit">最近</span> <input id="evtLimit" type="number" value="30" min="5" max="200" step="5"> <span data-i18n="evt_rows">条</span></label>
