@@ -244,13 +244,21 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 **无状态**：每次请求都用当前快照（设备清册 + 走失案件 + 最近签名上报）重算，
 不存告警表、没有确认/关闭流程 → 条件消失则告警自动消失，无需状态机。
 
-规则（阈值可在 `alerts.py` 常量或 `evaluate(..., **th)` 覆盖）：
+规则（阈值可用**环境变量**覆盖，改了要重启；默认值是演示压缩时间，真实部署要调大）：
 
-| kind | level | 条件 | 阈值 |
-|---|---|---|---|
-| `no_report` | `warn` | 启用中且**曾上报过**的设备，距上次上报超过 N 秒 | `no_report_sec=30` |
-| `case_overtime` | `crit` | `open` 状态的案件立案超过 N 秒仍未发现 | `case_overtime_sec=180` |
-| `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 50% | `sig_window=5` |
+| kind | level | 条件 | 阈值 | 环境变量 |
+|---|---|---|---|---|
+| `no_report` | `warn` | 启用中且**曾上报过**的设备，距上次上报超过 N 秒 | `30` | `ORPAH_ALERT_NO_REPORT_SEC` |
+| `case_overtime` | `crit` | `open` 状态的案件立案超过 N 秒仍未发现 | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
+| `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
+
+- 环境变量与事件保留期限（`ORPAH_EVENT_RETENTION_DAYS`，见 §5）同一套机制：
+  未设 / 空串 / 非法值 → 回退上表默认值。
+- 也可以在进程内覆盖：`alerts.evaluate(..., no_report_sec=…, case_overtime_sec=…,
+  sig_window=…, sig_fail_ratio=…)`（单测用的就是这个入口）。
+- 例（想避免「刚立案 3 分钟就亮红点」的观感）：
+  PowerShell `$env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901`；
+  cmd `set ORPAH_ALERT_CASE_OVERTIME_SEC=600 && python ui_server.py --port 8901`。
 
 字段说明：
 

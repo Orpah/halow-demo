@@ -7,7 +7,18 @@ alerts.py — 告警规则引擎（供页面红点消费）
 
 - **无状态**：每次用当前快照重新评估，返回「活跃告警」列表，**不落库**。
   告警表达的是"当前状态"，不是"历史"——历史由 IoTDB 事件流（`root.orpah.events`）负责。
-- 阈值是**演示压缩时间**（真实部署要调大）：客户端本来 2s 一包，所以"长未上报"取 30s。
+- 阈值默认值是**演示压缩时间**（真实部署要调大），但**全部可用环境变量覆盖**
+  （与事件保留期限 `ORPAH_EVENT_RETENTION_DAYS` 同一套机制，改了要重启）：
+
+      ORPAH_ALERT_NO_REPORT_SEC       长未上报（秒，默认 30）
+      ORPAH_ALERT_CASE_OVERTIME_SEC   走失超时（秒，默认 180）
+      ORPAH_ALERT_SIG_WINDOW          签名失败率窗口（条，默认 5）
+      ORPAH_ALERT_SIG_FAIL_RATIO      签名失败率阈值（0~1，默认 0.5）
+
+  例（立案后 10 分钟才算超时，避免演示时刚立案就亮红点）：
+      PowerShell:  $env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901
+      cmd:         set ORPAH_ALERT_CASE_OVERTIME_SEC=600 && python ui_server.py --port 8901
+
 - 每条告警带 `key`（kind + 对象）供前端判断"是否是新告警"；`msg` 是 **i18n 键**，
   由前端本地化 —— 后端不拼中文/英文，免得又变成"后端文案不跟语言走"。
 - 时间戳单位统一为**秒**（与 `registry.touch` / `cases.mark` 一致）。
@@ -19,6 +30,7 @@ alerts.py — 告警规则引擎（供页面红点消费）
 
 第二批可加：RSSI 突变、校验位连续失败（需要历史序列，本模块暂不做）。
 """
+import os
 import time
 
 import cases as cs
@@ -27,10 +39,27 @@ import registry as reg
 LEVEL_CRIT = "crit"
 LEVEL_WARN = "warn"
 
-NO_REPORT_SEC = 30        # 超过这么久没上报 → 告警
-CASE_OVERTIME_SEC = 180   # 立案后这么久还没发现 → 告警
-SIG_WINDOW = 5            # 签名失败率统计窗口（条）
-SIG_FAIL_RATIO = 0.5      # 窗口内被拒比例超过它 → 告警
+
+def _env_int(name, default):
+    """取整数环境变量；未设/空串/非法值 → 回退默认（与 tsdb._env_int 同语义）。"""
+    try:
+        return int(str(os.environ.get(name, "") or default).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name, default):
+    """取浮点环境变量；未设/空串/非法值 → 回退默认。"""
+    try:
+        return float(str(os.environ.get(name, "") or default).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+NO_REPORT_SEC = _env_int("ORPAH_ALERT_NO_REPORT_SEC", 30)        # 超过这么久没上报 → 告警
+CASE_OVERTIME_SEC = _env_int("ORPAH_ALERT_CASE_OVERTIME_SEC", 180)  # 立案后这么久还没发现
+SIG_WINDOW = _env_int("ORPAH_ALERT_SIG_WINDOW", 5)              # 签名失败率统计窗口（条）
+SIG_FAIL_RATIO = _env_float("ORPAH_ALERT_SIG_FAIL_RATIO", 0.5)  # 窗口内被拒比例超过它 → 告警
 
 
 def _alert(kind, level, key_obj, msg, since, **data):

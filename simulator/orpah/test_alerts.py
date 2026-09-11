@@ -107,6 +107,42 @@ check("真实对象：长未上报 + 走失超时都能报",
 check("真实对象：长未上报报的是没入案的那台",
       [x["sn"] for x in real if x["kind"] == "no_report"] == ["CN-WH02-BBBBBBBB"])
 
+# ---- 阈值环境变量（进程内改了要重启才生效，这里用 reload 模拟重启）----------
+import importlib                  # noqa: E402
+import os                         # noqa: E402
+
+
+def reload_with(**env):
+    for k, v in env.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    return importlib.reload(alr)
+
+
+a = reload_with(ORPAH_ALERT_CASE_OVERTIME_SEC="600",
+                ORPAH_ALERT_NO_REPORT_SEC=None, ORPAH_ALERT_SIG_WINDOW=None,
+                ORPAH_ALERT_SIG_FAIL_RATIO=None)
+check("env：未设的项保持默认",
+      (a.NO_REPORT_SEC, a.SIG_WINDOW, a.SIG_FAIL_RATIO) == (30, 5, 0.5))
+check("env：超时阈值被覆盖", a.CASE_OVERTIME_SEC == 600)
+# 立案 300s 前：默认 180 会告警，改成 600 后不该告警
+check("env：覆盖值切实用于评估",
+      a.evaluate(regis(), case_mgr(case("C001", created=NOW - 300)),
+                 deque(), now=NOW) == [])
+
+a = reload_with(ORPAH_ALERT_CASE_OVERTIME_SEC="abc", ORPAH_ALERT_SIG_WINDOW="",
+                ORPAH_ALERT_SIG_FAIL_RATIO="0.9")
+check("env：非法值/空串回退默认", (a.CASE_OVERTIME_SEC, a.SIG_WINDOW) == (180, 5))
+check("env：浮点阈值生效", a.SIG_FAIL_RATIO == 0.9)
+# 4/5 = 0.8：默认 0.5 会告警，0.9 不该告警
+a2 = a.evaluate(regis(), case_mgr(), deque([rep(False)] * 4 + [rep(True)]), now=NOW)
+check("env：浮点阈值切实用于评估", a2 == [])
+
+a = reload_with(ORPAH_ALERT_CASE_OVERTIME_SEC=None, ORPAH_ALERT_SIG_FAIL_RATIO=None)
+check("env：清后恢复默认", (a.CASE_OVERTIME_SEC, a.SIG_FAIL_RATIO) == (180, 0.5))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILED: " + "; ".join(FAILS))

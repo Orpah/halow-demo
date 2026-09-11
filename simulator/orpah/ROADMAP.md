@@ -50,7 +50,13 @@
   - **保留期限**：`ORPAH_EVENT_RETENTION_DAYS`（默认 30 天，0=不清理），启动连上库后按期限清理一次；`/api/ts/events` 回 `retention_days`/`purged_upto`，页面显示「保留 30 天」。
   - **可筛选**：验签被拒的单写 `id_reject`（原来混在 `id_report` 的 detail 里，无法按类型筛）。
   - **未覆盖**（后续）：`/api/registry` 增删改、`/api/stations` 增删改/打点/绑定 这些写操作不产生审计事件；也无「谁」的鉴权/角色（仅自填标识）。
-- [x] **告警与通知**（2026-09-11 完成，仅「页面红点」部分）：`alerts.py` 无状态规则引擎（长未上报 / 走失超时 / 签名失败率）→ `GET /api/alerts`，`index.html` 页头徽标 + 告警卡片，3s 轮询；条件消失则告警自动消失。未做：Webhook/邮件通知、SSE 弹窗、RSSI 突变/校验位连续失败规则。
+- [x] **告警与通知**（2026-09-11 完成，仅「页面红点」部分）：`alerts.py` 无状态规则引擎（长未上报 / 走失超时 / 签名失败率）→ `GET /api/alerts`，`index.html` 页头徽标 + 告警卡片，3s 轮询；条件消失则告警自动消失。
+  - **阈值可配**：默认 30s / 180s / 5 条 / 0.5 是**演示压缩时间**（客户端 2s 一包），
+    全部可用环境变量覆盖（与保留期限同机制，见 `API.md` §8）：
+    `ORPAH_ALERT_NO_REPORT_SEC` / `ORPAH_ALERT_CASE_OVERTIME_SEC` /
+    `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO`。
+    演示时若嫌「立案 3 分钟就报警」，设 `ORPAH_ALERT_CASE_OVERTIME_SEC=600` 即可（不用改代码）。
+  - 未做：Webhook/邮件通知、SSE 弹窗、RSSI 突变/校验位连续失败规则、页面展示当前阈值。
 - [ ] **回放**：按时间段回放报文流 + 定位轨迹 + 安全事件。
 - [ ] **重放/篡改自动化测试台**：批量用例（黄金样本、边界 SN、过期 nonce、错 CC）一键跑并出报告。
 
