@@ -127,6 +127,16 @@
       <input id="baseLng" type="number" step="any" value="117.2688556"></label>
     <span class="hint" data-i18n="tk_map_hint">本地坐标 (0,0) 对应的真实经纬度；地图视图按此锚点 + 米/度换算。地图瓦片需联网。</span>
   </div>
+  <div class="row">
+    <label><span data-i18n="rp_exp">导出轨迹</span>
+      <select id="expSrc">
+        <option value="raw" selected data-i18n="rp_exp_raw">原始</option>
+        <option value="sm" data-i18n="rp_exp_sm">平滑</option>
+      </select></label>
+    <button class="btn" id="expGpx">GPX</button>
+    <button class="btn" id="expGeo">GeoJSON</button>
+    <span class="hint" id="expMsg" data-i18n="rp_exp_hint">导出整窗轨迹（不只已回放部分）；缺口断开成多段，不连线。经纬度按上面的基点换算。</span>
+  </div>
   <canvas id="canvasReplay" width="620" height="420"></canvas>
   <div id="map" style="display:none"></div>
   <p class="hint">
@@ -585,6 +595,98 @@ function smoothAt(t) {
   return null;
 }
 
+/* ---------------- 轨迹导出（GPX / GeoJSON） ----------------
+   导出**整窗**轨迹（不是只导已回放的部分）—— 导出是给野外/GIS 用的成果，缺时间段被截掉。
+   分段规则与画布/地图上的轨迹一致：相邻帧间隔 > ROUTER_MAX_AGE_MS（观测时效）算缺口，
+   **断开成多段**；跨缺口的直线不是真走出来的路，绝不能连起来。
+   平滑轨迹另按滤波器的 reset 断开（长缺口处滤波重置，前后不连续）。
+   经纬度走 map.js 的 toLatLng（基点 + 米/度换算）—— 与地图视图落点**同一个**换算，不另写一份。 */
+function exportRuns(src) {
+  const pts = src === "sm" ? S.sm : S.frames;
+  const runs = []; let cur = [];
+  for (const p of pts) {
+    const gap = cur.length > 0
+      && (p.t - cur[cur.length - 1].t > ROUTER_MAX_AGE_MS || (src === "sm" && p.reset));
+    if (gap) { runs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
+function xmlEsc(s) {
+  return String(s).replace(/[<>&'"]/g, c =>
+    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
+}
+
+function gpxOf(runs, sn, src) {
+  const segs = runs.map(run =>
+    "    <trkseg>\n" + run.map(p => {
+      const ll = toLatLng(p.x, p.y);
+      return '      <trkpt lat="' + ll[0].toFixed(7) + '" lon="' + ll[1].toFixed(7) + '">' +
+             "<time>" + new Date(p.t).toISOString() + "</time></trkpt>\n";
+    }).join("") + "    </trkseg>\n").join("");
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<gpx version="1.1" creator="ORPAH simulator (halow-demo)" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+    "  <metadata><name>" + xmlEsc(sn) + "</name><time>" + new Date().toISOString() + "</time></metadata>\n" +
+    "  <trk><name>" + xmlEsc(sn) + "</name><type>ORPAH " +
+    (src === "sm" ? "smoothed" : "raw") + "</type>\n" + segs + "  </trk>\n</gpx>\n";
+}
+
+function geoOf(runs, sn, src) {
+  return JSON.stringify({
+    type: "FeatureCollection",
+    features: runs.map(run => ({
+      type: "Feature",
+      properties: {
+        sn: sn, source: src === "sm" ? "smoothed" : "raw",
+        points: run.length,
+        from: new Date(run[0].t).toISOString(),
+        to: new Date(run[run.length - 1].t).toISOString(),
+        from_ms: run[0].t, to_ms: run[run.length - 1].t,
+      },
+      geometry: {
+        type: "LineString",
+        coordinates: run.map(p => {
+          const ll = toLatLng(p.x, p.y);
+          return [+ll[1].toFixed(7), +ll[0].toFixed(7)];
+        }),
+      },
+    })),
+  }, null, 2) + "\n";
+}
+
+function exportName(src, ext) {
+  const safe = String($("rpSn").value || "device").replace(/[^A-Za-z0-9._-]/g, "_");
+  const stamp = (ms) => {
+    const d = new Date(ms), p = (v) => String(v).padStart(2, "0");
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+  };
+  return "orpah-" + safe + "-" + (src === "sm" ? "smoothed" : "raw") + "-" +
+         stamp(S.from) + "-" + stamp(S.to) + "." + ext;
+}
+
+function downloadText(name, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function doExport(kind) {
+  const src = $("expSrc").value;
+  const runs = exportRuns(src);
+  const n = runs.reduce((s, r) => s + r.length, 0);
+  if (!n) { $("expMsg").textContent = T("rp_exp_none"); return; }
+  const name = exportName(src, kind === "gpx" ? "gpx" : "geojson");
+  downloadText(name, kind === "gpx" ? gpxOf(runs, $("rpSn").value, src)
+                                    : geoOf(runs, $("rpSn").value, src),
+               kind === "gpx" ? "application/gpx+xml" : "application/geo+json");
+  $("expMsg").textContent = T("rp_exp_done")
+    .replace("{n}", runs.length).replace("{m}", n).replace("{f}", name);
+}
+
 function draw(obs, est, ell) {
   if (mapActive()) return;          // 地图视图下不画本画布（省一半开销）
   const c = $("canvasReplay"), ctx = c.getContext("2d");
@@ -719,6 +821,9 @@ $("rpSeek").oninput = () => {
 };
 $("rpSkip").onchange = () => { $("rpValid").title = ""; };
 $("rpSmooth").onchange = () => { render(); };
+$("expGpx").onclick = () => doExport("gpx");
+$("expGeo").onclick = () => doExport("geojson");
+$("expSrc").onchange = () => { $("expMsg").textContent = T("rp_exp_hint"); };
 $("view").onchange = applyView;
 /* 换瓦片源 / 改基点：地图图层必须重建（地图对象本身先销毁释放瓦片） */
 $("tileSrc").onchange = () => { resetMap(); };
