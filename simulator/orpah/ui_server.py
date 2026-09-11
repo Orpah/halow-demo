@@ -94,11 +94,12 @@ class OrpahApp:
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
         # 数字签名工具：临时密钥对（供 /api/sig 演示 ES256/HS256）
         self.sig_dev = None
-        # 设备清册（P0：SN↔走失者一对多绑定、状态、首/最近见时间）
-        self.registry = reg.Registry()
-        # 走失案件闭环（P0：以人为单位的状态机）
-        self.cases = cases.CaseManager()
-        self._seed_registry()
+        # 设备清册 + 走失案件（SQLite 持久化；首次启动播种）
+        db_path = os.path.join(HERE, "orpah.db")
+        self.registry = reg.Registry(db_path)
+        self.cases = cases.CaseManager(db_path)
+        if not self.registry.persons:
+            self._seed_registry()
         # 组件
         self.cores = []
         self.srv = None
@@ -257,10 +258,9 @@ class OrpahApp:
         self.srv.start()
 
         # 2.5) 已立案案件名下设备同步进权威走失表（种子案件等）
-        for c in self.cases.cases.values():
-            if c.status in (cases.CASE_OPEN, cases.CASE_FOUND):
-                for d in self.registry.devices_of(c.person_id):
-                    self.srv.mark_tracked(d.sn, note=f"case:{c.case_id}")
+        for c in self.cases.open_cases():
+            for d in self.registry.devices_of(c.person_id):
+                self.srv.mark_tracked(d.sn, note=f"case:{c.case_id}")
 
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
         self.router = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV,
@@ -382,8 +382,7 @@ class OrpahApp:
             "reports": list(reversed(rows)),
             "flow": list(self.flow),
             "lost": self.lost,
-            "lost_sns": [d.sn for d in self.registry.devices.values()
-                         if d.status == reg.STATUS_LOST],
+            "lost_sns": self.registry.lost_sns(),
             "publishes": list(self.publishes),
             "publish_total": self.publish_total,
             "founds": list(self.founds),

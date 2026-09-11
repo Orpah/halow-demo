@@ -8,9 +8,11 @@ cases.py — 走失案件闭环（以人为单位，非单 SN）
   → 发现 found   任一台设备被 Router 命中走失表（ORPAH-FOUND）→ 该人「已发现」
   → 结案 close   找回（closed，设备恢复启用）/ 撤销误报（revoked，设备恢复启用）
 
-纯内存 demo 实现；不依赖 server。由 ui_server 负责与权威走失表（server.mark_tracked/
+SQLite 持久化；不依赖 server。由 ui_server 负责与权威走失表（server.mark_tracked/
 untrack）联动，并注入 Router 发现事件（ORPAH-FOUND）。
 """
+import sqlite3
+import threading
 import time
 
 from registry import STATUS_ACTIVE, STATUS_LOST, STATUS_SCRAPPED
@@ -65,11 +67,88 @@ class Case:
 
 
 class CaseManager:
-    """走失案件台账：case_id -> Case。"""
+    """走失案件台账：case_id -> Case（SQLite 持久化）。"""
 
-    def __init__(self):
+    def __init__(self, db_path=":memory:"):
+        self._lock = threading.Lock()
+        self.db = sqlite3.connect(db_path, check_same_thread=False, timeout=5)
+        self.db.row_factory = sqlite3.Row
+        self._init_db()
         self.cases = {}
         self._seq = 0
+        self._load()
+
+    def _init_db(self):
+        with self._lock:
+            self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS cases (
+                case_id TEXT PRIMARY KEY, person_id TEXT NOT NULL,
+                status TEXT NOT NULL, outcome TEXT, created INTEGER NOT NULL,
+                updated INTEGER NOT NULL, closed_at INTEGER,
+                missing_at TEXT DEFAULT '', missing_place TEXT DEFAULT '',
+                possible_to TEXT DEFAULT '', clothing TEXT DEFAULT '',
+                contact_phone TEXT DEFAULT '', police TEXT DEFAULT '',
+                police_case_no TEXT DEFAULT '', police_station TEXT DEFAULT '',
+                belongings TEXT DEFAULT '', vehicle TEXT DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS case_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT NOT NULL,
+                t INTEGER NOT NULL, type TEXT NOT NULL,
+                sn TEXT DEFAULT '', detail TEXT DEFAULT ''
+            );
+            """)
+            self.db.commit()
+
+    def _load(self):
+        for r in self.db.execute("SELECT * FROM cases"):
+            c = Case(r["case_id"], r["person_id"], r["created"],
+                     r["missing_at"], r["missing_place"], r["possible_to"],
+                     r["clothing"], r["contact_phone"], r["police"],
+                     r["police_case_no"], r["police_station"], r["belongings"],
+                     r["vehicle"])
+            c.status = r["status"]
+            c.updated = r["updated"]
+            c.closed_at = r["closed_at"]
+            c.outcome = r["outcome"]
+            self.cases[c.case_id] = c
+            n = int(c.case_id[1:]) if c.case_id[1:].isdigit() else 0
+            self._seq = max(self._seq, n)
+        for r in self.db.execute("SELECT * FROM case_events ORDER BY id"):
+            c = self.cases.get(r["case_id"])
+            if c is not None:
+                ev = {"t": r["t"], "type": r["type"],
+                      "sn": r["sn"], "detail": r["detail"]}
+                c.events.append(ev)
+                if r["type"] == "found" and r["sn"]:
+                    c.found_sns.add(r["sn"])
+        for c in self.cases.values():
+            del c.events[:-MAX_EVENTS]
+
+    def _persist_case(self, c):
+        with self._lock:
+            self.db.execute(
+                "INSERT OR REPLACE INTO cases (case_id, person_id, status,"
+                " outcome, created, updated, closed_at, missing_at, missing_place,"
+                " possible_to, clothing, contact_phone, police, police_case_no,"
+                " police_station, belongings, vehicle)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (c.case_id, c.person_id, c.status, c.outcome, c.created,
+                 c.updated, c.closed_at, c.missing_at, c.missing_place,
+                 c.possible_to, c.clothing, c.contact_phone, c.police,
+                 c.police_case_no, c.police_station, c.belongings, c.vehicle))
+            self.db.commit()
+
+    def _add_event(self, c, ev):
+        with self._lock:
+            self.db.execute(
+                "INSERT INTO case_events (case_id, t, type, sn, detail)"
+                " VALUES (?,?,?,?,?)",
+                (c.case_id, ev["t"], ev["type"], ev["sn"], ev["detail"]))
+            self.db.commit()
+
+    def _note(self, c, ts, type_, sn="", detail=""):
+        c.note(ts, type_, sn, detail)
+        self._add_event(c, c.events[-1])
 
     def active_case(self, person_id):
         """该走失者当前未结（open/found）案件；无则返回 None。"""
@@ -77,6 +156,11 @@ class CaseManager:
             if c.person_id == person_id and c.status in (CASE_OPEN, CASE_FOUND):
                 return c
         return None
+
+    def open_cases(self):
+        """当前所有未结案件（open/found），供启动时同步走失表。"""
+        return [c for c in self.cases.values()
+                if c.status in (CASE_OPEN, CASE_FOUND)]
 
     def mark(self, person_id, registry, ts=None,
              missing_at="", missing_place="", possible_to="", clothing="",
@@ -103,9 +187,9 @@ class CaseManager:
                  police_station, belongings, vehicle)
         self.cases[cid] = c
         sns = [d.sn for d in devs]
-        for d in devs:
-            d.status = STATUS_LOST
-        c.note(ts, "mark", sn=",".join(sns))
+        registry.set_statuses(sns, STATUS_LOST)   # 设备→丢失（写库）
+        self._note(c, ts, "mark", sn=",".join(sns))
+        self._persist_case(c)
         return c, sns, False
 
     def on_found(self, sn, registry, ts=None, detail=""):
@@ -125,7 +209,8 @@ class CaseManager:
         c.updated = ts
         if sn not in c.found_sns:
             c.found_sns.add(sn)
-            c.note(ts, "found", sn=sn, detail=detail)
+            self._note(c, ts, "found", sn=sn, detail=detail)
+        self._persist_case(c)
         return c
 
     def close(self, case_id, registry, outcome, ts=None):
@@ -143,11 +228,10 @@ class CaseManager:
         c.closed_at = ts
         c.updated = ts
         c.outcome = "found" if outcome == CASE_CLOSED else "revoked"
-        sns = []
-        for d in registry.devices_of(c.person_id):
-            d.status = STATUS_ACTIVE
-            sns.append(d.sn)
-        c.note(ts, "close", sn=",".join(sns), detail=c.outcome)
+        sns = [d.sn for d in registry.devices_of(c.person_id)]
+        registry.set_statuses(sns, STATUS_ACTIVE)   # 设备→启用（写库）
+        self._note(c, ts, "close", sn=",".join(sns), detail=c.outcome)
+        self._persist_case(c)
         return c, sns
 
     def to_dict(self, registry):

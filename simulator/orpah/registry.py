@@ -7,9 +7,11 @@ Orpah ID 的客户端台账：一个「走失者/被保护对象」可绑定多�
 字段：SN、所属组织、CC、绑定走失者（一对多）、状态（启用/停用/丢失/报废）、
 首次入网时间、最近见时间。
 
-纯内存实现（demo 用），后续 P0 审计/告警/案件闭环都挂在这个清册上。
+SQLite 持久化：内存对象（Person/DeviceRecord）为工作集，每次变更写库，启动时读库恢复。
 """
 import re
+import sqlite3
+import threading
 import time
 
 # SN 格式（协议 §2：CC-ORG-UNIQUE[-CHECK]；CC=ISO 3166-1 alpha-2，ORG/UNIQUE=Crockford Base32）
@@ -91,12 +93,74 @@ class DeviceRecord:
 
 
 class Registry:
-    """设备清册：走失者（Person）与客户端（DeviceRecord）的一对多绑定。"""
+    """设备清册：走失者（Person）与客户端（DeviceRecord）的一对多绑定（SQLite 持久化）。"""
 
-    def __init__(self):
+    def __init__(self, db_path=":memory:"):
+        self._lock = threading.Lock()
+        self.db = sqlite3.connect(db_path, check_same_thread=False, timeout=5)
+        self.db.row_factory = sqlite3.Row
+        self._init_db()
         self.persons = {}    # pid -> Person
         self.devices = {}    # sn -> DeviceRecord
         self._pid_seq = 0
+        self._load()
+
+    def _init_db(self):
+        with self._lock:
+            self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS persons (
+                pid TEXT PRIMARY KEY, name TEXT NOT NULL, note TEXT DEFAULT '',
+                gender TEXT DEFAULT '', age TEXT DEFAULT '', height TEXT DEFAULT '',
+                build TEXT DEFAULT '', features TEXT DEFAULT '', health TEXT DEFAULT '',
+                mental TEXT DEFAULT '', communicate TEXT DEFAULT '', photo TEXT DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS devices (
+                sn TEXT PRIMARY KEY, person_id TEXT, cc TEXT DEFAULT '', org TEXT DEFAULT '',
+                status TEXT DEFAULT 'active', first_seen INTEGER, last_seen INTEGER
+            );
+            """)
+            self.db.commit()
+
+    def _load(self):
+        for r in self.db.execute("SELECT * FROM persons"):
+            p = Person(r["pid"], r["name"], r["note"], r["gender"], r["age"],
+                       r["photo"], r["height"], r["build"], r["features"],
+                       r["health"], r["mental"], r["communicate"])
+            self.persons[p.pid] = p
+            n = int(p.pid[1:]) if p.pid[1:].isdigit() else 0
+            self._pid_seq = max(self._pid_seq, n)
+        for r in self.db.execute("SELECT * FROM devices"):
+            d = DeviceRecord(r["sn"], r["org"], r["cc"], r["person_id"],
+                             r["status"], r["first_seen"], r["last_seen"])
+            self.devices[d.sn] = d
+
+    def _persist_person(self, p):
+        with self._lock:
+            self.db.execute(
+                "INSERT OR REPLACE INTO persons (pid, name, note, gender, age,"
+                " height, build, features, health, mental, communicate, photo)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (p.pid, p.name, p.note, p.gender, p.age, p.height, p.build,
+                 p.features, p.health, p.mental, p.communicate, p.photo))
+            self.db.commit()
+
+    def _persist_device(self, d):
+        with self._lock:
+            self.db.execute(
+                "INSERT OR REPLACE INTO devices (sn, person_id, cc, org, status,"
+                " first_seen, last_seen) VALUES (?,?,?,?,?,?,?)",
+                (d.sn, d.person_id, d.cc, d.org, d.status, d.first_seen, d.last_seen))
+            self.db.commit()
+
+    def _delete_person(self, pid):
+        with self._lock:
+            self.db.execute("DELETE FROM persons WHERE pid=?", (pid,))
+            self.db.commit()
+
+    def _delete_device(self, sn):
+        with self._lock:
+            self.db.execute("DELETE FROM devices WHERE sn=?", (sn,))
+            self.db.commit()
 
     # ---- 走失者 ----
     def add_person(self, name, note="", gender="", age="", photo="",
@@ -104,9 +168,10 @@ class Registry:
                    communicate=""):
         self._pid_seq += 1
         pid = f"P{self._pid_seq:03d}"
-        self.persons[pid] = Person(pid, name, note, gender, age, photo,
-                                   height, build, features, health, mental,
-                                   communicate)
+        p = Person(pid, name, note, gender, age, photo,
+                   height, build, features, health, mental, communicate)
+        self.persons[pid] = p
+        self._persist_person(p)
         return pid
 
     # ---- 设备 ----
@@ -131,6 +196,7 @@ class Registry:
             rec.org, rec.cc = org, cc
             rec.person_id = person_id
             rec.status = status
+        self._persist_device(rec)
         return rec
 
     def get(self, sn):
@@ -143,6 +209,7 @@ class Registry:
         if rec is None:
             raise KeyError(f"未知 SN: {sn}")
         rec.status = status
+        self._persist_device(rec)
         return rec
 
     def touch(self, sn, ts=None):
@@ -158,12 +225,14 @@ class Registry:
         if rec.first_seen is None:
             rec.first_seen = ts
         rec.last_seen = ts
+        self._persist_device(rec)
         return rec
 
     def remove_device(self, sn):
         """删除设备；存在返回 True。"""
         if sn in self.devices:
             del self.devices[sn]
+            self._delete_device(sn)
             return True
         return False
 
@@ -183,15 +252,18 @@ class Registry:
             v = locals().get(k)
             if v is not None:
                 setattr(p, k, v)
+        self._persist_person(p)
         return p
 
     def remove_person(self, pid):
         """删除走失者；其名下设备全部解绑（person_id=None）。返回解绑设备数。"""
         self.persons.pop(pid, None)
+        self._delete_person(pid)
         n = 0
         for rec in self.devices.values():
             if rec.person_id == pid:
                 rec.person_id = None
+                self._persist_device(rec)
                 n += 1
         return n
 
@@ -206,6 +278,7 @@ class Registry:
                 missing.append(sn)
             else:
                 rec.status = status
+                self._persist_device(rec)
                 ok += 1
         return ok, missing
 
@@ -218,6 +291,10 @@ class Registry:
     def person_name(self, person_id):
         p = self.persons.get(person_id)
         return p.name if p else None
+
+    def lost_sns(self):
+        """当前「丢失」态设备 SN 列表（供 index 标红）。"""
+        return [d.sn for d in self.devices.values() if d.status == STATUS_LOST]
 
     def to_dict(self):
         return {
