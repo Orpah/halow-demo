@@ -103,4 +103,25 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - 数据模型：设备上报 `root.orpah.devices.<sn>`（测点 rssi/seq/router_id），
   业务事件 `root.orpah.events`（etype/sn/detail：case_mark/case_found/case_close）。
 - IoTDB 未启动时写入静默降级、每 10s 重连一次，不影响 SQLite/UI。
+- `track.html` 的「真实上报」模式消费本接口：按时间升序画 RSSI 时序 + 按 A/n 换算距离。
+  单测点只能得「距离环」，需多路由器（各自带 `router_id` + 已知坐标）才可三边定位到点。
+
+---
+
+## 6. `/api/checksum`（SN 校验位 / 拟群表）
+
+`GET /api/checksum?action=<a>&...`，算法单一源 = `damm32.py` / `luhn32.py` / `mod97.py`
+（前端不再各留一份实现，避免两套算法漂移）。
+
+| action | 参数 | 返回 |
+| --- | --- | --- |
+| `compute` | `algo=damm32\|luhn32\|mod97`，`org_unique=<SN 去 CC 段>` | `{ok, algo, org_unique, check, valid}` |
+| `verify` | `algo`，`body=<SN 去 CC 段 + "-" + 校验位>` | `{ok, algo, valid}` |
+| `table` | `algo=damm32` | `{ok, algo, crockford, quasigroup[32][32], valid, checks:{latin,diag_zero,adjacent_transposition}}` |
+| `brute` | `n=32`，`maxlen=N` | `{ok, miss, ms}`，`miss=null` 表示无漏检 |
+
+- `check` 为校验位字符串（mod97 两位十进制）；`full` 由前端拼成 `CC-ORG-UNIQUE-CHECK`。
+- `valid` = 用该算法回验 `ORG-UNIQUE-CHECK` 是否通过（`compute` 恒为 `true`，可作自检）。
+- `algo` / `action` 未知 → `{ok:false, err:"..."}`；参数非法一律 `ok:false`，不抛 500。
+- `brute` 在服务端穷举（`maxlen=3` 约 1.05s），前端只负责展示。
 

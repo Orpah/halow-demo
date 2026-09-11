@@ -47,6 +47,25 @@
 </header>
 
 <section class="card">
+  <h3>0 · 数据源</h3>
+  <div class="row">
+    <label>数据源
+      <select id="dsMode">
+        <option value="sim" selected>模拟（本地合成）</option>
+        <option value="real">真实上报（IoTDB 时序）</option>
+      </select>
+    </label>
+    <label>设备 SN
+      <select id="dsSn" style="min-width:280px"></select>
+    </label>
+    <label>最近 <input id="dsLimit" type="number" step="50" value="200" min="10" style="width:80px"> 点</label>
+    <label><input id="dsAuto" type="checkbox" checked> 自动刷新 2s</label>
+    <button class="btn" id="dsLoad">立即拉取</button>
+  </div>
+  <p class="hint" id="dsInfo">模拟模式：本地合成 RSSI。切到「真实上报」会从 IoTDB 读取该设备真实上报的 RSSI 时序。</p>
+</section>
+
+<section class="card" id="cardMap">
   <h3>地图接口</h3>
   <div class="row">
     <label>视图
@@ -74,8 +93,8 @@
 </section>
 
 <section class="card">
-  <h3>1 · 模拟参数</h3>
-  <div class="row">
+  <h3 id="head1">1 · 模拟参数</h3>
+  <div class="row" id="rowSimPath">
     <label>路径
       <select id="pathType">
         <option value="walk" selected>随机游走</option>
@@ -85,16 +104,19 @@
     </label>
     <label>步长 <input id="step" type="number" step="0.5" value="3"> m/tick</label>
     <label>噪声 ±<input id="noise" type="number" step="0.5" value="2"> dBm</label>
-    <label>A（1m RSSI）<input id="plA" type="number" step="0.1" value="-40"></label>
-    <label>n <input id="plN" type="number" step="0.1" value="2.5"></label>
   </div>
   <div class="row" style="margin-top:8px">
+    <label>A（1m RSSI）<input id="plA" type="number" step="0.1" value="-40"></label>
+    <label>n <input id="plN" type="number" step="0.1" value="2.5"></label>
+    <span class="hint">RSSI ↔ 距离换算参数（模拟 / 真实两种模式共用）。</span>
+  </div>
+  <div class="row" style="margin-top:8px" id="rowSimRun">
     <label><input id="showTrue" type="checkbox" checked> 显示真实轨迹</label>
     <label>tick <input id="tick" type="number" step="50" value="200" min="50"> ms</label>
   </div>
 </section>
 
-<section class="card">
+<section class="card" id="cardAnchors">
   <h3>2 · 路由器测点（无人机悬停 / 固定 AP）</h3>
   <div class="row">
     <button class="btn" id="btnAdd">添加测点</button>
@@ -109,16 +131,24 @@
 </section>
 
 <section class="card">
-  <h3>3 · 实时定位与轨迹</h3>
+  <h3 id="head3">3 · 实时定位与轨迹</h3>
   <div id="map" style="display:none"></div>
   <canvas id="canvas" width="620" height="420"></canvas>
-  <div class="stat mono">
+  <div class="stat mono" id="statSim">
     <div><span class="k">tick：</span><span id="stTick">0</span></div>
     <div><span class="k">真实位置：</span><span id="stTrue">-</span></div>
     <div><span class="k">定位估计：</span><span class="v-ok" id="stEst">-</span></div>
     <div><span class="k">定位误差：</span><span class="v-err" id="stErr">-</span></div>
   </div>
-  <p class="hint">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
+  <div class="stat mono" id="statReal" style="display:none">
+    <div><span class="k">设备：</span><span id="stSn">-</span></div>
+    <div><span class="k">样本数：</span><span id="stN">0</span></div>
+    <div><span class="k">最新 RSSI：</span><span class="v-ok" id="stRssi">-</span></div>
+    <div><span class="k">距离估计：</span><span id="stDist">-</span></div>
+    <div><span class="k">最新时间：</span><span id="stTime">-</span></div>
+    <div><span class="k">seq / router：</span><span id="stMeta">-</span></div>
+  </div>
+  <p class="hint" id="hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
 </section>
 
 <script>
@@ -130,6 +160,9 @@ const MAX_HIST = 800;       // 轨迹最多保留点数
 
 let timer = null;
 let tick = 0;
+let dsMode = "sim";         // sim | real（真实上报 IoTDB 时序）
+let realSamples = [];       // [{t,rssi,seq,router_id}]，时间升序
+let realTimer = null;
 let client = { x: 0, y: 0 };
 let heading = 0;            // 直线/圆周用
 const trueHist = [], estHist = [];
@@ -309,6 +342,7 @@ function polyline(ctx, pts, color) {
   ctx.stroke();
 }
 function draw() {
+  if (dsMode === "real") { drawRssi(); return; }
   if ($("view").value === "map") { drawMap(); return; }
   const c = $("canvas"), ctx = c.getContext("2d");
   const W = c.width, H = c.height, cx = 310, cy = 210;
@@ -383,8 +417,165 @@ $("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; } if ($(
 $("baseLat").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 $("baseLng").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 
+/* ---- 真实上报模式（IoTDB 时序）---- */
+function fmtTime(ms) {
+  const d = new Date(ms), p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function drawRssi() {
+  const c = $("canvas"), ctx = c.getContext("2d");
+  const W = c.width, H = c.height, L = 54, R = 16, T = 16, B = 30;
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "13px monospace";
+  if (!realSamples.length) {
+    ctx.fillStyle = "#8b949e";
+    ctx.fillText("没有真实上报数据（IoTDB 未启动，或该 SN 还没上报）", 20, H / 2);
+    return;
+  }
+  const t0 = realSamples[0].t, t1 = realSamples[realSamples.length - 1].t;
+  const rs = realSamples.map(p => p.rssi);
+  let lo = Math.min(...rs), hi = Math.max(...rs);
+  if (hi - lo < 6) { const m = (hi + lo) / 2; lo = m - 3; hi = m + 3; }
+  else { const pad = (hi - lo) * 0.1; lo -= pad; hi += pad; }
+  const X = (t) => L + (t1 > t0 ? (t - t0) / (t1 - t0) : 0.5) * (W - L - R);
+  const Y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
+
+  ctx.strokeStyle = "#1c2128"; ctx.lineWidth = 1;
+  ctx.fillStyle = "#8b949e"; ctx.font = "11px monospace";
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
+    ctx.fillText(v.toFixed(0), 10, y + 4);
+  }
+  ctx.strokeStyle = "#30363d";
+  ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, H - B); ctx.lineTo(W - R, H - B); ctx.stroke();
+
+  ctx.fillStyle = "#8b949e";
+  ctx.fillText("dBm", L + 2, T + 10);
+  ctx.fillText(fmtTime(t0), L, H - 10);
+  const tm = fmtTime((t0 + t1) / 2);
+  ctx.fillText(tm, L + (W - L - R - ctx.measureText(tm).width) / 2, H - 10);
+  const te = fmtTime(t1);
+  ctx.fillText(te, W - R - ctx.measureText(te).width, H - 10);
+
+  ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 1.5; ctx.beginPath();
+  realSamples.forEach((p, i) => {
+    const x = X(p.t), y = Y(p.rssi);
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  const last = realSamples[realSamples.length - 1];
+  ctx.fillStyle = "#f85149";
+  ctx.beginPath(); ctx.arc(X(last.t), Y(last.rssi), 3.5, 0, 2 * Math.PI); ctx.fill();
+}
+
+async function refreshSnList() {
+  const sel = $("dsSn");
+  try {
+    const r = await fetch("/api/registry").then(x => x.json());
+    const who = {};
+    (r.persons || []).forEach(p => { who[p.pid] = p.name; });
+    const keep = sel.value;
+    sel.innerHTML = "";
+    for (const d of (r.devices || [])) {
+      const o = document.createElement("option");
+      o.value = d.sn;
+      o.textContent = `${d.sn} · ${d.person_id ? (who[d.person_id] || d.person_id) : "未绑定"} · ${d.status}` +
+                      (d.last_seen ? "" : " · 无上报");
+      sel.appendChild(o);
+    }
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+  } catch (e) { console.error("registry:", e); }
+}
+
+async function loadReal() {
+  const sn = $("dsSn").value;
+  const info = $("dsInfo");
+  if (!sn) {
+    realSamples = [];
+    info.textContent = "没有可用设备（请先到「设备清册」注册）。";
+    updateRealStat(); draw(); return;
+  }
+  const limit = Math.min(5000, Math.max(10, parseInt($("dsLimit").value) || 200));
+  try {
+    const r = await fetch(`/api/ts/query?sn=${encodeURIComponent(sn)}&limit=${limit}`).then(x => x.json());
+    realSamples = (r.ok && r.rows) ? r.rows.slice().reverse() : [];   // IoTDB 按时间倒序返回 → 翻正
+    if (!r.ok) {
+      info.textContent = "IoTDB 不可达（服务未启动？）—— 切回模拟模式仍可演示。";
+    } else if (!realSamples.length) {
+      info.textContent = `IoTDB：${sn} 还没有上报记录（先让设备发几包，再点「立即拉取」）。`;
+    } else {
+      info.textContent = `IoTDB：${sn} 取到 ${realSamples.length} 个真实上报点。` +
+        `当前演示只有 1 台 Router 且上报里 router_id 为空 → 单测点只能得到「距离」，不足以定位到点；` +
+        `多路由器（各自带 router_id + 已知坐标）上报后才可三边定位。`;
+    }
+  } catch (e) {
+    realSamples = [];
+    info.textContent = "IoTDB 查询失败：" + e;
+  }
+  updateRealStat();
+  draw();
+}
+
+function updateRealStat() {
+  const n = realSamples.length;
+  $("stSn").textContent = $("dsSn").value || "-";
+  $("stN").textContent = n;
+  if (!n) {
+    $("stRssi").textContent = "-"; $("stDist").textContent = "-";
+    $("stTime").textContent = "-"; $("stMeta").textContent = "-";
+    return;
+  }
+  const p = realSamples[n - 1];
+  const d = distFromRssi(p.rssi, plA(), plN());
+  $("stRssi").textContent = `${p.rssi.toFixed(1)} dBm`;
+  $("stDist").textContent = `≈ ${d.toFixed(1)} m（A=${plA()}，n=${plN()}）`;
+  $("stTime").textContent = new Date(p.t).toLocaleString();
+  $("stMeta").textContent = `seq=${p.seq}，router_id=${p.router_id || "（空）"}`;
+}
+
+function applyMode() {
+  dsMode = $("dsMode").value;
+  const real = dsMode === "real";
+  $("rowSimPath").style.display = real ? "none" : "";
+  $("rowSimRun").style.display = real ? "none" : "";
+  $("head1").textContent = real ? "1 · RSSI ↔ 距离换算" : "1 · 模拟参数";
+  $("cardMap").style.display = real ? "none" : "";
+  $("cardAnchors").style.display = real ? "none" : "";
+  $("statSim").style.display = real ? "none" : "";
+  $("statReal").style.display = real ? "" : "none";
+  $("head3").textContent = real ? "3 · 真实上报（IoTDB 时序）" : "3 · 实时定位与轨迹";
+  $("hint3").textContent = real
+    ? "蓝线=真实 RSSI 时序（IoTDB）、红点=最新样本；纵轴 dBm、横轴时间。"
+    : "蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。";
+  if (realTimer) { clearInterval(realTimer); realTimer = null; }
+  if (real) {
+    if (timer) { clearInterval(timer); timer = null; $("btnRun").textContent = "开始"; }
+    $("view").value = "canvas";
+    $("map").style.display = "none";
+    $("canvas").style.display = "block";
+    refreshSnList().then(loadReal);
+    if ($("dsAuto").checked) realTimer = setInterval(loadReal, 2000);
+  } else {
+    draw(); updateStat(null);
+  }
+}
+
+$("dsMode").onchange = applyMode;
+$("dsLoad").onclick = loadReal;
+$("dsSn").onchange = loadReal;
+$("dsLimit").onchange = loadReal;
+$("dsAuto").onchange = () => {
+  if (realTimer) { clearInterval(realTimer); realTimer = null; }
+  if (dsMode === "real" && $("dsAuto").checked) realTimer = setInterval(loadReal, 2000);
+};
+$("plA").onchange = () => { if (dsMode === "real") { updateRealStat(); draw(); } };
+$("plN").onchange = () => { if (dsMode === "real") { updateRealStat(); draw(); } };
+
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
+refreshSnList();
 draw(); updateStat(null);
 </script>
 </body>
