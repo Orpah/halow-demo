@@ -5,8 +5,10 @@
 <title>定位与轨迹 — ORPAH-over-HaLow</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="style.css?v=20260910f">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet 1.9.4 本地化（BSD-2-Clause，见 vendor/leaflet/LICENSE-leaflet.txt）：
+     不再依赖 unpkg CDN，离线部署也能用地图视图。升级时整目录替换并保留许可文件。 -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<script src="vendor/leaflet/leaflet.js"></script>
 <style>
   .back { margin-left: 10px; }
   .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
@@ -87,6 +89,7 @@
     </label>
     <label><span data-i18n="tk_tile_url">自定义瓦片 URL</span> <input id="tileUrl" style="width:340px" placeholder="https://…/{z}/{x}/{y}.png"></label>
   </div>
+  <p class="hint" id="tileNote"></p>
   <div class="row" style="margin-top:8px">
     <label><span data-i18n="tk_base_lat">基点纬度</span> <input id="baseLat" type="number" step="0.0001" value="39.9042"></label>
     <label><span data-i18n="tk_base_lng">基点经度</span> <input id="baseLng" type="number" step="0.0001" value="116.4074"></label>
@@ -310,14 +313,28 @@ function stepOnce() {
   updateStat(est);
 }
 
-/* ---- 地图（Leaflet，用户指定瓦片源）---- */
+/* ---- 地图（Leaflet，用户指定瓦片源）----
+   每个源三要素：url + attr（署名，必须可见）+ note（条款说明键，走字典 zh/en）。
+   各源许可/条款差别很大，尤其 osm.org 官方瓦片禁止离线/预取，且无 SLA —— 见 ROADMAP §七。 */
 const TILE_PROVIDERS = {
-  osm: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attr: "© OpenStreetMap contributors" },
-  opentopo: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", attr: "© OpenTopoMap (CC-BY-SA)" },
-  carto: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", attr: "© OpenStreetMap © CARTO" },
-  esri: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr: "© Esri" },
-  custom: { url: "", attr: "" },
+  osm: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+         attr: "© OpenStreetMap contributors", note: "tile_note_osm" },
+  opentopo: { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+              // OpenTopoMap 官方要求的署名文本（不能简写成 © OpenTopoMap (CC-BY-SA)）
+              attr: "Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)",
+              note: "tile_note_opentopo" },
+  carto: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+           attr: "© OpenStreetMap contributors © CARTO", note: "tile_note_carto" },
+  esri: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+          attr: "© Esri", note: "tile_note_esri" },
+  custom: { url: "", attr: "", note: "tile_note_custom" },
 };
+function refreshTileNote() {
+  const el = $("tileNote");
+  if (!el) return;
+  const p = TILE_PROVIDERS[$("tileSrc").value] || TILE_PROVIDERS.custom;
+  el.textContent = T(p.note);
+}
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
 let lRings = [], lEstLoc = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计
 
@@ -473,7 +490,7 @@ function applyView() {
   draw();
 }
 $("view").onchange = applyView;
-$("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } if ($("view").value === "map") applyView(); };
+$("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } refreshTileNote(); if ($("view").value === "map") applyView(); };
 $("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } if ($("view").value === "map") applyView(); };
 $("baseLat").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
 $("baseLng").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
@@ -1005,6 +1022,7 @@ $("stationBody").onchange = async (e) => {
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
 OrpahI18n.apply();
+refreshTileNote();
 refreshSnList();
 draw(); updateStat(null);
 </script>

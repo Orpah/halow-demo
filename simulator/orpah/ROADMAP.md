@@ -36,6 +36,11 @@
     不足 2 个时直接提示、不出估计点。
   - 未做：置信半径（站形条件数已能提示共线，见上）。
 - [ ] **离线地图与野外包**：PMTiles/区域离线包切换、经纬度基点导入、轨迹导出 GPX/GeoJSON。
+  - **授权约束（2026-09-11 核实，必须遵守）**：`tile.openstreetmap.org` 的 Tile Usage Policy **明令禁止离线**
+    （"Offline use is not permitted on tile.openstreetmap.org"），也禁止预取/批量下载/建瓦片包；
+    且无 SLA、可无预警封禁，policy 原文提醒「商业服务可能随时失去访问」。
+    故本项**不得**基于 OSM 官方瓦片，必须自建瓦片（switch2osm，PMTiles 自建即合规）
+    或改用明确允许离线的供应商。
 
 ## 三、案件闭环 + 安全事件与运维
 
@@ -70,6 +75,27 @@
 | `sig.html` | `/api/sig` | 无（内存 KeyStore） | `KeyStore.save/load` 存在但 UI 未接；重启丢密钥 |
 | `checksum.html` / `damm32.html` | `/api/checksum` | 无 | 纯计算，产出用完即弃 |
 | `rssi.html` | 无 | 无 | 纯前端算法演示 |
+
+## 七、第三方素材与许可（2026-09-11 核实）
+
+| 素材 | 位置 | 许可 | 义务 / 风险 |
+|---|---|---|---|
+| **Leaflet 1.9.4** | `ui/static/vendor/leaflet/`（已入库） | **BSD-2-Clause** | 保留版权与许可文本（已附 `LICENSE-leaflet.txt`）；可商用、无 copyleft |
+| 底图瓦片 | 运行时外部请求，**不入库** | 各源不同 | 见 `track.html` 的 `TILE_PROVIDERS`；页面上选了哪个源就显示对应条款提示 |
+
+**底图要点（选型时必读）**：
+
+- `tile.openstreetmap.org`（默认）受独立的 [Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/) 约束：
+  必须**可见署名**、必须**可识别 UA**（网页场景浏览器默认 UA 可接受）、必须**遵守缓存头**（≥7 天）；
+  **禁止**批量下载 / 预取 / 离线打包 / 高倍自动扫图；**无 SLA，可无预警封禁**。
+- **OpenTopoMap** = CC-BY-SA 3.0：可商用、免许可费；需按官方文本署名
+  （`Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)`，
+  不能简写），且衍生作品需相同方式共享。
+- **CARTO / Esri**：商业服务商，生产使用前需单独确认条款（可能需账号/付费）。
+- **结论**：本库演示用法（网页内嵌 + attribution 控件 + 可自定义源）合规；
+  但**产品化与离线场景不得依赖 OSM 官方瓦片**。
+
+---
 
 ## 优先级
 
