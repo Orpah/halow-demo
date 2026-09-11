@@ -129,7 +129,11 @@
   </div>
   <canvas id="canvasReplay" width="620" height="420"></canvas>
   <div id="map" style="display:none"></div>
-  <p class="hint" data-i18n="rp_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、灰点=当时无观测的站位。</p>
+  <p class="hint">
+    <label><input type="checkbox" id="rpSmooth" checked> <span data-i18n="rp_smooth">轨迹平滑（恒速卡尔曼）</span></label>
+    <span class="hint" data-i18n="rp_smooth_hint">平滑用**恒速卡尔曼**（不是滑动平均）：靠速度外推，几乎没有滞后；搜索半径用滤波后协方差，不用测量协方差。</span>
+  </p>
+  <p class="hint" data-i18n="rp_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、绿线=平滑轨迹（恒速卡尔曼）、灰点=当时无观测的站位。</p>
   <p class="hint" data-i18n="rp_legend_map">地图视图：蓝点=站位、蓝圈=距离环（半径即测距）、红点=该时刻定位估计、黄虚线多边形=95% 置信椭圆、红线=已回放轨迹（**跨无观测缺口会断开**，不会画成一段直路）。地图瓦片需联网。</p>
   <div class="stat mono">
     <div class="cell"><span class="k" data-i18n="rp_lab_used">参与定位</span><span class="v" id="rpUsed">-</span></div>
@@ -137,6 +141,9 @@
     <div class="cell"><span class="k" data-i18n="rp_lab_res">残差 RMS</span><span class="v" id="rpRes">-</span></div>
     <div class="cell"><span class="k" data-i18n="rp_lab_gdop">GDOP</span><span class="v" id="rpGdop">-</span></div>
     <div class="cell"><span class="k" data-i18n="rp_lab_rad">搜索半径</span><span class="v" id="rpRad">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_smooth">平滑估计</span><span class="v v-ok" id="rpSmLoc">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_rad_s">平滑搜索半径</span><span class="v" id="rpSmRad">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_lab_jitter">轨迹抖动</span><span class="v" id="rpJit">-</span></div>
     <div class="cell"><span class="k" data-i18n="rp_lab_obs">当时 RSSI</span><span class="v" id="rpObs">-</span></div>
     <div class="cell"><span class="k" data-i18n="rp_lab_last">最近事件</span><span class="v" id="rpLast">-</span></div>
   </div>
@@ -202,14 +209,17 @@ const S = {                          // 回放状态
   points: [], obs: {}, events: [], stations: [],
   t: 0, playing: false, timer: null,
   seg: null,                         // 有效时段分段（obsSegments 结果）
+  frames: [], sm: [],                // 原始位置帧（含协方差）与卡尔曼平滑后的帧
+  jitRaw: 0, jitSm: 0,               // 轨迹抖动（相邻帧距离均值）：原始 vs 平滑
   trail: [],                         // 已回放出的估计点（画轨迹；null = 缺口断开）
 };
 
 /* ---- 地图视图（Leaflet）----
    底图源 / 条款说明 / 本地坐标→经纬度换算都在 **map.js**（与实时页共用单一源）。
    本页只保留自己的图层：回放的轨迹要**跨缺口断开**、站位固定、另有 95% 椭圆。 */
-let lmap = null, lMarks = [], lRings = [], lEst = null, lEll = null, lRuns = [];
+let lmap = null, lMarks = [], lRings = [], lEst = null, lEll = null, lRuns = [], lSmRuns = [];
 let mapSig = "";                     // 标记签名（站位集合 + 基点）；基点变必须重画
+let lSmDot = null;                    // 平滑位置点（绿）
 let mapFitDone = false;               // 每次载入数据/换基点后，只自动框景一次（之后不抢用户平移）
 
 function mapActive() { return $("view") && $("view").value === "map"; }
@@ -273,6 +283,20 @@ function drawMapView(obs, est, ell) {
     if (!lRuns[i]) lRuns[i] = L.polyline([], { color: "#f85149", weight: 2 }).addTo(lmap);
     lRuns[i].setLatLngs(pts);
   });
+  /* 平滑轨迹（绿）：同样跨缺口断开 */
+  const sruns = (smoothOn() && S.sm.length > 1) ? smRuns(S.t).map(r => r.map(p => toLatLng(p.x, p.y))) : [];
+  while (lSmRuns.length > sruns.length) lSmRuns.pop().remove();
+  sruns.forEach((pts, i) => {
+    if (!lSmRuns[i]) lSmRuns[i] = L.polyline([], { color: "#3fb950", weight: 2 }).addTo(lmap);
+    lSmRuns[i].setLatLngs(pts);
+  });
+  const sv = smoothAt(S.t);
+  if (sv) {
+    const ll = toLatLng(sv.pt.x, sv.pt.y);
+    if (!lSmDot) lSmDot = L.circleMarker(ll, { color: "#3fb950", radius: 6, weight: 2,
+      fillColor: "#3fb950", fillOpacity: 0.9 }).addTo(lmap);
+    else lSmDot.setLatLng(ll);
+  } else if (lSmDot) { lmap.removeLayer(lSmDot); lSmDot = null; }
 }
 
 /* 自动框住「场景」：站位 + 已回放轨迹。
@@ -354,6 +378,7 @@ async function loadReplay() {
       + (rep.truncated ? " · " + T("rp_truncated") : "");
     rpInfo("");                     // 先清掉「拉取中…」，再由 analyzeValid 写「光标已落…」
     analyzeValid();
+    precomputeFrames();             // 全窗位置帧 + 卡尔曼平滑（一次算完，之后每帧只取 t<=光标）
     renderTimeline();
     render();
   } catch (e) {
@@ -487,6 +512,19 @@ function render() {
   $("rpLast").textContent = ev
     ? clockOf(ev.t) + " " + evtLabel(ev.etype) + (ev.sn ? " " + ev.sn : "") : "-";
 
+  /* 平滑（可选）：光标时刻的平滑位置 + 平滑后的搜索半径（来自滤波后协方差 P）+ 抖动对比 */
+  const smv = smoothAt(S.t);
+  const smEll = (smv && smv.pt.cov) ? ellipseOf(smv.pt.cov) : null;
+  $("rpSmLoc").textContent = smv ? `( ${smv.pt.x.toFixed(1)}, ${smv.pt.y.toFixed(1)} )` : "-";
+  $("rpSmLoc").className = "v " + (smv ? "v-ok" : "");
+  $("rpSmRad").textContent = smEll ? T("rp_rad_fmt").replace("{v}", smEll.radius.toFixed(1)) : "-";
+  if (S.frames.length > 3) {
+    const drop = S.jitRaw > 0 ? (1 - S.jitSm / S.jitRaw) * 100 : 0;
+    $("rpJit").textContent = T("rp_jit_fmt")
+      .replace("{a}", S.jitRaw.toFixed(1)).replace("{b}", S.jitSm.toFixed(1))
+      .replace("{p}", (drop >= 0 ? "−" : "+") + Math.abs(drop).toFixed(0));
+  } else { $("rpJit").textContent = "-"; }
+
   /* 进度与时刻 */
   const span = Math.max(S.to - S.from, 1);
   $("rpSeek").value = Math.round((S.t - S.from) / span * 1000);
@@ -499,6 +537,52 @@ function lastEvent() {
   let last = null;
   for (const e of S.events) { if (e.t <= S.t) last = e; else break; }
   return last;
+}
+
+/* 平滑轨迹（到光标 t 为止；卡尔曼在长时间缺口处 reset → 断开） */
+function smRuns(t) {
+  const runs = []; let cur = [];
+  for (const p of S.sm) {
+    if (p.t > t) break;
+    if (p.reset && cur.length) { runs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
+function smoothOn() { return $("rpSmooth") && $("rpSmooth").checked; }
+
+/* 预计算全窗的「原始位置帧」（每个观测时刻解一次 WLS，带协方差）→ 再滤波。
+   为什么要预计算：滤波需要**逐帧**的位置与协方差，而 render() 每帧只解当前时刻；
+   全窗一次算完（~900 帧量级，一次 WLS 解很便宜）后，每帧只需把 t<=光标的帧过一遍滤波。
+   **不看未来**：卡尔曼是因果的，且这里只取 `t <= S.t` 的输出。 */
+function precomputeFrames() {
+  const A = parseFloat($("rpA").value), n = parseFloat($("rpN").value);
+  const times = new Set();
+  for (const s of S.stations) {
+    (S.obs[s.sid] && S.obs[s.sid].length ? S.obs[s.sid] : S.points)
+      .forEach(p => { if (p.t >= S.from && p.t <= S.to) times.add(p.t); });
+  }
+  const frames = [];
+  for (const t of [...times].sort((a, b) => a - b)) {
+    const obs = obsAt(S.stations, samplesOf, t, A, n);
+    if (obs.length < 2) continue;
+    const lin = trilaterate(obs.map(x => ({ x: x.s.x, y: x.s.y })), obs.map(x => x.dist), null);
+    const w = lin ? wlsLocate(obs, lin) : null;
+    if (w && w.ok) frames.push({ t, x: w.x, y: w.y, cov: w.cov });
+  }
+  S.frames = frames;
+  S.sm = kalmanTrack(frames);
+  S.jitRaw = pathJitter(frames);
+  S.jitSm = pathJitter(S.sm);
+}
+
+/* 光标时刻的平滑结果（只取 t <= 光标的最后一帧） + 已回放到的平滑轨迹 */
+function smoothAt(t) {
+  if (!smoothOn() || !S.sm.length) return null;
+  for (let i = S.sm.length - 1; i >= 0; i--) if (S.sm[i].t <= t) return { pt: S.sm[i], n: i + 1 };
+  return null;
 }
 
 function draw(obs, est, ell) {
@@ -539,6 +623,24 @@ function draw(obs, est, ell) {
       if (started) ctx.lineTo(X, Y); else { ctx.moveTo(X, Y); started = true; }
     }
     ctx.stroke();
+  }
+  /* 平滑轨迹（恒速卡尔曼，绿）：与原始（红）并列画，不改原始结果 */
+  if (smoothOn() && S.sm.length > 1) {
+    ctx.strokeStyle = "#3fb950"; ctx.lineWidth = 2;
+    for (const run of smRuns(S.t)) {
+      ctx.beginPath();
+      run.forEach((p, i) => {
+        const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
+        if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+      });
+      ctx.stroke();
+    }
+    const sv = smoothAt(S.t);
+    if (sv) {
+      const X = cx + sv.pt.x * SCALE, Y = cy - sv.pt.y * SCALE;
+      ctx.fillStyle = "#3fb950";
+      ctx.beginPath(); ctx.arc(X, Y, 4.5, 0, 2 * Math.PI); ctx.fill();
+    }
   }
   if (est) {
     if (ell) {                                       // 95% 置信椭圆
@@ -616,6 +718,7 @@ $("rpSeek").oninput = () => {
   render();
 };
 $("rpSkip").onchange = () => { $("rpValid").title = ""; };
+$("rpSmooth").onchange = () => { render(); };
 $("view").onchange = applyView;
 /* 换瓦片源 / 改基点：地图图层必须重建（地图对象本身先销毁释放瓦片） */
 $("tileSrc").onchange = () => { resetMap(); };
@@ -625,6 +728,7 @@ $("baseLng").onchange = () => { resetMap(); };
 function resetMap() {
   if (lmap) { lmap.remove(); lmap = null; }
   lMarks = []; lRings = []; lRuns = []; lEst = null; lEll = null; mapSig = "";
+  lSmRuns = []; lSmDot = null;
   mapFitDone = false;
   refreshTileNote();
   if (mapActive()) applyView();

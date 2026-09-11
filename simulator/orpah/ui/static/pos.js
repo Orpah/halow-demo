@@ -326,6 +326,166 @@ function obsAt(stations, samples, t, A, n) {
   return out;
 }
 
+/* ---------------- 时序平滑（恒速卡尔曼） ----------------
+   为什么**不能**用滑动平均/低通：对**移动目标**，N 点平均的滞后 ≈ (N/2) 个采样周期 ——
+   站位 2 s 一采、人走 1.2 m/s 时，5 点平均就滞后 ~5 m，比测量噪声（±2 dBm ≈ 1~2 m 测距）还大，
+   结果是"看起来平滑了、其实偏了"。所以用**恒速模型**（状态 x,y,vx,vy）：它用速度外推，
+   匀速运动下几乎没有滞后，同时把抖动压下去。
+
+   与「搜索半径」的关系（ROADMAP 挂的开放问题，这里给出答案）：
+   **滤波之后的不确定度不再等于测量协方差** —— 必须用滤波器的**后验协方差 P**
+   （含过程噪声 Q 与测量噪声 R）给椭圆/半径；否则会把"平滑后的平滑"当成真实精度，
+   正是本页一直在防的那种假自信。本函数返回每帧的 P 投影 → 由 `ellipseOf` 出椭圆。
+
+   输入：按时间升序的**位置帧** [{t, x, y, cov?}]（cov={a,b,c} 为该帧测量协方差，缺省用 sigma 估值），
+   即"松耦合"做法（对已解出的位置做滤波，而不是对 RSSI 做 EKF）—— 简单、够用；
+   严格的非线性 EKF（直接滤测距）留作后续。**跨越长时间缺口会重置**（见 MAX_DT_MS），
+   否则滤波会把缺口两侧当成连续运动。 */
+const KF_ACC = 1.5;          // 过程噪声：加速度不确定度（m/s²）。人走路急停/转身的量级
+const KF_SIG0 = 15;          // 起步先验位置不确定度（m）
+const KF_VEL0 = 3;           // 起步先验速度不确定度（m/s）
+const KF_MAX_DT_MS = 10000;  // 两帧间隔超过它 = 缺口 → 重置（别把中断当匀速运动）
+
+function kalmanTrack(frames, opts) {
+  const o = opts || {};
+  const qa = o.acc !== undefined ? o.acc : KF_ACC;
+  const dtMax = o.maxDtMs !== undefined ? o.maxDtMs : KF_MAX_DT_MS;
+  const sigOf = (f) => {
+    if (f.cov) {                       // 测量协方差（WLS 给的 2×2）
+      return { a: f.cov.a, b: f.cov.b, c: f.cov.c };
+    }
+    const s = (f.sigma || 3) * (f.sigma || 3);
+    return { a: s, b: 0, c: s };
+  };
+  let st = null;                       // [x, y, vx, vy]
+  let P = null;                        // 4×4
+  const out = [];
+  const mat4 = () => [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+  for (const f of frames) {
+    const R = sigOf(f);
+    if (!st) {                          // 起步：位置取该帧，速度给 0 但方差大
+      st = [f.x, f.y, 0, 0];
+      P = mat4();
+      P[0][0] = P[1][1] = KF_SIG0 * KF_SIG0;
+      P[2][2] = P[3][3] = KF_VEL0 * KF_VEL0;
+      out.push({ t: f.t, x: f.x, y: f.y, vx: 0, vy: 0, cov: { a: R.a, b: R.b, c: R.c } });
+      continue;
+    }
+    const dt = Math.max(0.001, (f.t - out[out.length - 1].t) / 1000);
+    if (dt * 1000 > dtMax) {            // 缺口 → 重置（并且不把两侧连成一条直线）
+      st = [f.x, f.y, 0, 0];
+      P = mat4();
+      P[0][0] = P[1][1] = KF_SIG0 * KF_SIG0;
+      P[2][2] = P[3][3] = KF_VEL0 * KF_VEL0;
+      out.push({ t: f.t, x: f.x, y: f.y, vx: 0, vy: 0, cov: { a: R.a, b: R.b, c: R.c },
+                 reset: true });
+      continue;
+    }
+    /* 预测 x = F x，P = F P Fᵀ + Q（恒速模型，Q 用加速度不确定度 qa） */
+    const px = st[0] + st[2] * dt, py = st[1] + st[3] * dt;
+    const d2 = dt * dt, d3 = d2 * dt, d4 = d2 * d2;
+    const q = qa * qa;
+    const Q = [
+      [q * d4 / 4, 0, q * d3 / 2, 0],
+      [0, q * d4 / 4, 0, q * d3 / 2],
+      [q * d3 / 2, 0, q * d2, 0],
+      [0, q * d3 / 2, 0, q * d2],
+    ];
+    const F = [[1,0,dt,0],[0,1,0,dt],[0,0,1,0],[0,0,0,1]];
+    const PFt = mat4();
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += P[i][k] * F[j][k];   // (P Fᵀ)_ij
+        PFt[i][j] = s;
+      }
+    const Pp = mat4();
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        let s = Q[i][j];
+        for (let k = 0; k < 4; k++) s += F[i][k] * PFt[k][j];
+        Pp[i][j] = s;
+      }
+    /* 更新：只观测位置（H = [I2 0]） */
+    const S00 = Pp[0][0] + R.a, S01 = Pp[0][1] + R.b, S11 = Pp[1][1] + R.c;
+    const det = S00 * S11 - S01 * S01;
+    if (!(Math.abs(det) > 1e-12)) {     // 数值退化 → 直接采信测量
+      out.push({ t: f.t, x: f.x, y: f.y, vx: st[2], vy: st[3],
+                 cov: { a: R.a, b: R.b, c: R.c }, degenerate: true });
+      st = [f.x, f.y, st[2], st[3]];
+      P = Pp;
+      continue;
+    }
+    const i00 = S11 / det, i01 = -S01 / det, i11 = S00 / det;
+    const ry = f.y - py, rx = f.x - px;
+    const K = mat4();                   // K = Pp Hᵀ S⁻¹（H 只取前两行）
+    for (let i = 0; i < 4; i++) {
+      K[i][0] = Pp[i][0] * i00 + Pp[i][1] * i01;
+      K[i][1] = Pp[i][0] * i01 + Pp[i][1] * i11;
+    }
+    const nx = px + K[0][0] * rx + K[0][1] * ry;
+    const ny = py + K[1][0] * rx + K[1][1] * ry;
+    const nvx = st[2] + K[2][0] * rx + K[2][1] * ry;
+    const nvy = st[3] + K[3][0] * rx + K[3][1] * ry;
+    /* P = (I−KH) Pp (I−KH)ᵀ + K R Kᵀ —— **Joseph 形式**。
+       为什么不能用更短的 P = (I−KH)Pp：那个形式在浮点下会丢掉对称正定，跑几十帧后
+       创新协方差 S 近奇异 → 增益暴冲 → 状态发散（实测：真实数据跑到第 84 帧从 -11 m
+       直接跳到 12000 m）。Joseph 形式数值上保正定，代价只是多两次矩阵乘。 */
+    const A = mat4();                     // A = I − K H（H 只观测位置）
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        const kh = (j === 0) ? K[i][0] : (j === 1 ? K[i][1] : 0);
+        A[i][j] = (i === j ? 1 : 0) - kh;
+      }
+    const AP = mat4();
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += A[i][k] * Pp[k][j];
+        AP[i][j] = s;
+      }
+    let Pn = mat4();
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4; j++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += AP[i][k] * A[j][k];
+        s += K[i][0] * (R.a * K[j][0] + R.b * K[j][1])
+           + K[i][1] * (R.b * K[j][0] + R.c * K[j][1]);
+        Pn[i][j] = s;
+      }
+    for (let i = 0; i < 4; i++)             // 消掉浮点残差带来的不对称
+      for (let j = i + 1; j < 4; j++) {
+        const m = (Pn[i][j] + Pn[j][i]) / 2;
+        Pn[i][j] = m; Pn[j][i] = m;
+      }
+    if (!isFinite(nx) || !isFinite(ny) || !(Pn[0][0] > 0) || !(Pn[1][1] > 0)) {
+      /* 兜底：宁可重置并采信测量，也不要把 NaN/发散值写进轨迹（静默垃圾最糟） */
+      st = [f.x, f.y, 0, 0];
+      Pn = mat4();
+      Pn[0][0] = Pn[1][1] = KF_SIG0 * KF_SIG0;
+      Pn[2][2] = Pn[3][3] = KF_VEL0 * KF_VEL0;
+      out.push({ t: f.t, x: f.x, y: f.y, vx: 0, vy: 0,
+                 cov: { a: R.a, b: R.b, c: R.c }, reset: true, diverged: true });
+      P = Pn;
+      continue;
+    }
+    st = [nx, ny, nvx, nvy];
+    P = Pn;
+    out.push({ t: f.t, x: nx, y: ny, vx: nvx, vy: nvy,
+               cov: { a: Pn[0][0], b: Pn[0][1], c: Pn[1][1] } });
+  }
+  return out;
+}
+
+/* 轨迹抖动度：相邻点距离的均值（m）。平滑效果的可量化指标 —— 原始 vs 平滑。 */
+function pathJitter(pts) {
+  const v = (pts || []).filter(Boolean);
+  if (v.length < 2) return 0;
+  let s = 0;
+  for (let i = 1; i < v.length; i++) s += Math.hypot(v[i].x - v[i - 1].x, v[i].y - v[i - 1].y);
+  return s / (v.length - 1);
+}
+
 /* ---------------- 有效时段分段（回放「标注缺口 / 跳过无效段」用） ----------------
    把 [t0, t1] 切成最多 maxSeg 段，逐段给出「有几台站位有观测」：
      0   = 无观测（解不出位置，也没有距离环）

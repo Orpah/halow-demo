@@ -17,6 +17,7 @@
 
 只依赖标准库；纯函数式，便于单测（见 `test_motion.py`）。
 """
+import hashlib
 import math
 
 # 演示路由（站位）坐标：与 ui_server._seed_stations 的种子一致（米，局部坐标）
@@ -27,6 +28,11 @@ RSSI_A = -40.0                         # 1 m 处参考强度（与页面默认 A
 RSSI_N = 2.5                           # 路径损耗指数（与页面默认 n 一致）
 MIN_DIST_M = 1.0                       # 距离下限（防 log10(0)）
 RSSI_MIN, RSSI_MAX = -95, -30          # 实测可达范围（钳制）
+# 测量噪声幅度（±dBm，矩形分布）。**为什么要有**：真实 RSSI 每次测量都抰动（多径/干扰），
+# 没有噪声的演示有两个害处：① 定位解精确复原真值，看起来“好得不像话”；
+# ② 误差椭圆/搜索半径、时序平滑（滑动平均/卡尔曼）全部失去意义 ——
+# 无噪声时平滑只会引入滞后。用 **(sid, t) 哈希** 生成伪随机，不用随机库 → 仍然可复现。
+NOISE_DB = 2.0
 
 # 闭合路线（局部坐标，米）：绕三台路由器走一圈，含几处折返，看起来像人在找路
 WAYPOINTS = [
@@ -48,13 +54,33 @@ def dist(ax, ay, bx, by):
     return math.hypot(float(ax) - float(bx), float(ay) - float(by))
 
 
-class Walk:
-    """匀速走闭合折线：pos(t_ms) → (x, y)（确定性，可复现）。"""
+def noise_db(sid, t_ms, amp=NOISE_DB):
+    """测量噪声（±amp dBm，矩形分布，由 (sid, t) 确定 → 同一条记录永远得到同一个值）。
 
-    def __init__(self, points=None, speed=SPEED_MPS, epoch_ms=WALK_EPOCH_MS):
+    真实 RSSI 抰动近似高斯，此处用**矩形分布**简化（避免引入 random/种子管理）；
+    目的是让「定位质量 / 误差椭圆 / 时序平滑」有噪声可讲，不是要精确模仿信道。
+    想回到无噪演示：`amp=0` 或 `Walk(noise=0)`。
+    """
+    amp = float(amp or 0.0)
+    if amp <= 0:
+        return 0.0
+    h = hashlib.sha256(f"{sid}|{int(t_ms)}".encode("utf-8")).digest()
+    u = int.from_bytes(h[:4], "big") / 0xFFFFFFFF      # [0, 1)
+    return (u * 2.0 - 1.0) * amp
+
+
+class Walk:
+    """匀速走闭合折线：pos(t_ms) → (x, y)（确定性，可复现）。
+
+    `noise` = 测量噪声幅度（±dBm，默认 NOISE_DB；0 = 无噪，见 noise_db 的说明）。
+    """
+
+    def __init__(self, points=None, speed=SPEED_MPS, epoch_ms=WALK_EPOCH_MS,
+                 noise=NOISE_DB):
         pts = list(points or WAYPOINTS)
         if len(pts) < 2:
             raise ValueError("路线至少需要 2 个点")
+        self.noise = float(noise or 0.0)
         self.points = [(float(x), float(y)) for x, y in pts]
         self.speed = float(speed or SPEED_MPS)
         self.epoch_ms = int(epoch_ms)
@@ -88,10 +114,15 @@ class Walk:
                 return (x0 + (x1 - x0) * k, y0 + (y1 - y0) * k)
         return self.points[0]
 
-    def rssi_to(self, t_ms, sx, sy, A=RSSI_A, n=RSSI_N):
-        """t_ms 时刻，位于 (sx, sy) 的**路由器**测到的人 → RSSI(dBm)。"""
+    def rssi_to(self, t_ms, sx, sy, A=RSSI_A, n=RSSI_N, sid=None):
+        """t_ms 时刻，位于 (sx, sy) 的**路由器**测到的人 → RSSI(dBm)（含测量噪声）。
+
+        sid = 噪声标识（每台路由器各自的噪声序列；缺省用坐标代替）。
+        """
         x, y = self.pos(t_ms)
-        return path_loss(dist(x, y, sx, sy), A, n)
+        v = path_loss(dist(x, y, sx, sy), A, n)
+        return int(round(v + noise_db(sid if sid is not None else f"{sx},{sy}",
+                                      t_ms, self.noise)))
 
     def nearest(self, t_ms, stations):
         """t_ms 时刻离人最近的那台路由器 → (sid, rssi)；stations = [(sid, x, y)] 或 Station 列表。
@@ -112,7 +143,8 @@ class Walk:
                 best, best_d = (sid, sx, sy), d
         if best is None:
             return None, None
-        return best[0], path_loss(best_d)
+        return best[0], int(round(path_loss(best_d)
+                                 + noise_db(best[0], t_ms, self.noise)))
 
 
 _default = None

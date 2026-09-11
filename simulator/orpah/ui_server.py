@@ -268,7 +268,7 @@ class OrpahApp:
         t_s = float(ts) if ts else time.time()      # 注意：tsdb 写入接口的 ts 是 epoch **秒**
         t_ms = int(t_s * 1000)                     # 位置按毫秒算（motion 用 ms）
         for s in self.stations.list():
-            rssi = self.walk.rssi_to(t_ms, s.x, s.y)
+            rssi = self.walk.rssi_to(t_ms, s.x, s.y, sid=s.sid)
             self.tsdb.write_router_obs(s.sid, sn, ts=t_s, rssi=rssi,
                                        seq=msg.get("seq"))
 

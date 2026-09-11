@@ -80,11 +80,9 @@ lo, hi = 999, -999
 for k in range(240):                          # 采样 8 分钟（每 2 s 一个上报点）
     t = t0 + k * 2000
     for sid, sx, sy in ROUTERS:
-        r = w.rssi_to(t, sx, sy)
+        r = w.rssi_to(t, sx, sy, sid=sid)
         lo, hi = min(lo, r), max(hi, r)
-ck("RSSI 落在 -90..-40 dBm（像真的）", -90 <= lo and hi <= -40, f"{lo}..{hi} dBm")
-ck("没有触到钳位边界（说明距离合理）",
-   lo > motion.RSSI_MIN and hi < motion.RSSI_MAX, f"{lo}..{hi}")
+ck("RSSI 落在 -95..-35 dBm（含噪声也像真的）", -95 <= lo and hi <= -35, f"{lo}..{hi} dBm")
 dmin, dmax = 999, 0
 for k in range(240):
     t = t0 + k * 2000
@@ -95,6 +93,35 @@ ck("人到各路由器距离 1..80 m", 1 <= dmin and dmax <= 80, f"{dmin:.1f}..{
 ck("人不是静止的（8 分钟内走遍路线）",
    len({tuple(round(v, 1) for v in w.pos(t0 + k * 2000)) for k in range(240)}) > 100)
 
+print("== 5b. 测量噪声（无噪声时平滑/椭圆都没意义，所以演示数据必须带噪） ==")
+wn = motion.Walk()                             # 默认带噪
+w0 = motion.Walk(noise=0)                      # 无噪对照
+ck("默认带噪（NOISE_DB>0）", wn.noise > 0, f"±{wn.noise} dBm")
+ck("noise=0 → 与路径损耗完全一致",
+   all(w0.rssi_to(t0 + k * 2000, 30, 0, sid="S1")
+       == motion.path_loss(motion.dist(*w0.pos(t0 + k * 2000), 30, 0))
+       for k in range(50)))
+diffs = []
+for k in range(400):
+    t = t0 + k * 2000
+    exact = motion.path_loss(motion.dist(*wn.pos(t), 30, 0))
+    diffs.append(wn.rssi_to(t, 30, 0, sid="S1") - exact)
+ck("噪声幅度不超 ±NOISE_DB",
+   max(abs(d) for d in diffs) <= motion.NOISE_DB + 1, f"max|Δ|={max(abs(d) for d in diffs)}")
+ck("噪声确实在动（不是常数偏移）", len(set(diffs)) >= 3, f"不同值 {len(set(diffs))} 个")
+nd = {round(motion.noise_db("S1", t0 + k * 1000), 4) for k in range(300)}
+ck("底层噪声取值连续（矩形分布；取整到 dBm 后只有 5 种差值）",
+   len(nd) > 250, f"{len(nd)} 个不同值")
+ck("同 (sid,t) 两次调用结果相同（可复现）",
+   wn.rssi_to(t0, 30, 0, sid="S1") == wn.rssi_to(t0, 30, 0, sid="S1"))
+ck("不同路由器噪声序列不同",
+   wn.rssi_to(t0, 30, 0, sid="S1") != wn.rssi_to(t0, 30, 0, sid="S2")
+   or wn.rssi_to(t0, 30, 0, sid="S1") != motion.path_loss(motion.dist(*wn.pos(t0), 30, 0)))
+ck("零均值附近（矩形分布）", abs(sum(diffs) / len(diffs)) <= 1.0,
+   f"mean={sum(diffs) / len(diffs):.2f}")
+ck("离噪声幅度约 ±2 dBm → 测距误差可达米级（这才有可平滑的东西）",
+   wn.noise >= 1.0, f"±{wn.noise} dBm")
+
 print("== 6. 最近路由器（设备链路的 AP） ==")
 bad = []
 for k in range(200):                          # 沿路线扫一遍，最近台必须真的最近
@@ -102,11 +129,17 @@ for k in range(200):                          # 沿路线扫一遍，最近台�
     pos = w.pos(t)
     sid, rssi = w.nearest(t, ROUTERS)
     want = min(ROUTERS, key=lambda r: motion.dist(*pos, r[1], r[2]))
-    if sid != want[0] or rssi != motion.path_loss(motion.dist(*pos, want[1], want[2])):
-        bad.append((t, sid, want[0], rssi))
-ck("nearest 始终等于几何最近的站位，且 rssi 一致", not bad,
+    exact = motion.path_loss(motion.dist(*pos, want[1], want[2]))
+    if sid != want[0] or abs(rssi - exact) > motion.NOISE_DB:
+        bad.append((t, sid, want[0], rssi, exact))
+ck("nearest 始终等于几何最近的站位，且 rssi 落在噪声范围内", not bad,
    f"不一致 {len(bad)} 次：{bad[:2]}")
-sid, rssi = w.nearest(t0, ROUTERS)
+w0n = motion.Walk(noise=0)
+pos0 = w0n.pos(t0)
+want0 = min(ROUTERS, key=lambda r: motion.dist(*pos0, r[1], r[2]))
+ck("无噪时 nearest 的 rssi = 该距离的路径损耗",
+   w0n.nearest(t0, ROUTERS)
+   == (want0[0], motion.path_loss(motion.dist(*pos0, want0[1], want0[2]))))
 ck("空站位表不炸", w.nearest(t0, []) == (None, None))
 
 print("== 7. 默认单例 ==")
