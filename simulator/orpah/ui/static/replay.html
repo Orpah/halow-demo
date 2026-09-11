@@ -20,6 +20,10 @@
            margin-top: 10px; display: block; max-width: 100%; }
   .plyr { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .plyr input[type=range] { flex: 1; min-width: 220px; accent-color: var(--acc); }
+  /* 滑块 + 标记条同一个 flex 项、上下叠放 → 两者等长且左右对齐（标记条画的就是滑块的时间轴） */
+  .seekwrap { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 3px; }
+  .seekwrap input[type=range] { flex: none; width: 100%; min-width: 0; margin: 0; }
+  #rpBar { width: 100%; height: 8px; display: block; border-radius: 4px; }
   .clock { font-size: 13px; color: var(--mut); }
   .clock b { color: var(--txt); font-size: 15px; }
   .stat { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; }
@@ -91,10 +95,12 @@
         <option value="20">20×</option><option value="60" selected>60×</option>
         <option value="300">300×</option><option value="1200">1200×</option>
       </select></label>
-    <input id="rpSeek" type="range" min="0" max="1000" value="0">
+    <div class="seekwrap">
+      <input id="rpSeek" type="range" min="0" max="1000" value="0">
+      <canvas id="rpBar" height="8"></canvas>
+    </div>
     <span class="clock"><b id="rpClock">--:--:--</b> <span id="rpSpan"></span></span>
   </div>
-  <canvas id="rpBar" height="8" style="width:100%;height:8px;display:block;margin:4px 0 2px"></canvas>
   <div class="row">
     <label><input type="checkbox" id="rpSkip" checked> <span data-i18n="rp_skip">跳过无效段</span></label>
     <span class="hint" id="rpValid"></span>
@@ -265,15 +271,19 @@ function analyzeValid() {
   }
 }
 
-/* 进度条分色：绿=可定位 / 橙=仅 1 台 / 灰=无观测 */
+/* 进度条分色：绿=可定位 / 橙=仅 1 台 / 灰=无观测
+   关键：**像素缓冲宽度必须 = 显示宽度×dpr**，否则颜色会被拉伸，
+   某个时刻的颜色就不在滑块对应的位置上（左右等长但中间错位）。 */
 function drawValidBar() {
   const c = $("rpBar"), seg = S.seg;
   if (!c || !seg) return;
-  const W = Math.max(200, Math.round(c.clientWidth || c.parentElement.clientWidth || 600));
-  c.width = W;
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const cssW = Math.max(200, Math.round(c.clientWidth || c.parentElement.clientWidth || 600));
+  c.width = Math.round(cssW * dpr);
+  c.height = Math.round(8 * dpr);
   const ctx = c.getContext("2d");
-  ctx.clearRect(0, 0, W, c.height);
-  const px = W / seg.n;
+  ctx.clearRect(0, 0, c.width, c.height);
+  const px = c.width / seg.n;
   for (let i = 0; i < seg.n; i++) {
     const cnt = seg.counts[i];
     ctx.fillStyle = cnt >= 2 ? "#3fb950" : (cnt === 1 ? "#d29922" : "#30363d");
@@ -487,7 +497,12 @@ $("rpSeek").oninput = () => {
   render();
 };
 $("rpSkip").onchange = () => { $("rpValid").title = ""; };
-window.addEventListener("resize", () => { if (S.seg) drawValidBar(); });
+/* 宽度变化（窗口缩放、时钟文字变长变短、字体加载）就重画：
+   否则像素缓冲宽度会滞后于显示宽度 → 颜色位置错位 */
+if (window.ResizeObserver) {
+  new ResizeObserver(() => { if (S.seg) drawValidBar(); })
+    .observe(document.querySelector(".seekwrap"));
+}
 $("rpOnlySec").onchange = () => { $("rpTimeline").dataset.sig = ""; renderTimeline(); };
 document.querySelectorAll("[data-min]").forEach(b => {
   b.onclick = () => {
