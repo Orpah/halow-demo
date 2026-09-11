@@ -196,22 +196,25 @@ class CaseManager:
         """某设备被上报/发现 → 找到其走失者案件 → 首次发现即转 found、写事件。
 
         同一设备重复出现只刷新 updated，不重复写事件（按 case+sn 去重）。
+        返回 (case, newly_found)；无案件返回 (None, False)。
         """
         rec = registry.get(sn)
         if rec is None or not rec.person_id:
-            return None
+            return None, False
         c = self.active_case(rec.person_id)
         if c is None:
-            return None
+            return None, False
         ts = ts if ts is not None else int(time.time())
         if c.status == CASE_OPEN:
             c.status = CASE_FOUND
         c.updated = ts
+        newly = False
         if sn not in c.found_sns:
             c.found_sns.add(sn)
             self._note(c, ts, "found", sn=sn, detail=detail)
+            newly = True
         self._persist_case(c)
-        return c
+        return c, newly
 
     def close(self, case_id, registry, outcome, ts=None):
         """结案：outcome ∈ {CASE_CLOSED, CASE_REVOKED}。名下设备 → 启用。

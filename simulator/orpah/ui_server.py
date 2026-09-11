@@ -49,6 +49,7 @@ from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
+import tsdb                               # noqa: E402  Apache IoTDB 时序库
 
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
@@ -100,6 +101,8 @@ class OrpahApp:
         self.cases = cases.CaseManager(db_path)
         if not self.registry.persons:
             self._seed_registry()
+        # IoTDB 时序库（上报流 + 业务事件；未启动时优雅降级）
+        self.tsdb = tsdb.Tsdb()
         # 组件
         self.cores = []
         self.srv = None
@@ -188,10 +191,15 @@ class OrpahApp:
         self._remember(msg, "server")
         self._push_flow("up", msg, "server")
         self._emit("server", msg)
-        # 设备清册：更新最近见时间；走失案件：被看到即触发「发现」
+        # 设备清册：更新最近见时间；IoTDB 写上报点；走失案件：被看到即触发「发现」
         if msg.get("sn"):
-            self.registry.touch(msg["sn"])
-            self.cases.on_found(msg["sn"], self.registry, detail="report")
+            sn = msg["sn"]
+            self.registry.touch(sn)
+            self.tsdb.write_report(sn, ts=msg.get("ts"), rssi=msg.get("rssi"),
+                                   seq=msg.get("seq"))
+            _, newly = self.cases.on_found(sn, self.registry, detail="report")
+            if newly:
+                self.tsdb.write_event("case_found", sn=sn, detail="report")
 
     def _on_lost(self, snap):
         """Server 走失表变更 → 存快照（前端展示）。"""
@@ -218,11 +226,15 @@ class OrpahApp:
         del self.founds[20:]
         self._emit("found", rec)
         # 走失案件：任一台设备被 Router 发现 → 该人案件进入「已发现」
-        c = self.cases.on_found(msg.get("sn", "-"), self.registry,
-                                detail=f"router {addr[0]}:{addr[1]}")
+        sn = msg.get("sn", "-")
+        c, newly = self.cases.on_found(sn, self.registry,
+                                       detail=f"router {addr[0]}:{addr[1]}")
+        if newly:
+            self.tsdb.write_event("case_found", sn=sn,
+                                  detail=f"router {addr[0]}:{addr[1]}")
         if c is not None:
             self._emit("case", {"case_id": c.case_id, "status": c.status,
-                                "sn": msg.get("sn", "-")})
+                                "sn": sn})
 
     def _remember(self, msg, stage):
         seq = msg.get("seq")
@@ -383,6 +395,7 @@ class OrpahApp:
             "flow": list(self.flow),
             "lost": self.lost,
             "lost_sns": self.registry.lost_sns(),
+            "tsdb": self.tsdb.available,
             "publishes": list(self.publishes),
             "publish_total": self.publish_total,
             "founds": list(self.founds),
@@ -427,6 +440,7 @@ class OrpahApp:
             self.router.stop()
         if self.srv:
             self.srv.stop()
+        self.tsdb.close()
 
 
 APP = None
@@ -468,6 +482,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/cases":
             self._send(200, json.dumps(APP.cases.to_dict(APP.registry)).encode())
+            return
+        if self.path.startswith("/api/ts/query"):
+            self._api_ts_query()
             return
         if self.path == "/api/events":
             self._sse()
@@ -646,6 +663,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         for sn in sns:
                             if APP.srv:
                                 APP.srv.mark_tracked(sn, note=f"case:{c.case_id}")
+                        APP.tsdb.write_event("case_mark", sn=",".join(sns),
+                                             detail=c.case_id)
                     self._send(200, json.dumps({"ok": True, "dup": dup,
                                                 "case_id": c.case_id}).encode())
             elif action == "close":
@@ -658,12 +677,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     for sn in sns:
                         if APP.srv:
                             APP.srv.untrack(sn)
+                    APP.tsdb.write_event("case_close",
+                                         detail=f"{c.case_id}:{outcome}")
                     self._send(200, json.dumps({"ok": True}).encode())
             else:
                 self._send(200, json.dumps({"ok": False,
                                             "err": f"unknown action: {action}"}).encode())
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
+
+    def _api_ts_query(self):
+        """GET /api/ts/query?sn=...&limit=N → IoTDB 里该设备最近上报点。"""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        sn = (qs.get("sn") or [""])[0]
+        try:
+            limit = int((qs.get("limit") or ["100"])[0])
+        except ValueError:
+            limit = 100
+        rows = APP.tsdb.query_report(sn, limit) if sn else None
+        self._send(200, json.dumps({"ok": rows is not None, "sn": sn,
+                                    "rows": rows or []}).encode())
 
     def _api_sig(self):
         """数字签名工具：newkey 生成临时密钥对；sign 算预像+签名；verify 验签。"""
