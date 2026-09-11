@@ -125,6 +125,11 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 | `case_mark` | 立案（去重后只写一次） | `case_id` | 操作者（POST 传的 `actor`） |
 | `case_found` | 案件进入已发现（`newly` 时才写） | 触发来源 | `system` |
 | `case_close` | 结案 | `<case_id>:closed\|revoked` | 操作者（POST 传的 `actor`） |
+| `key_issue` | 签发新一代密钥 | `kid` | 操作者 |
+| `key_rotate` | 轮换（旧代→宽限） | `<旧 kid> -> <新 kid> grace=<秒>s` | 操作者 |
+| `key_retire` | 退役某代（提前失效） | `kid[,kid…]` | 操作者 |
+| `key_revoke` | 整机作废 | `<原因>`（未填记 `-`） | 操作者 |
+| `key_unrevoke` | 撤销恢复（仅演示） | `unrevoke (demo only)` | 操作者 |
 
 - `limit` 上限 500（默认 50）。`etype` / `sn` 在**服务端本地过滤**（多取 10 倍再筛，上限 5000），
   因为 IoTDB 树模型对「非投影列」做值过滤不可靠。
@@ -273,4 +278,74 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   或状态非「启用」的，不参与 `no_report`。
 - 页面：`index.html` 页头徽标（`#alertBadge`，`crit` 红 / `warn` 橙）+ 告警卡片，
   3 秒轮询；无告警时徽标与卡片整体隐藏。
+
+---
+
+## 9. `/api/keys`（密钥库：生成→分发→轮换→吊销→退役）
+
+密钥生命周期逻辑在**协议层** `orpah_id.KeyStore`（纯内存、不依赖数据库，`server.py --keystore-file`
+也用它）；**持久化**在 `keystore.KeyStoreDB`（SQLite，与清册同库 `orpah.db`，写穿透）；
+页面 `keys.html`；审计事件见 §5。
+
+### GET `/api/keys` → 密钥库全量视图
+
+```json
+{"ok": true, "now": 1789143000, "grace_sec": 604800,
+ "demo": {"sn": "CN-WH01-9AF3C1D2", "gen": 6},
+ "counts": {"sn": 3, "active": 2, "grace": 1, "retired": 5, "revoked_sn": 0},
+ "items": [{"sn": "CN-WH01-9AF3C1D2",
+            "device": {"status": "active", "person_id": "P001", "org": "WH01", "cc": "CN", "last_seen": 1789143286},
+            "revoked": null,
+            "keys": [{"kid": "CN-WH01-9AF3C1D2#6", "gen": 6, "state": "active",
+                       "created_at": 1789142900, "grace_until": null, "grace_left": null,
+                       "retired_at": null, "se_sn": "ATECC608B-DEMO", "model": "…",
+                       "firmware": "1.0.3", "has_pubkey": true, "has_hmac": true,
+                       "pubkey_pem": "-----BEGIN PUBLIC KEY-----…"}]}]
+}
+```
+
+- `items` 包含**所有**已入密钥库的 SN **加上**设备清册里的 SN（后者 `keys: []`）→ 页面上直接给它
+  签发第一代（产线先发钥、设备后入网也合理）。
+- `demo` = 当前演示终端（Orpah ID 设备）的 SN 与**正在使用的代次** → 页面标出「← 当前用这把」。
+- 每次 GET 顺手 `sweep` 一次（宽限已过的 `grace` → `retired`）；只在真有转移时写库。
+- 私钥不在返回值里（也不入库）：库里只有 **server 侧该持有的** ES256 公钥 + 降级 HS256 对称密钥。
+
+### POST `/api/keys`（body 带 `action`，成功回全量 `view`）
+
+| action | 字段 | 说明 |
+|---|---|---|
+| `issue` | `sn`, `model?`, `firmware?` | 签发新一代（`gen = 最大代次+1`）；**已有 active 时幂等** → `note_code=already_active` 并回既有 `kid` |
+| `rotate` | `sn` | 旧 active → `grace`（`now+grace_sec`），新钥 → `active`；回 `kid`/`prev_kid`/`grace_until` |
+| `adopt` | `sn` | 让**演示终端**改用当前 `active` 代（演示「设备侧完成更新」）；非终端 SN → `note_code=not_demo_sn` |
+| `retire` | `sn`, `kid?` | 退役某代（**当「让宽限期立即到期」的按钮**）；不带 `kid` 则退所有非 active 代 |
+| `revoke` | `sn`, `reason?` | **整机作废**：所有代立即不可验签（不可逆*） |
+| `unrevoke` | `sn` | 撤销的逆操作（*仅演示；代次一律转 `retired`，要恢复需重新 `issue`） |
+
+**返回机器码，文案由页面本地化**（后端不拼中文，免得「后端文案不跟语言走」）：
+
+- 失败：`{"ok":false, "code":"<码>", "err":"<兜底文本>"}`；页面取 `keys_err_<码>` 显示。
+- 成功：`{"ok":true, "code":"<action>", "note_code?":"…", "view":{…}}`。
+- 错误码：`no_sn` / `unknown_sn` / `unknown_action` / `revoked_sn` / `no_active` /
+  `nothing_retire` / `bad_json` / `exception`。
+- 只允许对「已在密钥库或已在设备清册」的 SN 操作（防手滑打错 SN 造出野钥）。
+- **`revoked_sn` 挡在签发前**：已作废的设备不能 `issue`/`rotate` 复活（撤销不可逆），
+  必须 `unrevoke` → 再 `issue`。协议层 `_issue` 也有同名护栏（双保险）。
+
+### 生命周期与「轮换不断链」
+
+```
+register/issue ──> active ──rotate──> grace ──宽限到期(sweep)──> retired
+                     │                  └── retire(提前退役)
+                     └── revoke（整机：所有代 → revoked，立即不可验签，不可逆*）
+```
+
+- **不改报文格式**：报文头**不加 `kid`**，验签时按代次倒序**逐代试签**（活跃 + 宽限代通常只有
+  1~2 个，代价可忽略）→ 老报文/老设备无需任何改动。命中哪代会在结果里回 `kid`/`gen`，
+  并写进 `id_report` 事件的 `detail`（`gen=<n>`）。
+- 宽限期 = `ORPAH_KEY_GRACE_SEC`（默认 **7 天**；`0` = 旧钥立即失效）。
+- **模拟器的私钥不入库**：由 `orpah_id.derive_demo_privkey(sn, gen)` 由 (SN, 代次) 确定派生，
+  所以服务器重启后公钥仍对得上（否则持久化的密钥库每次重启都验不过）。
+  真实设备 `demo_key=False`（安全元件内生成、私钥不可导出）。
+- **审计**：每个变更都写 `key_*` 事件（带 `actor`），见 §5。
+- **本页只管密钥**：不做组织/角色/权限（见 `ROADMAP.md` §〇 范围原则）。
 

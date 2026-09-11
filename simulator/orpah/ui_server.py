@@ -47,6 +47,7 @@ from server import OrpahServer            # noqa: E402
 from router import RouterBridge           # noqa: E402
 from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
+import keystore as kst                    # noqa: E402  密钥库持久化（多代/轮换/撤销）
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
 import stations as sta                     # noqa: E402  定位站位（无人机悬停测点）
@@ -112,8 +113,12 @@ class OrpahApp:
         self.publish_total = 0             # 服务器发布走失表总次数（单调累加）
         # 发现记录（Router 命中走失表 → ORPAH-FOUND，最新在前）
         self.founds = []
+        # 持久化库（清册/案件/站位/密钥库共用同一 orpah.db）
+        db_path = os.path.join(HERE, "orpah.db")
         # Orpah ID 层演示：设备 + 密钥库 + nonce 缓存（设备按 Client SN 创建，懒初始化）
-        self.id_ks = oid.KeyStore()
+        # 密钥库落 SQLite（与清册同库）：重启不丢，代次/宽限/撤销都在 —— 见 keystore.py
+        self.id_ks = kst.KeyStoreDB(db_path)
+        self.id_ks.sweep()                 # 启动收敛一次：宽限已过的代次 → retired
         self.id_dev = None
         self.id_used = oid.NonceCache()
         self.id_demo = {}
@@ -123,7 +128,6 @@ class OrpahApp:
         # 数字签名工具：临时密钥对（供 /api/sig 演示 ES256/HS256）
         self.sig_dev = None
         # 设备清册 + 走失案件（SQLite 持久化；首次启动播种）
-        db_path = os.path.join(HERE, "orpah.db")
         self.registry = reg.Registry(db_path)
         self.cases = cases.CaseManager(db_path)
         self.stations = sta.StationTable(db_path)   # 定位站位（全局一张）
@@ -357,11 +361,17 @@ class OrpahApp:
             time.sleep(self.every)
 
     def _ensure_id_device(self):
-        """让 Orpah ID 演示设备与当前 Client SN 一致（SN 变更时重建+重注册）。"""
+        """让 Orpah ID 演示设备与当前 Client SN 一致（SN 变更时重建+重注册）。
+
+        密钥由 (sn, gen) 确定派生（`oid.derive_demo_privkey`）→ 重启后公钥仍对得上；
+        gen 取密钥库里该 SN 的 **active 代次**，轮换后签的是新代。
+        """
         sn = self.client.sn if self.client else self.sn
         if self.id_dev is not None and self.id_dev.sn == sn:
             return
-        self.id_dev = oid.Device(sn=sn, se_sn="ATECC608B-DEMO")
+        rec = self.id_ks.active_of(sn)
+        gen = rec["gen"] if rec else 1
+        self.id_dev = oid.Device(sn=sn, se_sn="ATECC608B-DEMO", gen=gen)
         self.id_ks.register(self.id_dev, model="CH32V203+TX-AH+ATECC608B",
                             firmware="1.0.3")
 
@@ -388,6 +398,7 @@ class OrpahApp:
         """Server 验签结果回调：更新卡片 + 签名上报流（带 trust）。"""
         self.id_demo = {
             "t": rec["t"], "sn": rec["sn"], "alg": rec["alg"],
+            "gen": rec.get("gen"), "kid": rec.get("kid"),
             "level": rec["level"], "trust": rec["trust"],
             "accepted": rec["accepted"], "sig": rec.get("sig", ""),
             "nonce": rec.get("nonce", ""), "error": rec.get("error"),
@@ -399,13 +410,43 @@ class OrpahApp:
             self.registry.touch(rec["sn"])
         # 落库（内存 deque 有上限，历史看「事件历史」区）
         # 验签不通过 → 单记 id_reject，才能在事件历史里按类型筛出「被拒上报」
+        # gen = 命中的密钥代次（审计“用的是哪一代钥匙”，与 /api/keys 对得上）
         self.tsdb.write_event(
             "id_report" if rec.get("accepted") else "id_reject",
             sn=rec.get("sn", ""),
             detail=(f"alg={rec.get('alg')} level={rec.get('level')} "
                     f"trust={rec.get('trust')} "
                     f"accepted={rec.get('accepted')}" +
+                    (f" gen={rec.get('gen')}" if rec.get("gen") is not None else "") +
                     (f" err={rec.get('error')}" if rec.get("error") else "")))
+
+    # ---------------- 密钥库（P1 密钥/证书生命周期） ----------------
+    def keys_view(self):
+        """密钥库全量视图 → {ok, now, grace_sec, counts, items:[{sn,device,revoked,keys}]}。
+
+        除已有密钥的 SN，也把「已入清册但还没发钥」的 SN 列进去（keys=[]），
+        方便在页面上直接给它签发第一代密钥（产线先发钥、设备后入网也合理）。
+        顺手 sweep 一次（宽限已过的 grace → retired）；只在真有转移时写库。
+        """
+        now = int(time.time())
+        self.id_ks.sweep(now)
+        sns = set(self.id_ks.sns()) | set(self.registry.devices.keys())
+        items = [self.id_ks.to_dict(sn, registry=self.registry, now=now)
+                 for sn in sorted(sns)]
+        states = [k["state"] for it in items for k in it["keys"]]
+        return {"ok": True, "now": now, "grace_sec": self.id_ks.grace_sec,
+                # 演示终端（Orpah ID 设备）：页面据此标出「当前用哪一代」并给更新按钮
+                "demo": {"sn": (self.client.sn if self.client else self.sn),
+                         "gen": (self.id_dev.gen
+                                 if self.id_dev is not None else None)},
+                "counts": {
+                    "sn": len(items),
+                    "active": states.count(oid.KEY_ACTIVE),
+                    "grace": states.count(oid.KEY_GRACE),
+                    "retired": states.count(oid.KEY_RETIRED),
+                    "revoked_sn": sum(1 for it in items if it["revoked"]),
+                },
+                "items": items}
 
     # ---------------- 控制（前端按钮） ----------------
     def status(self):
@@ -532,6 +573,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/stations":
             self._send(200, json.dumps(APP.stations.to_dict()).encode())
+            return
+        if self.path == "/api/keys":
+            self._send(200, json.dumps(APP.keys_view()).encode())
             return
         if self.path == "/api/alerts":
             # 无状态评估：每次用当前快照重算活跃告警（规则见 alerts.py）
@@ -794,6 +838,107 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
+    def _api_keys(self):
+        """密钥库操作（P1 密钥/证书生命周期）：issue / rotate / adopt / retire /
+        revoke / unrevoke。每个变更都写审计事件（etype=key_*，带操作者 actor）。
+
+        - issue     给某 SN 签发新一代（已有 active 时幂等，回 note_code=already_active）
+        - rotate    轮换：旧 active → grace（now+grace_sec），新钥 → active
+        - adopt     让演示终端改用当前 active 代（演示“设备侧完成更新”）
+        - retire    强制退役（带 kid 只退该代；不带则退所有非 active）——也可当作
+                    “让宽限期立即到期”的按钮
+        - revoke    整机作废（所有代立即不验签；不可逆*）
+        - unrevoke  撤销的逆操作（*仅演示：代次一律转 retired，要恢复需重新签发）
+
+        **返回机器码**（code / note_code），文案由页面按语言本地化 —— 后端不拼中文，
+        免得又变成“后端文案不跟语言走”（tools/ui 那次的教训）。
+        """
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except Exception as e:
+            self._send(400, json.dumps({"ok": False, "code": "bad_json",
+                                        "err": str(e)}).encode())
+            return
+        action = (req.get("action") or "").strip()
+        sn = (req.get("sn") or "").strip()
+        kid = (req.get("kid") or "").strip()
+        actor = req.get("actor", "")
+        ks = APP.id_ks
+
+        def err(code, msg=""):
+            self._send(200, json.dumps({"ok": False, "code": code,
+                                        "err": msg or code}).encode())
+
+        def done(etype=None, detail="", **extra):
+            """写审计 + 回全量密钥视图（前端直接重渲染，避免状态漂移）。"""
+            if etype:
+                APP.tsdb.write_event(etype, sn=sn, detail=detail, actor=actor)
+            resp = {"ok": True, "code": action}
+            resp.update(extra)
+            resp["view"] = APP.keys_view()
+            self._send(200, json.dumps(resp).encode())
+
+        if not sn:
+            return err("no_sn")
+        # 只允许对「已在密钥库或已在设备清册」的 SN 操作（防手滑打错 SN 造出野钥）
+        if sn not in set(ks.sns()) | set(APP.registry.devices.keys()):
+            return err("unknown_sn", sn)
+        try:
+            if action in ("issue", "rotate") and ks.is_revoked(sn):
+                return err("revoked_sn")     # 撤销不可逆：需先 unrevoke 再签发
+
+            if action == "issue":
+                cur = ks.active_of(sn)
+                if cur is not None:
+                    return done(note_code="already_active", kid=cur["kid"])
+                gen = max([k["gen"] for k in ks.list_keys(sn)] or [0]) + 1
+                kid = ks.register(oid.Device(sn=sn, gen=gen),
+                                  model=req.get("model") or None,
+                                  firmware=req.get("firmware") or None)
+                return done("key_issue", kid, kid=kid)
+
+            if action == "rotate":
+                cur = ks.active_of(sn)
+                gen = (cur["gen"] if cur else 0) + 1
+                r = ks.rotate(sn, oid.Device(sn=sn, gen=gen))
+                return done("key_rotate",
+                            f"{r['prev_kid'] or '-'} -> {r['kid']} "
+                            f"grace={r['grace_sec']}s", **r)
+
+            if action == "adopt":
+                cur = ks.active_of(sn)
+                if cur is None:
+                    return err("no_active")
+                if APP.id_dev is not None and APP.id_dev.sn == sn:
+                    APP.id_dev = None          # 强制重建 → 采用 active 代
+                    APP._ensure_id_device()
+                    return done(kid=cur["kid"])
+                # 不是当前演示终端：只有终端自己的 SN 会真的换钥（页面上不给这个按钮）
+                return done(note_code="not_demo_sn", kid=cur["kid"])
+
+            if action == "retire":
+                kids = ks.retire(sn, kid=kid or None)
+                if not kids:
+                    return err("nothing_retire")
+                return done("key_retire", ",".join(kids), kids=kids)
+
+            if action == "revoke":
+                reason = (req.get("reason") or "").strip()
+                rec = ks.revoke(sn, reason=reason, actor=actor)
+                return done("key_revoke", reason or "-", revoked=rec)
+
+            if action == "unrevoke":
+                ks.unrevoke(sn)
+                return done("key_unrevoke", "unrevoke (demo only)")
+
+            return err("unknown_action", action)
+        except ValueError as e:
+            # 协议层兜底（撤销不可逆）：仍翻译成机器码给页面本地化
+            err("revoked_sn" if ks.is_revoked(sn) else "exception", str(e))
+        except Exception as e:
+            err("exception", str(e))
+
     def _api_stations(self):
         """定位站位（无人机悬停测点）：增删改 + 打点 + 手动绑定 + 导入悬停计划。
 
@@ -1027,6 +1172,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/stations":
             self._api_stations()
+            return
+        if self.path == "/api/keys":
+            self._api_keys()
             return
         if self.path == "/api/sig":
             self._api_sig()

@@ -29,6 +29,14 @@
   标记/取消按钮。
 - 运行：`python orpah/demo_l1.py --n 3`（L1 验收）、`python orpah/demo_l2.py`（L2 验收）。
   单独跑见 `orpah/README.md`。
+- **密钥库（2026-09-12，P1）叮：`orpah.db` 里的 `keys` 表是**已发密钥的真相**，
+  改下面任一东西都会让已入库的密钥全部验不过（`signature_invalid`）：
+  ① `orpah_id.Device` 的密钥生成（尤其 `derive_demo_privkey` 的派生前缀/算法 ——
+  模拟器私钥就靠它「由 (SN, 代次) 确定派生」，否则服务器重启后公钥对不上）；
+  ② `verify_report` 的验签入参（预像/JCS 规范化）；③ `b64url`/PEM 编解码。
+  改完请跑 `python orpah/test_keys.py`（生命周期单测）+ `python orpah/demo_id.py`（端到端验收）；
+  实在要换算法就删 `orpah.db` 重新播种（会一并清掉清册/案件/站位）。
+- **orpah 进程不要改客户端 SN 做测试**（会真的造出新的密钥代次并写进密钥库/审计）。
 - **`host/sim.py` 新增「host 数据口」**（`--host <port>` / `Core(host_port=)`，缺省不启用）：
   语义 = SPI MACBUS `DATA_TX`(host 注入→空口转发) / `DATA_RX`(收帧推 host)；帧格式同空口
   `AA 55 TYPE LEN CRC payload`。不加参数完全不影响原有行为（24 项回归仍过）。

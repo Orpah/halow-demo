@@ -274,6 +274,9 @@ class OrpahServer:
             "trust": v.get("trust") if v.get("accepted") else "-",
             "accepted": bool(v.get("accepted")),
             "error": v.get("error"),
+            # 命中的密钥代次（多代并存 → 审计“用的是哪一代钥匙”）
+            "kid": v.get("kid"),
+            "gen": v.get("gen"),
             "sig": sig[:36] + ("…" if len(sig) > 36 else ""),
             "nonce": payload.get("nonce", ""),
         }

@@ -20,6 +20,7 @@ orpah_id.py — Orpah ID 协议实现层（对齐《Orpah ID 协议规范》v1.1
 依赖：`cryptography`（ES256/HS256 需要；缺失时仅 L3 none 可用）。
 """
 import base64
+import hashlib
 import hmac as _hmac_stdlib
 import json
 import os
@@ -61,6 +62,27 @@ LEVEL_TO_ALG = {0: ALG_ES256, 1: ALG_HS256, 2: ALG_HS256, 3: ALG_NONE}
 
 # 信任分级（§8.1/§8.3）
 TRUST_BY_LEVEL = {0: "high", 1: "medium", 2: "low", 3: "none"}
+
+# 密钥代次状态（§6.3 生命周期）
+KEY_ACTIVE = "active"      # 当前代：用于签发新报文，参与验签
+KEY_GRACE = "grace"        # 已被轮换掉：宽限期内仍参与验签（等役设备更新完）
+KEY_RETIRED = "retired"    # 宽限结束：不再验签（记录保留，供审计追溯）
+KEY_REVOKED = "revoked"    # 整机作废：所有代立即不验签（失窃/泄露/报废）
+
+
+def _env_int(name, default):
+    """取整数环境变量；未设/空串/非法值 → 回退默认。"""
+    try:
+        return int(str(os.environ.get(name, "") or default).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+# 轮换宽限期（秒）：ORPAH_KEY_GRACE_SEC（默认 7 天；0 = 旧钥立即失效）
+KEY_GRACE_SEC = _env_int("ORPAH_KEY_GRACE_SEC", 7 * 86400)
+
+# P-256 群阶 n（派生确定私钥时把哈希折到 [1, n-1]）
+_P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 
 
 # ---------------------------------------------------------------------------
@@ -310,22 +332,56 @@ def pubkey_from_pem(pem):
     return serialization.load_pem_public_key(pem.encode("ascii"))
 
 
+def derive_demo_privkey(sn, gen=1):
+    """**仅演示**：由 (sn, gen) 确定派生的 P-256 私钥 —— 同 SN 同代 → 同钥。
+
+    真实设备在安全元件内生成且私钥不可导出；但模拟器若每次启动都随机生成，
+    持久化的密钥库就会每次重启都对不上公钥（验签必失败）。
+    gen 与密钥库代次一致：轮换后应重新派生（第 N 代 → sn|N）。
+    """
+    seed = hashlib.sha256(
+        b"orpah-demo-ec-p256-v1|" + str(sn).encode("utf-8")
+        + b"|" + str(int(gen)).encode("ascii")).digest()
+    d = (int.from_bytes(seed, "big") % (_P256_ORDER - 1)) + 1
+    return ec.derive_private_key(d, ec.SECP256R1())
+
+
+def derive_demo_hmac(sn, gen=1):
+    """**仅演示**：由 (sn, gen) 确定派生的 32 字节 HMAC 降级密钥（HS256）。"""
+    return hashlib.sha256(
+        b"orpah-demo-hmac-v1|" + str(sn).encode("utf-8")
+        + b"|" + str(int(gen)).encode("ascii")).digest()
+
+
 # ---------------------------------------------------------------------------
 # 设备 / 密钥库 / nonce 缓存
 # ---------------------------------------------------------------------------
 class Device:
-    """Orpah ID 终端：SN + ECDSA 私钥 + HMAC 降级密钥（§6.2 产线绑定记录）。"""
+    """Orpah ID 终端：SN + ECDSA 私钥 + HMAC 降级密钥（§6.2 产线绑定记录）。
+
+    demo_key=True（默认）时密钥由 (sn, gen) **确定派生**，使同一 SN 在重启/多进程
+    后仍是同一把钥（否则持久化密钥库每次重启都验不过）。**仅供模拟器**；
+    真实设备用 demo_key=False（在安全元件/CH32 保护区内生成，私钥不可导出）。
+    """
 
     def __init__(self, sn=None, cc="CN", org="WH01", se_sn="ATECC608B-DEMO",
-                 check="mod97"):
+                 check="mod97", demo_key=True, gen=1):
         self.sn = sn if sn is not None else gen_sn(cc=cc, org=org, check=check)
         self.se_sn = se_sn
-        self.hmac_key = os.urandom(32)          # Slot 5 / CH32 保护区（降级 HS256）
+        self.demo_key = bool(demo_key)
+        self.gen = int(gen)
         self.privkey = None
         self.pubkey = None
-        if _CRYPTO_OK:
+        if not _CRYPTO_OK:
+            self.hmac_key = os.urandom(32)
+            return
+        if self.demo_key:
+            self.privkey = derive_demo_privkey(self.sn, self.gen)
+            self.hmac_key = derive_demo_hmac(self.sn, self.gen)
+        else:
             self.privkey = ec.generate_private_key(ec.SECP256R1())
-            self.pubkey = self.privkey.public_key()
+            self.hmac_key = os.urandom(32)      # Slot 5 / CH32 保护区（降级 HS256）
+        self.pubkey = self.privkey.public_key()
 
     def sign(self, alg, preimage):
         return sign_preimage(alg, preimage, self)
@@ -356,57 +412,255 @@ class Device:
 
 
 class KeyStore:
-    """server 密钥库：sn → {pubkey, hmac_key, se_sn, ...} + 撤销表（§6.3/§9.1）。"""
+    """server 密钥库：sn → 多代密钥（§6.3/§9.1）+ 设备级撤销表。
 
-    def __init__(self):
-        self._records = {}
-        self._revoked = set()
+    **为什么多代（轮换不断链）**：轮换后旧钥进入 grace 宽限期，宽限期内新旧钥**都能验签**，
+    在役设备不必与 server 同时换钥；宽限结束（`sweep`）旧钥转 retired、不再参与验签。
 
-    def register(self, dev, model=None, firmware=None):
-        self._records[dev.sn] = {
-            "pubkey": dev.pubkey,
-            "hmac_key": dev.hmac_key,
-            "se_sn": getattr(dev, "se_sn", None),
-            "model": model,
-            "firmware": firmware,
-        }
+    **不改报文格式**：报文头不引入 kid，验签按代次倒序**逐代试签**（活跃 + 宽限代通常只有
+    1~2 个，代价可忽略）→ 老报文、老设备无需任何改动。
 
-    def get_by_sn(self, sn):
-        return self._records.get(sn)
+    生命周期：
+        register(签发→active) → rotate(active→grace，新代→active)
+        → sweep(grace 到期→retired) / retire(提前强制退役)
+        revoke(整机作废：所有代立即不验签，不可逆*)
+    * `unrevoke` 仅供演示；真实部署撤销不可逆（规范 §6.3.2）。撤销恢复后代次一律转 retired
+      （不自动回到 active），要恢复服务需重新签发/轮换。
+    """
 
-    def revoke(self, sn):
-        self._revoked.add(sn)
+    def __init__(self, grace_sec=None):
+        self.grace_sec = KEY_GRACE_SEC if grace_sec is None else int(grace_sec)
+        self._gens = {}         # sn -> [rec, ...]（按 gen 升序）
+        self._revoked = {}      # sn -> {"at","reason","actor"}
+
+    # ---------------- 签发 / 轮换 ----------------
+    def register(self, dev, model=None, firmware=None, ts=None, se_sn=None):
+        """登记设备的一代密钥（产线绑定，§6.2）→ 返回 kid。
+
+        **幂等**：该 SN 已有 active 钥时不再签发，直接返回现有 kid
+        （免得演示器每次启动都造出一把新钥）。要换钥请用 rotate。
+        """
+        cur = self.active_of(dev.sn)
+        if cur is not None:
+            return cur["kid"]
+        return self._issue(dev.sn, getattr(dev, "pubkey", None),
+                           getattr(dev, "hmac_key", None), model=model,
+                           firmware=firmware, ts=ts,
+                           se_sn=se_sn if se_sn is not None
+                           else getattr(dev, "se_sn", None))
+
+    def _issue(self, sn, pubkey, hmac_key, model=None, firmware=None, ts=None,
+               se_sn=None):
+        if sn in self._revoked:
+            # 撤销不可逆（§6.3.2）：要恢复服务必须先 unrevoke（仅演示）再重新签发，
+            # 否则“已作废”的设备会被重新发钥、静默复活。
+            raise ValueError(f"{sn} 的密钥已作废，需先恢复（unrevoke）再签发")
+        gens = self._gens.setdefault(sn, [])
+        gen = (gens[-1]["gen"] + 1) if gens else 1
+        rec = {"sn": sn, "kid": f"{sn}#{gen}", "gen": gen,
+               "pubkey": pubkey, "hmac_key": hmac_key, "se_sn": se_sn,
+               "model": model, "firmware": firmware,
+               "created_at": int(ts if ts is not None else time.time()),
+               "state": KEY_ACTIVE, "grace_until": None, "retired_at": None}
+        gens.append(rec)
+        return rec["kid"]
+
+    def rotate(self, sn, dev, ts=None):
+        """轮换：旧 active → grace（到 now+grace_sec），新钥 → active。
+
+        返回 {"kid","prev_kid","grace_until","grace_sec"}；此前无钥时等价首次签发。
+        """
+        now = int(ts if ts is not None else time.time())
+        prev = self.active_of(sn)
+        if prev is not None:
+            prev["state"] = KEY_GRACE
+            prev["grace_until"] = now + self.grace_sec
+        kid = self._issue(sn, getattr(dev, "pubkey", None),
+                          getattr(dev, "hmac_key", None), ts=now,
+                          se_sn=getattr(dev, "se_sn", None))
+        return {"kid": kid, "prev_kid": prev["kid"] if prev else None,
+                "grace_until": prev["grace_until"] if prev else None,
+                "grace_sec": self.grace_sec}
+
+    # ---------------- 退役 / 作废 ----------------
+    def retire(self, sn, kid=None, ts=None):
+        """强制退役某一代；不传 kid 时退役该 SN 所有**非 active**代。
+
+        返回退役的 kid 列表（active 不会被静默退役，整机作废请用 revoke）。
+        """
+        now = int(ts if ts is not None else time.time())
+        out = []
+        for r in self._gens.get(sn, []):
+            if r["state"] in (KEY_RETIRED, KEY_REVOKED):
+                continue
+            if kid is not None:
+                if r["kid"] != kid:
+                    continue
+            elif r["state"] == KEY_ACTIVE:
+                continue
+            r["state"] = KEY_RETIRED
+            r["retired_at"] = now
+            out.append(r["kid"])
+        return out
+
+    def sweep(self, now=None):
+        """宽限期已过的 grace 代 → retired。返回 [(kid, ts), ...]。"""
+        now = int(now if now is not None else time.time())
+        out = []
+        for gens in self._gens.values():
+            for r in gens:
+                if (r["state"] == KEY_GRACE and r["grace_until"] is not None
+                        and r["grace_until"] <= now):
+                    r["state"] = KEY_RETIRED
+                    r["retired_at"] = now
+                    out.append((r["kid"], now))
+        return out
+
+    def revoke(self, sn, reason="", actor="", ts=None):
+        """整机作废：该 SN 所有代立即不参与验签。重复调用不覆盖原记录。"""
+        now = int(ts if ts is not None else time.time())
+        if sn not in self._revoked:
+            self._revoked[sn] = {"at": now, "reason": reason or "",
+                                 "actor": actor or ""}
+        # 无论是否已撤销，都把所有代置为 revoked（可能有“撤销后又冒出来的代”）
+        for r in self._gens.get(sn, []):
+            r["state"] = KEY_REVOKED
+        return self._revoked[sn]
 
     def unrevoke(self, sn):
-        """撤销的逆操作（仅演示用；真实部署撤销不可逆，见规范 §6.3.2）。"""
-        self._revoked.discard(sn)
+        """撤销的逆操作（**仅演示**；真实部署撤销不可逆，规范 §6.3.2）。"""
+        rec = self._revoked.pop(sn, None)
+        for r in self._gens.get(sn, []):
+            if r["state"] == KEY_REVOKED:
+                r["state"] = KEY_RETIRED
+        return rec
 
     def is_revoked(self, sn):
         return sn in self._revoked
 
+    def revoked_info(self, sn):
+        return self._revoked.get(sn)
+
+    # ---------------- 查询 ----------------
+    def active_of(self, sn):
+        for r in self._gens.get(sn, []):
+            if r["state"] == KEY_ACTIVE:
+                return r
+        return None
+
+    def verify_keys(self, sn, now=None):
+        """可用于验签的密钥（active 在前，其次未过期的 grace），按代次倒序。
+
+        报文本就不带 kid，故 server 按代次倒序**逐代试签**，轮换期间新旧都能过。
+        """
+        now = int(now if now is not None else time.time())
+        out = []
+        for r in sorted(self._gens.get(sn, []), key=lambda x: -x["gen"]):
+            if r["state"] == KEY_ACTIVE:
+                out.append(r)
+            elif r["state"] == KEY_GRACE and (r["grace_until"] is None
+                                              or r["grace_until"] > now):
+                out.append(r)
+        return out
+
+    def get_by_sn(self, sn):
+        """兼容旧接口：返回该 SN 的 **active** 记录（无则 None）。"""
+        return self.active_of(sn)
+
+    def get_key(self, kid):
+        sn, _, gen = str(kid).rpartition("#")
+        for r in self._gens.get(sn, []):
+            if str(r["gen"]) == gen:
+                return r
+        return None
+
+    def list_keys(self, sn=None):
+        """全部密钥记录（可按 sn 过滤），按 (sn, 代次降序) 排序。"""
+        if sn is not None:
+            return sorted(self._gens.get(sn, []), key=lambda x: -x["gen"])
+        return [r for s in sorted(self._gens) for r in
+                sorted(self._gens[s], key=lambda x: -x["gen"])]
+
+    def sns(self):
+        return sorted(self._gens)
+
+    # ---------------- 导入导出（server.py --keystore-file） ----------------
     def save(self, path):
-        """导出密钥库为 JSON 文件（供 server.py --keystore-file 加载）。"""
+        """导出为 JSON（含每一代与撤销表）。"""
         recs = []
-        for sn, r in self._records.items():
-            recs.append({
-                "sn": sn,
-                "pubkey_pem": pubkey_to_pem(r["pubkey"]),
-                "hmac_key_b64": b64url_encode(r["hmac_key"]),
-                "se_sn": r.get("se_sn"),
-            })
+        for sn in self.sns():
+            for r in self._gens[sn]:
+                recs.append({
+                    "sn": r["sn"], "kid": r["kid"], "gen": r["gen"],
+                    "pubkey_pem": (pubkey_to_pem(r["pubkey"])
+                                   if r.get("pubkey") else None),
+                    "hmac_key_b64": (b64url_encode(r["hmac_key"])
+                                     if r.get("hmac_key") else None),
+                    "se_sn": r.get("se_sn"), "model": r.get("model"),
+                    "firmware": r.get("firmware"), "created_at": r["created_at"],
+                    "state": r["state"], "grace_until": r.get("grace_until"),
+                    "retired_at": r.get("retired_at"),
+                })
+        data = {"devices": recs,
+                "revocations": [dict(sn=sn, **v)
+                                for sn, v in sorted(self._revoked.items())]}
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"devices": recs}, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def load(self, path):
-        """从 JSON 文件加载设备并注册（server.py --keystore-file）。"""
+        """从 JSON 加载；**兼容旧格式**（无 kid/gen/state → 视作第 1 代 active）。"""
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
         for d in data.get("devices", []):
-            self._records[d["sn"]] = {
-                "pubkey": pubkey_from_pem(d["pubkey_pem"]),
-                "hmac_key": b64url_decode(d["hmac_key_b64"]),
-                "se_sn": d.get("se_sn"),
-            }
+            gen = int(d.get("gen") or 1)
+            rec = {"sn": d["sn"], "kid": d.get("kid") or f"{d['sn']}#{gen}",
+                   "gen": gen,
+                   "pubkey": (pubkey_from_pem(d["pubkey_pem"])
+                              if d.get("pubkey_pem") else None),
+                   "hmac_key": (b64url_decode(d["hmac_key_b64"])
+                                if d.get("hmac_key_b64") else None),
+                   "se_sn": d.get("se_sn"), "model": d.get("model"),
+                   "firmware": d.get("firmware"),
+                   "created_at": int(d.get("created_at") or 0),
+                   "state": d.get("state") or KEY_ACTIVE,
+                   "grace_until": d.get("grace_until"),
+                   "retired_at": d.get("retired_at")}
+            gens = self._gens.setdefault(rec["sn"], [])
+            gens[:] = [r for r in gens if r["gen"] != gen]
+            gens.append(rec)
+            gens.sort(key=lambda x: x["gen"])
+        for v in data.get("revocations", []):
+            self._revoked[v["sn"]] = {"at": int(v.get("at") or 0),
+                                      "reason": v.get("reason") or "",
+                                      "actor": v.get("actor") or ""}
+
+    # ---------------- 展示（UI / API） ----------------
+    def to_dict(self, sn, registry=None, now=None):
+        """单个 SN 的密钥视图（可带上设备台账信息，供页面一屏看完）。"""
+        now = int(now if now is not None else time.time())
+        dev = None
+        if registry is not None:
+            d = registry.devices.get(sn)
+            if d is not None:
+                dev = {"status": d.status, "person_id": d.person_id,
+                       "org": d.org, "cc": d.cc, "last_seen": d.last_seen}
+        out = {"sn": sn, "revoked": self._revoked.get(sn), "device": dev,
+               "keys": []}
+        for k in sorted(self._gens.get(sn, []), key=lambda x: -x["gen"]):
+            gu = k.get("grace_until")
+            out["keys"].append({
+                "kid": k["kid"], "gen": k["gen"], "state": k["state"],
+                "created_at": k["created_at"], "grace_until": gu,
+                "grace_left": (max(0, gu - now)
+                               if gu and k["state"] == KEY_GRACE else None),
+                "retired_at": k.get("retired_at"), "se_sn": k.get("se_sn"),
+                "model": k.get("model"), "firmware": k.get("firmware"),
+                "has_pubkey": k.get("pubkey") is not None,
+                "has_hmac": k.get("hmac_key") is not None,
+                "pubkey_pem": (pubkey_to_pem(k["pubkey"])
+                               if k.get("pubkey") else None),
+            })
+        return out
 
 
 class NonceCache:
@@ -496,31 +750,41 @@ def verify_report(report, ks, now=None, used_nonces=None, window=300):
     if not verify_check(sn):
         return _reject("bad_check", level, alg)
 
-    # 5. 撤销检查
+    # 5. 撤销检查（设备级：整机作废 → 所有代立即拒）
     if ks is not None and ks.is_revoked(sn):
         return _reject("revoked", level, alg)
 
-    # 6. 查密钥（以 sn 为检索键，每设备仅一个活跃密钥，§6.3）
-    rec = ks.get_by_sn(sn) if ks is not None else None
-    if not rec:
+    # 6. 取可用密钥（active + 未过期的 grace）：轮换宽限期内新旧钥都能过（§6.3）
+    recs = ks.verify_keys(sn) if ks is not None else []
+    if not recs:
         return _reject("unknown_device", level, alg)
 
-    # 7. 验签
+    # 7. 验签：报文不带 kid → 按代次倒序**逐代试签**到匹配为止
     if not isinstance(sig, str) or not sig:
         return _reject("missing_sig", level, alg)
     preimage = jcs({"hdr": hdr, "payload": payload})
-    if alg == ALG_ES256:
-        ok = _verify_es256(rec["pubkey"], preimage, sig)
-    else:  # HS256：直接对 preimage 做 HMAC
-        hk = rec.get("hmac_key")
-        if not hk:
-            return _reject("no_hmac_key", level, alg)  # 降级需对称密钥（§9.1）
-        ok = _verify_hs256(hk, preimage, sig)
-    if not ok:
-        return _reject("signature_invalid", level, alg)
+    hit = None
+    hmac_missing = False
+    for rec in recs:
+        if alg == ALG_ES256:
+            if rec.get("pubkey") and _verify_es256(rec["pubkey"], preimage, sig):
+                hit = rec
+                break
+        else:  # HS256：直接对 preimage 做 HMAC
+            hk = rec.get("hmac_key")
+            if not hk:
+                hmac_missing = True
+                continue
+            if _verify_hs256(hk, preimage, sig):
+                hit = rec
+                break
+    if hit is None:
+        # 降级到 HS256 但库里没有对称密钥 → 明确报错（§9.1）
+        return _reject("no_hmac_key" if (alg == ALG_HS256 and hmac_missing)
+                       else "signature_invalid", level, alg)
 
     return {"accepted": True, "trust": TRUST_BY_LEVEL.get(level, "low"),
-            "level": level, "alg": alg}
+            "level": level, "alg": alg, "kid": hit["kid"], "gen": hit["gen"]}
 
 
 # ---------------------------------------------------------------------------
