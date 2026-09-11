@@ -89,9 +89,14 @@
       "evt_type_publish": "服务器发布走失表",
       "evt_type_found": "路由器发现",
       "evt_type_id_report": "Orpah ID 验签",
+      "evt_type_id_reject": "Orpah ID 验签被拒",
       "evt_type_case_mark": "案件立案",
       "evt_type_case_found": "案件已发现",
       "evt_type_case_close": "案件结案",
+      "evt_retention": "保留 {n} 天",
+      "evt_retention_all": "保留全部",
+      "actor_ph": "操作者",
+      "actor_title": "操作者（记入审计日志）",
       "alert_title": "告警",
       "alert_age": "持续 {v}",
       "alert_no_report": "设备 {sn} 无上报",
@@ -747,9 +752,14 @@
       "evt_type_publish": "Server published lost table",
       "evt_type_found": "Router discovery hit",
       "evt_type_id_report": "Orpah ID verified",
+      "evt_type_id_reject": "Orpah ID rejected",
       "evt_type_case_mark": "Case opened",
       "evt_type_case_found": "Case found",
       "evt_type_case_close": "Case closed",
+      "evt_retention": "keeping {n} days",
+      "evt_retention_all": "keeping all",
+      "actor_ph": "operator",
+      "actor_title": "Operator (recorded in the audit log)",
       "alert_title": "Alerts",
       "alert_age": "for {v}",
       "alert_no_report": "No report from {sn}",
@@ -1349,6 +1359,9 @@
     return "zh";
   }
 
+  /* 操作者（审计「谁」）：值存 localStorage，跨页/刷新保持。 */
+  var ACTOR_KEY = "orpah_ui_actor";
+
   var api = {
     lang: detectLang(),
     setLang: function (l) {
@@ -1397,8 +1410,25 @@
       if (dt) document.title = api.t(dt.getAttribute("data-i18n-doc-title"));
       document.documentElement.lang = api.lang === "en" ? "en" : "zh-CN";
       bootLangBtn();
+      bootActorBox();
       return api;
     },
+
+    /* 操作者（审计「谁」）。页面放一个容器即可：<span id="actorBox"></span>。
+     * 值存 localStorage；页面 POST 时带上 actor 字段 → 落库 root.orpah.events.actor，
+     * 事件历史里就能看出「哪个操作者」干的（自动事件记为 system）。 */
+    actor: function () {
+      try { return (localStorage.getItem(ACTOR_KEY) || "").trim(); }
+      catch (e) { return ""; }
+    },
+    setActor: function (v) {
+      v = String(v == null ? "" : v).trim();
+      try {
+        if (v) localStorage.setItem(ACTOR_KEY, v);
+        else localStorage.removeItem(ACTOR_KEY);
+      } catch (e) { /* ignore */ }
+    },
+    bootActorBox: bootActorBox,
   };
 
   /* 页头语言切换：页面只需放一个 <button id="langBtn">（内容自动填）。
@@ -1419,6 +1449,28 @@
         location.reload();
       }
     };
+  }
+
+  /* 页头操作者输入框：页面只需放一个 <span id="actorBox"></span>（内容自动填）。
+   * 留空 = 不记名（落库时该事件的 actor 记为空，展示为「—」）。 */
+  function bootActorBox() {
+    var box = document.getElementById("actorBox");
+    if (!box || box._wired) return;
+    box._wired = true;
+    var inp = document.createElement("input");
+    inp.id = "actorIn";
+    inp.className = "actor-in";
+    inp.type = "text";
+    inp.spellcheck = false;
+    inp.setAttribute("data-i18n-ph", "actor_ph");
+    inp.setAttribute("data-i18n-title", "actor_title");
+    inp.placeholder = api.t("actor_ph");
+    inp.title = api.t("actor_title");
+    inp.value = api.actor();
+    inp.onchange = function () { api.setActor(inp.value); };
+    inp.onblur = function () { api.setActor(inp.value); };
+    box.appendChild(inp);
+    box.title = api.t("actor_title");
   }
 
   global.OrpahI18n = api;

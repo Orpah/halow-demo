@@ -232,7 +232,7 @@ const evtLabel = v => {
   return s === "evt_type_" + v ? (v || "?") : s;   // 字典无此键 → 回退机器值
 };
 
-function renderEvents(rows, ok) {
+function renderEvents(rows, ok, meta) {
   const ul = $("evtList");
   if (!ul) return;
   const state = $("evtState");
@@ -240,6 +240,12 @@ function renderEvents(rows, ok) {
   state.textContent = ok ? T("evt_n").replace("{n}", list.length)
                          : T("evt_offline");
   state.className = ok ? "hint" : "hint lost-yes";
+  const ret = $("evtRetention");
+  if (ret && meta) {      // 保留期限：由后端 tsdb.EVENT_RETENTION_DAYS 决定
+    const d = meta.retention_days;
+    ret.textContent = d ? T("evt_retention").replace("{n}", d)
+                        : T("evt_retention_all");
+  }
   ul.innerHTML = "";
   if (!list.length) {
     const li = document.createElement("li");
@@ -252,11 +258,14 @@ function renderEvents(rows, ok) {
     const li = document.createElement("li");
     li.className = "pub-meta";
     const tm = new Date(e.t || 0).toTimeString().slice(0, 8);
+    // 操作者：只标人为操作（自动事件记 system，不显）
+    const who = (e.actor && e.actor !== "system")
+      ? ` <span class="evt-actor">${esc(e.actor)}</span>` : "";
     li.innerHTML =
       `<span class="tm">${esc(tm)}</span> ` +
       `<span class="pub-act"><b>${esc(evtLabel(e.etype))}</b>` +
       (e.sn ? ` <b class="lost-yes">${esc(e.sn)}</b>` : "") +
-      (e.detail ? ` ${esc(e.detail)}` : "") + `</span>`;
+      (e.detail ? ` ${esc(e.detail)}` : "") + who + `</span>`;
     ul.appendChild(li);
   });
 }
@@ -272,7 +281,7 @@ async function refreshEvents() {
   try {
     const r = await fetch(`/api/ts/events?limit=${limit}` +
       (etype ? `&etype=${encodeURIComponent(etype)}` : "")).then(x => x.json());
-    renderEvents(r.rows, !!r.ok);
+    renderEvents(r.rows, !!r.ok, r);
   } catch (e) {
     renderEvents([], false);
   } finally {

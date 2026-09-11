@@ -14,6 +14,11 @@
   .alert-list li.crit { color: var(--red); }
   .alert-list li.warn { color: var(--org); }
   .alert-list .since { color: var(--mut); }
+  /* 审计：事件历史里只给「人为操作」标出操作者（自动事件 system 不显） */
+  .evt-actor {
+    color: var(--acc); border: 1px solid var(--bd); border-radius: 8px;
+    padding: 0 6px; font-size: 12px; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -169,6 +174,7 @@
         <option value="publish" data-i18n="evt_type_publish">publish</option>
         <option value="found" data-i18n="evt_type_found">found</option>
         <option value="id_report" data-i18n="evt_type_id_report">id_report</option>
+        <option value="id_reject" data-i18n="evt_type_id_reject">id_reject</option>
         <option value="case_mark" data-i18n="evt_type_case_mark">case_mark</option>
         <option value="case_found" data-i18n="evt_type_case_found">case_found</option>
         <option value="case_close" data-i18n="evt_type_case_close">case_close</option>
@@ -177,6 +183,7 @@
     <label><span data-i18n="evt_limit">最近</span> <input id="evtLimit" type="number" value="30" min="5" max="200" step="5"> <span data-i18n="evt_rows">条</span></label>
     <button class="btn" id="btnEvtRefresh" data-i18n="evt_refresh">刷新</button>
     <span class="hint" id="evtState"></span>
+    <span class="hint" id="evtRetention"></span>
   </div>
   <ul id="evtList"></ul>
 </section>

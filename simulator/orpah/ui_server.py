@@ -398,8 +398,10 @@ class OrpahApp:
         if rec.get("sn"):
             self.registry.touch(rec["sn"])
         # 落库（内存 deque 有上限，历史看「事件历史」区）
+        # 验签不通过 → 单记 id_reject，才能在事件历史里按类型筛出「被拒上报」
         self.tsdb.write_event(
-            "id_report", sn=rec.get("sn", ""),
+            "id_report" if rec.get("accepted") else "id_reject",
+            sn=rec.get("sn", ""),
             detail=(f"alg={rec.get('alg')} level={rec.get('level')} "
                     f"trust={rec.get('trust')} "
                     f"accepted={rec.get('accepted')}" +
@@ -761,7 +763,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             if APP.srv:
                                 APP.srv.mark_tracked(sn, note=f"case:{c.case_id}")
                         APP.tsdb.write_event("case_mark", sn=",".join(sns),
-                                             detail=c.case_id)
+                                             detail=c.case_id,
+                                             actor=req.get("actor", ""))
                     resp = {"ok": True, "dup": dup, "case_id": c.case_id}
                     if dup:
                         resp["existing_case_id"] = c.case_id
@@ -782,7 +785,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if APP.srv:
                             APP.srv.untrack(sn)
                     APP.tsdb.write_event("case_close",
-                                         detail=f"{c.case_id}:{outcome_val}")
+                                         detail=f"{c.case_id}:{outcome_val}",
+                                         actor=req.get("actor", ""))
                     self._send(200, json.dumps({"ok": True}).encode())
             else:
                 self._send(200, json.dumps({"ok": False,
@@ -933,7 +937,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _api_ts_events(self):
         """GET /api/ts/events?limit=N[&etype=][&sn=] → IoTDB 里的业务事件历史。
 
-        事件由本进程写入（publish/found/id_report/case_*），**重启后仍在**。
+        事件由本进程写入（publish/found/id_report/id_reject/case_*），**重启后仍在**。
+        每行带 actor（操作者，审计「谁」；自动事件 = system）。
+        retention_days = 事件保留期限（天，0 = 不清理；见 tsdb.EVENT_RETENTION_DAYS）。
         """
         from urllib.parse import parse_qs
         qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -947,6 +953,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         rows = APP.tsdb.query_events(limit=limit, etype=etype, sn=sn)
         self._send(200, json.dumps({"ok": rows is not None,
                                     "etype": etype, "sn": sn,
+                                    "retention_days": APP.tsdb.event_retention_days,
+                                    "purged_upto": APP.tsdb.purged_upto,
                                     "rows": rows or []}).encode())
 
     def _api_sig(self):
