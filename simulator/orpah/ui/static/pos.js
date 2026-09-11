@@ -325,3 +325,65 @@ function obsAt(stations, samples, t, A, n) {
   }
   return out;
 }
+
+/* ---------------- 有效时段分段（回放「标注缺口 / 跳过无效段」用） ----------------
+   把 [t0, t1] 切成最多 maxSeg 段，逐段给出「有几台站位有观测」：
+     0   = 无观测（解不出位置，也没有距离环）
+     1   = 只有 1 台（有距离环，但解不出位置 —— 信息不足）
+     >=2 = 可定位
+   **语义直接调用 obsOfStation**（不另写一套判定），只是把时间分批以免逐毫秒扫描。
+   跳过/标注只认「>=2」为有效：1 台观测给不出坐标，对找人没有可操作信息。
+
+   性能：时间轴最长 12 h（回放上限）。对**走路由器序列**的站位，只把 t 附近
+   2×ROUTER_MAX_AGE 内的样本喂进去 —— obsOfStation 在该分支只看「最近一条」，
+   裁剪不改变结果；有 t0 悬停窗口的站位**不裁剪**（窗口分支要窗内全部样本算中位数）。
+   返回 { step(ms), n(段数), t0, counts(Uint8Array) }。 */
+function obsSegments(stations, samplesOf, t0, t1, maxSeg = 1200) {
+  const span = Math.max(1, t1 - t0);
+  const step = Math.max(1000, Math.ceil(span / maxSeg));
+  const n = Math.floor(span / step) + 1;
+  const counts = new Uint8Array(n);
+  const state = {};
+  for (const s of stations) {
+    state[s.sid] = {
+      arr: samplesOf(s.sid) || [],
+      lo: 0,
+      // 手动绑定不受时间影响；有 t0 的走窗口分支（要全量样本）→ 这两种不裁剪
+      sliding: (s.rssi === null || s.rssi === undefined)
+               && (s.t0 === null || s.t0 === undefined),
+    };
+  }
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * step;
+    let c = 0;
+    for (const s of stations) {
+      const st = state[s.sid];
+      let smp = st.arr;
+      if (st.sliding) {
+        while (st.lo < st.arr.length && st.arr[st.lo].t < t - 2 * ROUTER_MAX_AGE_MS) st.lo++;
+        smp = st.arr.slice(st.lo);
+      }
+      if (obsOfStation(s, smp, t)) c++;
+    }
+    counts[i] = Math.min(255, c);
+  }
+  return { step, n, t0, counts };
+}
+
+/* 时刻 → 段号（越界返回 -1） */
+function segIndexAt(seg, t) {
+  if (!seg) return -1;
+  const i = Math.floor((t - seg.t0) / seg.step);
+  return (i < 0 || i >= seg.n) ? -1 : i;
+}
+
+/* 从 t 起（含）第一个「可定位」时刻；没有则返回 null。
+   minCount 默认 2 —— 1 台观测解不出位置，不算有效。 */
+function nextValidAt(seg, t, minCount = 2) {
+  if (!seg) return null;
+  let i = Math.max(0, Math.ceil((t - seg.t0) / seg.step));
+  for (; i < seg.n; i++) {
+    if (seg.counts[i] >= minCount) return seg.t0 + i * seg.step;
+  }
+  return null;
+}

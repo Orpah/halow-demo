@@ -58,6 +58,11 @@
   - **tsdb 写入接口的 `ts` 参数单位是 epoch 秒**（`write_report` / `write_router_obs`）。
     传毫秒会被当成天文数字时间戳 → IoTDB 报错 → 异常被 `try/except` 吞掉，
     **只表现为 `/api/status.tsdb=false` 且数据静默不落库**（排查时先看这条）。
+  - **`tsdb._read_rows` 必须整段持锁**（取数据集 + 遍历游标 + 关闭）：IoTDB 的 `Session`
+    **不是线程安全的**，同一 Session 上并发的查询会互相踩游标 —— 只锁 `execute_query_statement`
+    时，另一线程的查询会让本线程的遍历**读出空结果**（实测：串行 4 发全对，并发 4 发里有 2 条
+    返回 0 行 / `ok:false`）。HTTP 是 ThreadingHTTPServer，两个页面/两个标签页同时请求就会撞上。
+    排查手法：同一窗口**串行 vs 并发**各发几次对比。
 - **回放页硬规则（2026-09-12）**：
   - **定位算法只有一份**：`orpah/ui/static/pos.js`（`trilaterate`/`wlsLocate`/`ellipseOf`/
     `obsOfStation`/`qualityOf`…）。`track.html` 与 `replay.html` 都用它 —— 别在页面里

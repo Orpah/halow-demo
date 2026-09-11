@@ -94,6 +94,12 @@
     <input id="rpSeek" type="range" min="0" max="1000" value="0">
     <span class="clock"><b id="rpClock">--:--:--</b> <span id="rpSpan"></span></span>
   </div>
+  <canvas id="rpBar" height="8" style="width:100%;height:8px;display:block;margin:4px 0 2px"></canvas>
+  <div class="row">
+    <label><input type="checkbox" id="rpSkip" checked> <span data-i18n="rp_skip">跳过无效段</span></label>
+    <span class="hint" id="rpValid"></span>
+  </div>
+  <p class="hint" data-i18n="rp_bar_legend">进度条：绿=可定位（≥2 台有观测）· 橙=仅 1 台（信息不足）· 灰=无观测。无效段保留不删（“某段时间完全没被任何路由器听到”本身就是线索）。</p>
   <canvas id="canvasReplay" width="620" height="420"></canvas>
   <p class="hint" data-i18n="rp_legend">蓝方块=站位、蓝圈=该站位的距离环、红叉=该时刻的定位估计、黄虚线椭圆=95% 置信范围、红线=已回放出的估计轨迹、灰点=当时无观测的站位。</p>
   <div class="stat mono">
@@ -164,7 +170,8 @@ const S = {                          // 回放状态
   sn: "", from: 0, to: 0,
   points: [], obs: {}, events: [], stations: [],
   t: 0, playing: false, timer: null,
-  trail: [],                         // 已回放出的估计点（画轨迹）
+  seg: null,                         // 有效时段分段（obsSegments 结果）
+  trail: [],                         // 已回放出的估计点（画轨迹；null = 缺口断开）
 };
 
 /* ---------------- 拉取 ---------------- */
@@ -222,21 +229,76 @@ async function loadReplay() {
       .replace("{p}", S.points.length).replace("{e}", S.events.length)
       .replace("{o}", nObs)
       + (rep.truncated ? " · " + T("rp_truncated") : "");
+    rpInfo("");                     // 先清掉「拉取中…」，再由 analyzeValid 写「光标已落…」
+    analyzeValid();
     renderTimeline();
     render();
-    rpInfo("");
   } catch (e) {
     rpInfo(T("err_offline"), "err");
   }
 }
 
+/* 有效时段：分段统计 + 进度条标注 + 光标落到首个可定位时刻
+   为什么要做：窗口里常常大段「解不出位置」（无观测 / 只有 1 台）—— 直接从头播，
+   用户第一眼看到「无解」会以为页面坏了；但**也不能静默截掉**：
+   「某段时间完全没被任何路由器听到」本身就是线索。所以保留完整时间轴 + 明确标注。 */
+function analyzeValid() {
+  S.seg = obsSegments(S.stations, samplesOf, S.from, S.to);
+  const seg = S.seg;
+  let ge2 = 0, one = 0, none = 0;
+  for (let i = 0; i < seg.n; i++) {
+    if (seg.counts[i] >= 2) ge2++;
+    else if (seg.counts[i] === 1) one++;
+    else none++;
+  }
+  const total = seg.n || 1;
+  const first = nextValidAt(seg, S.from);
+  const mins = (k) => durLeft(k * seg.step / 1000);
+  $("rpValid").textContent = T("rp_valid_fmt")
+    .replace("{a}", (ge2 / total * 100).toFixed(0)).replace("{am}", mins(ge2))
+    .replace("{b}", ((one + none) / total * 100).toFixed(0)).replace("{bm}", mins(one + none))
+    + (first === null ? " · " + T("rp_no_valid") : "");
+  drawValidBar();
+  if (first !== null) {                     // 光标先落在能看见东西的地方
+    S.t = first;
+    $("rpInfo").textContent = T("rp_jump_first").replace("{t}", clockOf(first));
+  }
+}
+
+/* 进度条分色：绿=可定位 / 橙=仅 1 台 / 灰=无观测 */
+function drawValidBar() {
+  const c = $("rpBar"), seg = S.seg;
+  if (!c || !seg) return;
+  const W = Math.max(200, Math.round(c.clientWidth || c.parentElement.clientWidth || 600));
+  c.width = W;
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, W, c.height);
+  const px = W / seg.n;
+  for (let i = 0; i < seg.n; i++) {
+    const cnt = seg.counts[i];
+    ctx.fillStyle = cnt >= 2 ? "#3fb950" : (cnt === 1 ? "#d29922" : "#30363d");
+    ctx.fillRect(i * px, 0, Math.max(1, Math.ceil(px)), c.height);
+  }
+}
 /* ---------------- 回放推进 ---------------- */
 function tick() {
   const speed = parseFloat($("rpSpeed").value) || 60;
   S.t += 100 * speed;                     // 每 100ms 帧推进 速度×0.1s
+  if (skipOn()) {                         // 「跳过无效段」：跳到下一个能定位的时刻
+    const i = segIndexAt(S.seg, S.t);
+    if (i >= 0 && S.seg.counts[i] < 2) {
+      const nx = nextValidAt(S.seg, S.t);
+      if (nx === null) { S.t = S.to; stop(); return; }
+      S.trail.push(null);                 // 缺口 → 轨迹断开（跨缺口的直线不是真走出来的路）
+      S.t = nx;
+    }
+  }
   if (S.t >= S.to) { S.t = S.to; stop(); }
   render();
 }
+
+function skipOn() { return $("rpSkip").checked && S.seg; }
+
 function play() {
   if (!S.points.length && !S.events.length) return;
   if (S.t >= S.to) S.t = S.from, S.trail = [];
@@ -276,7 +338,7 @@ function render() {
   const ell = (wls && wls.ok) ? wls.ellipse : null;
 
   if (est) {
-    const last = S.trail[S.trail.length - 1];
+    const last = S.trail.length ? S.trail[S.trail.length - 1] : null;
     if (!last || Math.hypot(last.x - est.x, last.y - est.y) > 1e-6) S.trail.push(est);
     if (S.trail.length > 4000) S.trail.shift();
   }
@@ -338,13 +400,15 @@ function draw(obs, est, ell) {
     ctx.fillStyle = "#c9d1d9"; ctx.font = "11px monospace";
     ctx.fillText(o.s.name || o.s.sid, sx + 7, sy - 7);
   });
-  if (S.trail.length > 1) {                          // 已回放出的估计轨迹
+  if (S.trail.length > 1) {                          // 已回放出的估计轨迹（null = 缺口，断开）
     ctx.strokeStyle = "#f85149"; ctx.lineWidth = 2;
     ctx.beginPath();
-    S.trail.forEach((p, i) => {
+    let started = false;
+    for (const p of S.trail) {
+      if (!p) { if (started) { ctx.stroke(); ctx.beginPath(); started = false; } continue; }
       const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
-      if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
-    });
+      if (started) ctx.lineTo(X, Y); else { ctx.moveTo(X, Y); started = true; }
+    }
     ctx.stroke();
   }
   if (est) {
@@ -422,6 +486,8 @@ $("rpSeek").oninput = () => {
   S.trail = [];                       // 跳转后轨迹重画（不能留下"未来"的轨迹）
   render();
 };
+$("rpSkip").onchange = () => { $("rpValid").title = ""; };
+window.addEventListener("resize", () => { if (S.seg) drawValidBar(); });
 $("rpOnlySec").onchange = () => { $("rpTimeline").dataset.sig = ""; renderTimeline(); };
 document.querySelectorAll("[data-min]").forEach(b => {
   b.onclick = () => {

@@ -163,23 +163,29 @@ class Tsdb:
 
     # ---------------- 查询 ----------------
     def _read_rows(self, sql):
-        """执行查询 → [{t(ms), <列名>: 值}]（TEXT 自动解码）。失败返回 None。"""
+        """执行查询 → [{t(ms), <列名>: 值}]（TEXT 自动解码）。失败返回 None。
+
+        **必须整段持锁**（取数据集 + 遍历游标 + 关闭）：IoTDB 的 `Session` 不是线程安全的，
+        同一个 Session 上并发的查询会互相踩游标 —— 只锁 `execute_query_statement` 时，
+        另一个线程的查询会让本线程的遍历读出**空结果**（表现为某些窗口莫名 0 行、ok=false）。
+        HTTP 是 ThreadingHTTPServer，两个页面/两个标签页同时请求就会撞上。
+        """
         try:
             with self._lock:
                 ds = self.session.execute_query_statement(sql)
-            cols = ds.get_column_names()
-            rows = []
-            while ds.has_next():
-                rr = ds.next()
-                fields = rr.get_fields()          # 不含 Time 列
-                rec = {"t": int(rr.get_timestamp())}
-                for i, c in enumerate(cols[1:]):  # cols[0]=Time
-                    v = fields[i].value
-                    if isinstance(v, bytes):      # TEXT 返回 bytes → 解码
-                        v = v.decode("utf-8", "replace")
-                    rec[c.split(".")[-1]] = v
-                rows.append(rec)
-            ds.close_operation_handle()
+                cols = ds.get_column_names()
+                rows = []
+                while ds.has_next():
+                    rr = ds.next()
+                    fields = rr.get_fields()          # 不含 Time 列
+                    rec = {"t": int(rr.get_timestamp())}
+                    for i, c in enumerate(cols[1:]):  # cols[0]=Time
+                        v = fields[i].value
+                        if isinstance(v, bytes):      # TEXT 返回 bytes → 解码
+                            v = v.decode("utf-8", "replace")
+                        rec[c.split(".")[-1]] = v
+                    rows.append(rec)
+                ds.close_operation_handle()
             return rows
         except Exception:
             self.available = False
