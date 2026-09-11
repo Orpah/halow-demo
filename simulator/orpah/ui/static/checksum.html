@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_checksum">
 <head>
 <meta charset="utf-8">
 <title>SN 校验码工具 — ORPAH-over-HaLow</title>
@@ -30,84 +30,77 @@
 </head>
 <body>
 <header>
-  <div class="brand"><a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name">SN 校验码工具</span>
-    <span class="sub">Orpah ID · CHECK 校验位计算（CC=CN，校验位只算 ORG-UNIQUE）</span>
-    <a class="btn back" href="damm32.html">Damm32 构造</a>
-    <a class="btn back" href="index.html">← 返回主页</a>
+  <div class="brand"><a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name" data-i18n="cs_brand">SN 校验码工具</span>
+    <span class="sub" data-i18n="cs_sub">Orpah ID · CHECK 校验位计算（CC=CN，校验位只算 ORG-UNIQUE）</span>
+    <a class="btn back" href="damm32.html" data-i18n="nav_damm32">Damm32 构造</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>校验位计算器</h3>
+  <h3 data-i18n="cs_title">校验位计算器</h3>
   <div class="tabs" id="tabs">
-    <button class="tab active" data-algo="damm32">Damm32（1 位）</button>
-    <button class="tab" data-algo="luhn32">Luhn32（1 位）</button>
-    <button class="tab" data-algo="mod97">Mod97（2 位）</button>
+    <button class="tab active" data-algo="damm32" data-i18n="cs_tab_d32">Damm32（1 位）</button>
+    <button class="tab" data-algo="luhn32" data-i18n="cs_tab_l32">Luhn32（1 位）</button>
+    <button class="tab" data-algo="mod97" data-i18n="cs_tab_m97">Mod97（2 位）</button>
   </div>
   <div class="io">
-    <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
-      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"><span class="cc-name" id="ccName">中国</span></label>
-    <datalist id="ccList">
-      <option value="CN">中国</option>
-      <option value="US">美国</option>
-      <option value="JP">日本</option>
-      <option value="GB">英国</option>
-      <option value="DE">德国</option>
-      <option value="FR">法国</option>
-      <option value="RU">俄罗斯</option>
-      <option value="KR">韩国</option>
-      <option value="AU">澳大利亚</option>
-      <option value="CA">加拿大</option>
-      <option value="IN">印度</option>
-      <option value="BR">巴西</option>
-      <option value="MX">墨西哥</option>
-      <option value="IT">意大利</option>
-      <option value="ES">西班牙</option>
-      <option value="NL">荷兰</option>
-      <option value="SE">瑞典</option>
-      <option value="CH">瑞士</option>
-      <option value="NO">挪威</option>
-      <option value="DK">丹麦</option>
-      <option value="FI">芬兰</option>
-      <option value="AT">奥地利</option>
-      <option value="BE">比利时</option>
-      <option value="PT">葡萄牙</option>
-      <option value="IE">爱尔兰</option>
-      <option value="NZ">新西兰</option>
-      <option value="SG">新加坡</option>
-      <option value="TW">中国台湾</option>
-      <option value="HK">中国香港</option>
-      <option value="MO">中国澳门</option>
-    </datalist>
-    <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
+    <label><span class="hint" data-i18n="cs_cc_hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" data-i18n-ph="cs_cc_ph" data-i18n-title="cs_cc_tt" placeholder="如 CN" title="输入两位国家码"><span class="cc-name" id="ccName">中国</span></label>
+    <datalist id="ccList"></datalist>
+    <label><span class="hint" data-i18n="cs_org_hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
       <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
     <div class="out">
-      <div>校验位：<b id="checkOut">-</b></div>
-      <div>整串：<code id="fullOut">-</code></div>
-      <div>校验：<b id="verifyOut">-</b></div>
+      <div><span data-i18n="cs_out_check">校验位：</span><b id="checkOut">-</b></div>
+      <div><span data-i18n="cs_out_full">整串：</span><code id="fullOut">-</code></div>
+      <div><span data-i18n="cs_out_verify">校验：</span><b id="verifyOut">-</b></div>
     </div>
   </div>
   <div class="config-row" style="margin-top:12px">
-    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
-    <span class="hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
+    <button class="btn" id="btnDemo" data-i18n="cs_demo">演示单字符替换被检出</button>
+    <span class="hint" data-i18n="cs_demo_hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
     <span class="mono demo-result" id="demoResult"></span>
   </div>
   <p class="hint" id="algoNote"></p>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
+const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CI = {};
 for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i;
 
-// ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
-const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
-  "FR":"法国","RU":"俄罗斯","KR":"韩国","AU":"澳大利亚","CA":"加拿大","IN":"印度",
-  "BR":"巴西","MX":"墨西哥","IT":"意大利","ES":"西班牙","NL":"荷兰","SE":"瑞典",
-  "CH":"瑞士","NO":"挪威","DK":"丹麦","FI":"芬兰","AT":"奥地利","BE":"比利时",
-  "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
-  "HK":"中国香港","MO":"中国澳门" };
+// 国家码列表（选项与右侧国名共用）。国名优先用浏览器 Intl.DisplayNames 按语言输出，
+// 不可用时回退下面这份中文表。
+const CC_LIST = ["CN", "US", "JP", "GB", "DE", "FR", "RU", "KR", "AU",
+  "CA", "IN", "BR", "MX", "IT", "ES", "NL", "SE", "CH", "NO", "DK",
+  "FI", "AT", "BE", "PT", "IE", "NZ", "SG", "TW", "HK", "MO"];
+const CC_NAMES_ZH = { "CN": "中国", "US": "美国", "JP": "日本", "GB": "英国", "DE": "德国",
+  "FR": "法国", "RU": "俄罗斯", "KR": "韩国", "AU": "澳大利亚", "CA": "加拿大", "IN": "印度",
+  "BR": "巴西", "MX": "墨西哥", "IT": "意大利", "ES": "西班牙", "NL": "荷兰", "SE": "瑞典",
+  "CH": "瑞士", "NO": "挪威", "DK": "丹麦", "FI": "芬兰", "AT": "奥地利", "BE": "比利时",
+  "PT": "葡萄牙", "IE": "爱尔兰", "NZ": "新西兰", "SG": "新加坡", "TW": "中国台湾",
+  "HK": "中国香港", "MO": "中国澳门" };
+let ccDisp = null;
+try {
+  ccDisp = new Intl.DisplayNames(
+    [OrpahI18n.lang === "en" ? "en" : "zh-Hans"], { type: "region" });
+} catch (e) { /* 旧浏览器回退静态表 */ }
+function ccName(code) {
+  try {
+    const n = ccDisp && ccDisp.of(code);
+    if (n && n !== code) return n;
+  } catch (e) { /* ignore */ }
+  return CC_NAMES_ZH[code] || T("cc_unknown");
+}
+function fillCcList() {
+  $("ccList").innerHTML = CC_LIST
+    .map(c => `<option value="${c}">${ccName(c)}</option>`).join("");
+}
 
 /* ---- 算法全部走后端 /api/checksum（单一源：damm32.py / luhn32.py / mod97.py）---- */
 async function apiChecksum(params) {
@@ -115,7 +108,7 @@ async function apiChecksum(params) {
     return await fetch("/api/checksum?" + new URLSearchParams(params)).then(r => r.json());
   } catch (e) {
     console.error("checksum:", e);
-    return { ok: false, err: "后端不可达" };
+    return { ok: false, err: T("cs_offline") };
   }
 }
 
@@ -129,9 +122,9 @@ function validOrgUnique(s) {
 }
 
 const ALGO_NOTE = {
-  damm32: "Damm32：拟群 T[x][y] = 2·(x⊕y)（GF(2⁵)、p(t)=t⁵+t+1），检出所有单字符替换 + 相邻换位。构造与性质验证见「Damm32 构造」页。",
-  luhn32: "Luhn mod 32：从右往左隔位翻倍，和模 32 为 0。实现简单，检出大部分单错与换位。",
-  mod97: "Mod 97（IBAN 思路）：字母 A=10..Z=35、数字 0-9，整体取模 97；输出两位十进制（02–98，不含 00/01）。"
+  damm32: T("cs_note_d32"),
+  luhn32: T("cs_note_l32"),
+  mod97: T("cs_note_m97"),
 };
 let activeAlgo = "damm32";
 
@@ -146,19 +139,20 @@ async function refresh() {
   const my = ++reqSeq;
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
-  document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
+  document.getElementById("ccName").textContent = ccName(cc);
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
         ver = document.getElementById("verifyOut");
   const r = await compute(org);
   if (my !== reqSeq) return;             // 丢弃过期响应（快速输入防乱序）
   if (!r) {
-    out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
+    out.textContent = T("cs_bad_input"); full.textContent = "-";
+    ver.textContent = "-"; ver.className = "";
     return;
   }
   out.textContent = r.check;
   full.textContent = cc + "-" + org + "-" + r.check;
-  ver.textContent = r.ok ? "✓ 通过" : "✗ 失败";
+  ver.textContent = r.ok ? T("sg_ok") : T("sg_bad");
   ver.className = r.ok ? "ok" : "bad";
 }
 
@@ -168,15 +162,19 @@ document.getElementById("btnDemo").addEventListener("click", async () => {
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   const r = await compute(org);
   const out = document.getElementById("demoResult");
-  if (!r) { out.textContent = "非法输入"; return; }
+  if (!r) { out.textContent = T("cs_bad_input"); return; }
   const idx = CROCKFORD.indexOf(org.slice(-1));
   const flipped = CROCKFORD[(Math.max(idx, 0) + 1) % 32];
   const badOrg = org.slice(0, -1) + flipped;
   const bad = await apiChecksum({ action: "verify", algo: activeAlgo,
                                   body: badOrg + "-" + r.check });
+  const pass = T("cs_pass"), fail = T("cs_fail");
   out.textContent =
-    `原始  ${cc}-${org}-${r.check}   → 校验 ${r.ok ? "通过" : "失败"}\n` +
-    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${bad.valid ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+    T("cs_demo_orig").replace("{cc}", cc).replace("{org}", org)
+      .replace("{chk}", r.check).replace("{r}", r.ok ? pass : fail) + "\n" +
+    T("cs_demo_bad").replace("{cc}", cc).replace("{org}", badOrg)
+      .replace("{chk}", r.check)
+      .replace("{r}", bad.valid ? T("cs_pass_anom") : T("cs_fail_caught"));
 });
 
 /* ---- tab 切换 ---- */
@@ -200,6 +198,8 @@ document.getElementById("ccInput").addEventListener("keydown", (e) => {
 });
 
 document.getElementById("algoNote").textContent = ALGO_NOTE.damm32;
+OrpahI18n.apply();
+fillCcList();
 refresh();
 </script>
 </body>

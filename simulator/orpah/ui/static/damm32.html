@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_damm32">
 <head>
 <meta charset="utf-8">
 <title>Damm32 构造 / 验证工具 — ORPAH-over-HaLow</title>
@@ -47,113 +47,94 @@
 </head>
 <body>
 <header>
-  <div class="brand"><a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name">Damm32 构造 / 验证</span>
-    <span class="sub">ORPAH ID · 序列号校验码（Crockford Base32）</span>
-    <a class="btn back" href="index.html">← 返回主页</a>
+  <div class="brand"><a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name" data-i18n="d32_brand">Damm32 构造 / 验证</span>
+    <span class="sub" data-i18n="d32_sub">ORPAH ID · 序列号校验码（Crockford Base32）</span>
+    <a class="btn back" href="checksum.html" data-i18n="nav_checksum">校验码工具</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>1 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
+  <h3 data-i18n-html="d32_sec1">1 · 校验位计算器（与 <code>damm32.py</code> 同算法）</h3>
   <div class="io">
-    <label><span class="hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
-      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" placeholder="如 CN" title="输入两位国家码，如 CN"><span class="cc-name" id="ccName">中国</span></label>
-    <datalist id="ccList">
-      <option value="CN">中国</option>
-      <option value="US">美国</option>
-      <option value="JP">日本</option>
-      <option value="GB">英国</option>
-      <option value="DE">德国</option>
-      <option value="FR">法国</option>
-      <option value="RU">俄罗斯</option>
-      <option value="KR">韩国</option>
-      <option value="AU">澳大利亚</option>
-      <option value="CA">加拿大</option>
-      <option value="IN">印度</option>
-      <option value="BR">巴西</option>
-      <option value="MX">墨西哥</option>
-      <option value="IT">意大利</option>
-      <option value="ES">西班牙</option>
-      <option value="NL">荷兰</option>
-      <option value="SE">瑞典</option>
-      <option value="CH">瑞士</option>
-      <option value="NO">挪威</option>
-      <option value="DK">丹麦</option>
-      <option value="FI">芬兰</option>
-      <option value="AT">奥地利</option>
-      <option value="BE">比利时</option>
-      <option value="PT">葡萄牙</option>
-      <option value="IE">爱尔兰</option>
-      <option value="NZ">新西兰</option>
-      <option value="SG">新加坡</option>
-      <option value="TW">中国台湾</option>
-      <option value="HK">中国香港</option>
-      <option value="MO">中国澳门</option>
-    </datalist>
-    <label><span class="hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
+    <label><span class="hint" data-i18n="cs_cc_hint">CC（ISO 3166-1 alpha-2，不参与校验）</span><br>
+      <input id="ccInput" class="cc" list="ccList" value="CN" maxlength="2" spellcheck="false" autocomplete="off" data-i18n-ph="cs_cc_ph" data-i18n-title="cs_cc_tt" placeholder="如 CN" title="输入两位国家码"><span class="cc-name" id="ccName">中国</span></label>
+    <datalist id="ccList"></datalist>
+    <label><span class="hint" data-i18n="cs_org_hint">ORG-UNIQUE（Crockford；校验位只算这段，不含 CC）</span><br>
       <input id="orgUnique" value="WH01-9AF3C1D2" spellcheck="false"></label>
     <div class="out">
-      <div>校验位：<b id="checkOut">-</b></div>
-      <div>整串：<code id="fullOut">-</code></div>
-      <div>校验：<b id="verifyOut">-</b></div>
+      <div><span data-i18n="cs_out_check">校验位：</span><b id="checkOut">-</b></div>
+      <div><span data-i18n="cs_out_full">整串：</span><code id="fullOut">-</code></div>
+      <div><span data-i18n="cs_out_verify">校验：</span><b id="verifyOut">-</b></div>
     </div>
   </div>
   <div class="config-row" style="margin-top:12px">
-    <button class="btn" id="btnDemo">演示单字符替换被检出</button>
-    <span class="hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
+    <button class="btn" id="btnDemo" data-i18n="cs_demo">演示单字符替换被检出</button>
+    <span class="hint" data-i18n="cs_demo_hint">对 ORG-UNIQUE 改动一位（最后一个数据字符取反），校验应失败。</span>
     <span class="mono demo-result" id="demoResult"></span>
   </div>
 </section>
 
 <section class="card">
-  <h3>2 · 构造算法</h3>
-  <div class="formula">
-    Damm32 拟群定义在有限域 <b>GF(2⁵)</b> 上，不可约多项式
-    <code>p(t) = t⁵ + t + 1</code>（系数 <code>0x23</code>）：<br>
-    &nbsp;&nbsp;<code>T[x][y] = 2 · (x ⊕ y)</code>　
-    （<code>·</code> = GF(2⁵) 乘法，<code>2</code> = 域元素 <code>t</code>，<code>⊕</code> = 域加法 = 按位异或）<br>
-    该拟群是「弱全反对称拟群」（weak totally anti-symmetric quasigroup），满足 Damm 算法
-    检出<b>所有单字符替换 + 所有相邻换位</b>的充要条件：
-  </div>
-  <ul>
-    <li><b>拉丁方</b>：每行 / 每列都是 0..31 的一个排列（运算符 <code>⊙</code> 构成拟群）；</li>
-    <li><b>主对角线全 0</b>：<code>T[x][x] = 0</code>，校验位闭合；</li>
-    <li><b>相邻换位条件</b>：<code>(c⊙x)⊙y = (c⊙y)⊙x ⟹ x = y</code>（对任意 c、x≠y 不成立）。</li>
-  </ul>
-  <p class="hint">GF(2⁵) 特征为 2：<code>2·a = 0 ⟺ a = 0</code>，故不存在 Z₃₂ 里那种
-  「<code>a</code> 与 <code>a+16</code> 互为反极点」破坏换位条件的元素对 —— 这正是 32 阶可构造而模 32 加法不可行的原因。
-  与 base-10 Damm 表（同为弱全反对称拟群）性质一致，并已穷举验证。</p>
+  <h3 data-i18n="d32_sec2">2 · 构造算法</h3>
+  <div class="formula" data-i18n-html="d32_formula"></div>
+  <ul data-i18n-html="d32_cond"></ul>
+  <p class="hint" data-i18n-html="d32_char2"></p>
 </section>
 
 <section class="card">
-  <h3>3 · 拟群性质验证（浏览器内实时计算）</h3>
+  <h3 data-i18n="d32_sec3">3 · 拟群性质验证（浏览器内实时计算）</h3>
   <div class="prop-row" id="propRow"></div>
   <div class="config-row">
-    <button class="btn" id="btnBrute" data-run="3">全量穷举验证（长度 ≤ 3 全部串）</button>
-    <span class="hint" id="bruteHint">点击后穷举 32¹ + 32² + 32³ = 33824 个串，逐一检查单字符替换与相邻换位是否都被检出。</span>
+    <button class="btn" id="btnBrute" data-run="3" data-i18n="d32_brute">全量穷举验证（长度 ≤ 3 全部串）</button>
+    <span class="hint" id="bruteHint" data-i18n="d32_brute_hint">点击后穷举 32¹ + 32² + 32³ = 33824 个串，逐一检查单字符替换与相邻换位是否都被检出。</span>
   </div>
 </section>
 
 <section class="card">
-  <h3>4 · 生成的 32×32 表（<code>T[x][y] = 2·(x⊕y)</code>）</h3>
-  <p class="hint">对角线上为 0（蓝色）；第 0 行 <code>T[0][y] = 2y</code>（橙色）= GF(2⁵) 中乘 <code>t</code>。</p>
+  <h3 data-i18n-html="d32_sec4">4 · 生成的 32×32 表（<code>T[x][y] = 2·(x⊕y)</code>）</h3>
+  <p class="hint" data-i18n-html="d32_tbl_hint">对角线上为 0（蓝色）；第 0 行 <code>T[0][y] = 2y</code>（橙色）= GF(2⁵) 中乘 <code>t</code>。</p>
   <div class="tablewrap"><table class="t32" id="t32"></table></div>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
+const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
 let CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";  // 后端返回后覆盖
 let CI = {};
 function rebuildCI() { CI = {}; for (let i = 0; i < CROCKFORD.length; i++) CI[CROCKFORD[i]] = i; }
 rebuildCI();
 
-// ISO 3166-1 alpha-2 → 中文名（下拉框选项与右侧国名显示共用；默认/样例用 CN）
-const CC_NAMES = { "CN":"中国","US":"美国","JP":"日本","GB":"英国","DE":"德国",
-  "FR":"法国","RU":"俄罗斯","KR":"韩国","AU":"澳大利亚","CA":"加拿大","IN":"印度",
-  "BR":"巴西","MX":"墨西哥","IT":"意大利","ES":"西班牙","NL":"荷兰","SE":"瑞典",
-  "CH":"瑞士","NO":"挪威","DK":"丹麦","FI":"芬兰","AT":"奥地利","BE":"比利时",
-  "PT":"葡萄牙","IE":"爱尔兰","NZ":"新西兰","SG":"新加坡","TW":"中国台湾",
-  "HK":"中国香港","MO":"中国澳门" };
+// 国家码列表（与 checksum.html 同策略）：优先 Intl.DisplayNames 按语言输出，
+// 不可用时回退中文表。
+const CC_LIST = ["CN", "US", "JP", "GB", "DE", "FR", "RU", "KR", "AU",
+  "CA", "IN", "BR", "MX", "IT", "ES", "NL", "SE", "CH", "NO", "DK",
+  "FI", "AT", "BE", "PT", "IE", "NZ", "SG", "TW", "HK", "MO"];
+const CC_NAMES_ZH = { "CN": "中国", "US": "美国", "JP": "日本", "GB": "英国", "DE": "德国",
+  "FR": "法国", "RU": "俄罗斯", "KR": "韩国", "AU": "澳大利亚", "CA": "加拿大", "IN": "印度",
+  "BR": "巴西", "MX": "墨西哥", "IT": "意大利", "ES": "西班牙", "NL": "荷兰", "SE": "瑞典",
+  "CH": "瑞士", "NO": "挪威", "DK": "丹麦", "FI": "芬兰", "AT": "奥地利", "BE": "比利时",
+  "PT": "葡萄牙", "IE": "爱尔兰", "NZ": "新西兰", "SG": "新加坡", "TW": "中国台湾",
+  "HK": "中国香港", "MO": "中国澳门" };
+let ccDisp = null;
+try {
+  ccDisp = new Intl.DisplayNames(
+    [OrpahI18n.lang === "en" ? "en" : "zh-Hans"], { type: "region" });
+} catch (e) { /* 旧浏览器回退静态表 */ }
+function ccName(code) {
+  try {
+    const n = ccDisp && ccDisp.of(code);
+    if (n && n !== code) return n;
+  } catch (e) { /* ignore */ }
+  return CC_NAMES_ZH[code] || T("cc_unknown");
+}
+function fillCcList() {
+  $("ccList").innerHTML = CC_LIST
+    .map(c => `<option value="${c}">${ccName(c)}</option>`).join("");
+}
 
 /* ---- 拟群表与算法全部走后端 /api/checksum（单一源：damm32.py）---- */
 async function apiChecksum(params) {
@@ -161,7 +142,7 @@ async function apiChecksum(params) {
     return await fetch("/api/checksum?" + new URLSearchParams(params)).then(r => r.json());
   } catch (e) {
     console.error("checksum:", e);
-    return { ok: false, err: "后端不可达" };
+    return { ok: false, err: T("cs_offline") };
   }
 }
 
@@ -176,19 +157,19 @@ function validOrgUnique(s) {
 
 /* ---- 性质卡片（后端判定）---- */
 function renderProps(checks, valid) {
-  const items = [["拉丁方（行/列皆排列）", checks.latin],
-                 ["主对角线全 0", checks.diag_zero],
-                 ["相邻换位检出条件", checks.adjacent_transposition],
-                 ["综合（弱全反对称拟群）", valid]];
+  const items = [[T("d32_p_latin"), checks.latin],
+                 [T("d32_p_diag"), checks.diag_zero],
+                 [T("d32_p_adj"), checks.adjacent_transposition],
+                 [T("d32_p_all"), valid]];
   document.getElementById("propRow").innerHTML = items.map(([k, v]) =>
-    `<div class="prop"><div class="k">${k}</div><div class="v ${v ? "ok" : "bad"}">${v ? "✓ 通过" : "✗ 失败"}</div></div>`).join("");
+    `<div class="prop"><div class="k">${k}</div><div class="v ${v ? "ok" : "bad"}">${v ? T("sg_ok") : T("sg_bad")}</div></div>`).join("");
 }
 
 /* ---- 表格（后端构建的拟群）---- */
 async function loadTable() {
   const r = await apiChecksum({ action: "table", algo: "damm32" });
   const el = document.getElementById("t32");
-  if (!r.ok) { el.innerHTML = `<tbody><tr><td>后端不可达：${r.err}</td></tr></tbody>`; return; }
+  if (!r.ok) { el.innerHTML = `<tbody><tr><td>${T("cs_offline")}：${r.err}</td></tr></tbody>`; return; }
   CROCKFORD = r.crockford; rebuildCI();
   renderProps(r.checks, r.valid);
   let h = "<thead><tr><th class=\"corner\">x\\y</th>";
@@ -211,20 +192,25 @@ async function refresh() {
   const my = ++reqSeq;
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
-  document.getElementById("ccName").textContent = CC_NAMES[cc] || "（未知国家码）";
+  document.getElementById("ccName").textContent = ccName(cc);
   const out = document.getElementById("checkOut"),
         full = document.getElementById("fullOut"),
         ver = document.getElementById("verifyOut");
   if (!validOrgUnique(org)) {
-    out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = "";
+    out.textContent = T("cs_bad_input"); full.textContent = "-";
+    ver.textContent = "-"; ver.className = "";
     return;
   }
   const r = await apiChecksum({ action: "compute", algo: "damm32", org_unique: org });
   if (my !== reqSeq) return;             // 丢弃过期响应
-  if (!r.ok) { out.textContent = "非法输入"; full.textContent = "-"; ver.textContent = "-"; ver.className = ""; return; }
+  if (!r.ok) {
+    out.textContent = T("cs_bad_input"); full.textContent = "-";
+    ver.textContent = "-"; ver.className = "";
+    return;
+  }
   out.textContent = r.check;
   full.textContent = cc + "-" + org + "-" + r.check;
-  ver.textContent = r.valid ? "✓ 通过" : "✗ 失败";
+  ver.textContent = r.valid ? T("sg_ok") : T("sg_bad");
   ver.className = r.valid ? "ok" : "bad";
 }
 document.getElementById("orgUnique").addEventListener("input", refresh);
@@ -235,6 +221,8 @@ document.getElementById("ccInput").addEventListener("keydown", (e) => {
     document.getElementById("orgUnique").focus();
   }
 });
+OrpahI18n.apply();
+fillCcList();
 loadTable();
 refresh();
 
@@ -243,16 +231,20 @@ document.getElementById("btnDemo").addEventListener("click", async () => {
   const cc = document.getElementById("ccInput").value.trim().toUpperCase();
   const org = document.getElementById("orgUnique").value.trim().toUpperCase();
   const out = document.getElementById("demoResult");
-  if (!validOrgUnique(org)) { out.textContent = "非法输入"; return; }
+  if (!validOrgUnique(org)) { out.textContent = T("cs_bad_input"); return; }
   const r = await apiChecksum({ action: "compute", algo: "damm32", org_unique: org });
-  if (!r.ok) { out.textContent = "非法输入"; return; }
+  if (!r.ok) { out.textContent = T("cs_bad_input"); return; }
   const idx = CROCKFORD.indexOf(org.slice(-1));
   const flipped = CROCKFORD[(Math.max(idx, 0) + 1) % 32];
   const badOrg = org.slice(0, -1) + flipped;
   const bad = await apiChecksum({ action: "verify", algo: "damm32", body: badOrg + "-" + r.check });
+  const pass = T("cs_pass"), fail = T("cs_fail");
   out.textContent =
-    `原始  ${cc}-${org}-${r.check}   → 校验 ${r.valid ? "通过" : "失败"}\n` +
-    `改一位 ${cc}-${badOrg}-${r.check} → 校验 ${bad.valid ? "通过（异常！）" : "失败 ✓（单字符替换被检出）"}`;
+    T("cs_demo_orig").replace("{cc}", cc).replace("{org}", org)
+      .replace("{chk}", r.check).replace("{r}", r.valid ? pass : fail) + "\n" +
+    T("cs_demo_bad").replace("{cc}", cc).replace("{org}", badOrg)
+      .replace("{chk}", r.check)
+      .replace("{r}", bad.valid ? T("cs_pass_anom") : T("cs_fail_caught"));
 });
 
 /* ---- 全量穷举 ---- */
@@ -260,13 +252,19 @@ document.getElementById("btnBrute").addEventListener("click", async function () 
   const hint = document.getElementById("bruteHint");
   this.disabled = true;
   const maxlen = parseInt(this.dataset.run, 10);
-  hint.textContent = "后端正在穷举长度 ≤ " + maxlen + " 的全部串…（约 3.4 万个，约 1 秒）";
+  hint.textContent = T("d32_brute_run").replace("{n}", maxlen);
   const r = await apiChecksum({ action: "brute", algo: "damm32", n: 32, maxlen });
-  if (!r.ok) { hint.textContent = "后端不可达：" + r.err; this.disabled = false; return; }
+  if (!r.ok) {
+    hint.textContent = T("cs_offline") + "：" + r.err;
+    this.disabled = false;
+    return;
+  }
   if (r.miss) {
-    hint.textContent = `发现漏检：${JSON.stringify(r.miss)}（耗时 ${r.ms} ms）—— 该拟群不满足 Damm 检出条件！`;
+    hint.textContent = T("d32_brute_miss")
+      .replace("{miss}", JSON.stringify(r.miss)).replace("{ms}", r.ms);
   } else {
-    hint.textContent = `✓ 后端穷举完毕（长度 ≤ ${maxlen}）：所有单字符替换与相邻换位均改变校验位，无一漏检。（耗时 ${r.ms} ms）`;
+    hint.textContent = T("d32_brute_ok")
+      .replace("{n}", maxlen).replace("{ms}", r.ms);
   }
   this.disabled = false;
 });

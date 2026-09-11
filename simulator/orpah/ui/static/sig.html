@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-i18n-doc-title="doc_sig">
 <head>
 <meta charset="utf-8">
 <title>数字签名工具 — ORPAH-over-HaLow</title>
@@ -41,31 +41,32 @@
 </head>
 <body>
 <header>
-  <div class="brand"><a href="index.html" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name">数字签名工具</span>
-    <span class="sub">Orpah ID · ES256 / HS256 / none 签名与验签（JCS 预像）</span>
-    <a class="btn back" href="checksum.html">校验码工具</a>
-    <a class="btn back" href="index.html">← 返回主页</a>
+  <div class="brand"><a href="index.html" data-i18n-title="nav_home_title" title="返回主页"><img class="brand-logo" src="orpah-logo.png" alt="orpah"></a> <span class="brand-name" data-i18n="nav_sig">签名工具</span>
+    <span class="sub" data-i18n="sg_sub">Orpah ID · ES256 / HS256 / none 签名与验签（JCS 预像）</span>
+    <a class="btn back" href="checksum.html" data-i18n="nav_checksum">校验码工具</a>
+    <a class="btn back" href="index.html" data-i18n="nav_home">← 返回主页</a>
+    <button class="btn" id="langBtn" title="中文 / English"></button>
   </div>
 </header>
 
 <section class="card">
-  <h3>1 · 密钥（临时生成，仅用于演示）</h3>
+  <h3 data-i18n="sg_sec1">1 · 密钥（临时生成，仅用于演示）</h3>
   <div class="row">
-    <button class="btn" id="btnKey">生成新密钥</button>
-    <span>SN：<b class="mono" id="sigSn">-</b></span>
+    <button class="btn" id="btnKey" data-i18n="sg_newkey">生成新密钥</button>
+    <span><span data-i18n="sg_sn">SN：</span><b class="mono" id="sigSn">-</b></span>
   </div>
-  <div class="kv"><span class="k">ECDSA 公钥（P-256，PEM）：</span></div>
+  <div class="kv"><span class="k" data-i18n="sg_pub">ECDSA 公钥（P-256，PEM）：</span></div>
   <pre class="pem mono" id="sigPub">-</pre>
-  <div class="kv"><span class="k">HMAC 密钥（降级 HS256，hex）：</span> <code class="mono" id="sigHmac">-</code></div>
-  <p class="hint">密钥由后端用 <code>orpah_id.py</code> 真实生成；SN 与公钥在协议中按设备绑定（本页只演示签名原语，不做绑定校验）。</p>
+  <div class="kv"><span class="k" data-i18n="sg_hmac">HMAC 密钥（降级 HS256，hex）：</span> <code class="mono" id="sigHmac">-</code></div>
+  <p class="hint"><span data-i18n="sg_hint_a">密钥由后端用 </span><code>orpah_id.py</code><span data-i18n="sg_hint_b"> 真实生成；SN 与公钥在协议中按设备绑定（本页只演示签名原语，不做绑定校验）。</span></p>
 </section>
 
 <section class="card">
-  <h3>2 · 报文（hdr + payload，可编辑 JSON）</h3>
+  <h3 data-i18n="sg_sec2">2 · 报文（hdr + payload，可编辑 JSON）</h3>
   <div class="row">
-    <label>算法 <select id="sigAlg"><option value="ES256">ES256</option><option value="HS256">HS256</option><option value="none">none</option></select></label>
+    <label><span data-i18n="sg_alg">算法</span> <select id="sigAlg"><option value="ES256">ES256</option><option value="HS256">HS256</option><option value="none">none</option></select></label>
     <label>level <input id="sigLevel" type="number" value="0" min="0" max="3"></label>
-    <span class="hint">改算法/level 会同步回填到 hdr 的 alg/level 字段。</span>
+    <span class="hint" data-i18n="sg_sync">改算法/level 会同步回填到 hdr 的 alg/level 字段。</span>
   </div>
   <div class="json-grid">
     <label><span class="hint">hdr（JSON）</span>
@@ -74,26 +75,26 @@
       <textarea id="sigPayload" spellcheck="false">{"sn":"CN-WH01-9AF3C1D2","ts":1789000000,"rssi":-55}</textarea></label>
   </div>
   <div class="row" style="margin-top:12px">
-    <button class="btn primary" id="btnSign">签名</button>
-    <button class="btn" id="btnVerify">验签</button>
-    <button class="btn" id="btnTamper">演示篡改被检出</button>
+    <button class="btn primary" id="btnSign" data-i18n="sg_sign">签名</button>
+    <button class="btn" id="btnVerify" data-i18n="sg_verify">验签</button>
+    <button class="btn" id="btnTamper" data-i18n="sg_tamper">演示篡改被检出</button>
     <span class="hint" id="sigHint"></span>
   </div>
 </section>
 
 <section class="card">
-  <h3>3 · 结果</h3>
+  <h3 data-i18n="sg_sec3">3 · 结果</h3>
   <div class="sigout">
-    <div><span class="k">预像（JCS）：</span><code id="sigPreimage">-</code></div>
-    <div><span class="k">签名 sig：</span><code id="sigSig">-</code></div>
-    <div><span class="k">验签：</span><b id="sigResult">-</b></div>
+    <div><span class="k" data-i18n="sg_preimage">预像（JCS）：</span><code id="sigPreimage">-</code></div>
+    <div><span class="k" data-i18n="id_sig">签名 sig</span><code id="sigSig">-</code></div>
+    <div><span class="k" data-i18n="sg_result">验签：</span><b id="sigResult">-</b></div>
   </div>
 </section>
 
+<script src="ui_i18n.js"></script>
 <script>
 "use strict";
-async function api(body) {
-  const r = await fetch("/api/sig", {
+async function api(body) {  const r = await fetch("/api/sig", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -102,6 +103,7 @@ async function api(body) {
 }
 
 const $ = (id) => document.getElementById(id);
+const T = (k) => OrpahI18n.t(k);
 
 function hdrObj() { return JSON.parse($("sigHdr").value); }
 function payloadObj() { return JSON.parse($("sigPayload").value); }
@@ -117,7 +119,7 @@ $("sigAlg").addEventListener("change", syncHdr);
 $("sigLevel").addEventListener("change", syncHdr);
 
 function parseErr() {
-  $("sigHint").textContent = "hdr/payload 不是合法 JSON";
+  $("sigHint").textContent = T("sg_ejson");
   $("sigHint").className = "hint bad";
   return null;
 }
@@ -126,7 +128,7 @@ async function newkey() {
   const r = await api({ action: "newkey" });
   if (!r.ok) { $("sigHint").textContent = r.err; return; }
   $("sigSn").textContent = r.sn;
-  $("sigPub").textContent = r.pubkey_pem || "（cryptography 未安装，ES256 不可用）";
+  $("sigPub").textContent = r.pubkey_pem || T("sg_nocrypto");
   $("sigHmac").textContent = r.hmac_hex;
   // payload 的 sn 同步为设备 sn
   try {
@@ -134,7 +136,7 @@ async function newkey() {
     p.sn = r.sn;
     $("sigPayload").value = JSON.stringify(p, null, 2);
   } catch (e) { /* ignore */ }
-  $("sigHint").textContent = "密钥已生成";
+  $("sigHint").textContent = T("sg_keyok");
   $("sigHint").className = "hint";
 }
 
@@ -144,9 +146,9 @@ async function doSign() {
   const r = await api({ action: "sign", alg: $("sigAlg").value, hdr, payload });
   if (!r.ok) { $("sigHint").textContent = r.err; $("sigHint").className = "hint bad"; return; }
   $("sigPreimage").textContent = r.preimage;
-  $("sigSig").textContent = r.sig === null ? "（none，无签名）" : r.sig;
+  $("sigSig").textContent = r.sig === null ? T("sg_nosig") : r.sig;
   $("sigResult").textContent = "-";
-  $("sigHint").textContent = "已签名（可点「验签」验证，或「演示篡改」后验签看失败）";
+  $("sigHint").textContent = T("sg_signed");
   $("sigHint").className = "hint";
 }
 
@@ -154,13 +156,13 @@ async function doVerify() {
   let hdr, payload;
   try { hdr = hdrObj(); payload = payloadObj(); } catch (e) { parseErr(); return; }
   const sigText = $("sigSig").textContent;
-  const sig = sigText.startsWith("（") ? null : sigText;
+  const sig = sigText.indexOf("（") === 0 ? null : sigText;
   const r = await api({ action: "verify", alg: $("sigAlg").value, hdr, payload, sig });
   if (!r.ok) { $("sigHint").textContent = r.err; $("sigHint").className = "hint bad"; return; }
   const el = $("sigResult");
-  el.textContent = r.verified ? "✓ 通过" : "✗ 失败";
+  el.textContent = r.verified ? T("sg_ok") : T("sg_bad");
   el.className = r.verified ? "ok" : "bad";
-  $("sigHint").textContent = r.verified ? "签名有效" : "签名无效（预像被改动或签名不匹配）";
+  $("sigHint").textContent = r.verified ? T("sg_valid") : T("sg_invalid");
   $("sigHint").className = "hint";
 }
 
@@ -177,6 +179,8 @@ $("btnKey").addEventListener("click", newkey);
 $("btnSign").addEventListener("click", doSign);
 $("btnVerify").addEventListener("click", doVerify);
 $("btnTamper").addEventListener("click", doTamper);
+
+OrpahI18n.apply();
 
 newkey();
 </script>
