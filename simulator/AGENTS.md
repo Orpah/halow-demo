@@ -44,6 +44,20 @@
   - **值过滤（etype/sn）不要写进 WHERE**，在本地筛（`query_events*` 就是多取几倍再 filter）——
     树模型对「非投影列」做值过滤不可靠（历史坑）。两件事别混。
   - 历史回读一律**倒序**（最近优先），回放窗口一律**升序**（按时间轴消费）。
+- **多路由器观测 / 「移动的人」演示数据（2026-09-12）**：
+  - **一条链路分两类数据**：设备自己报的链路值 → `root.orpah.devices.<sn>`；
+    **各路由器各自测到它**的强度 → `root.orpah.routers.<sid>.<sn>`（`router_id`/站位 sid 即路由器身份）。
+    **绝不能把多台路由器的测量挤进同一路径的同一时间戳** —— IoTDB 同设备同时间戳是
+    last-write-wins，会互相覆盖。
+  - **演示数据由 `orpah/motion.py` 生成**（闭合路线 + 匀速 + 对数距离路径损耗，确定性可复现）：
+    `ui_server` 扮三台路由器，每个上报周期各写一条测量；设备 REPORT 的 rssi = 当前最近那台的测量。
+    关掉它用 `ui_server.py --no-walk`（回到恒定 RSSI）。
+  - **定位需要同一时刻 ≥2 个观察者**：单台路由器只有距离环；「悬停点 + 窗口中位数」模型的前提是
+    目标静止 —— 人一走动就必须用「路由器序列 + 取 t 之前最近一条」（`pos.js` 的 `obsOfStation`
+    第三条分支，时效 `ROUTER_MAX_AGE_MS`）。观测优先级：手动绑定 > 时间窗 > 路由器序列。
+  - **tsdb 写入接口的 `ts` 参数单位是 epoch 秒**（`write_report` / `write_router_obs`）。
+    传毫秒会被当成天文数字时间戳 → IoTDB 报错 → 异常被 `try/except` 吞掉，
+    **只表现为 `/api/status.tsdb=false` 且数据静默不落库**（排查时先看这条）。
 - **回放页硬规则（2026-09-12）**：
   - **定位算法只有一份**：`orpah/ui/static/pos.js`（`trilaterate`/`wlsLocate`/`ellipseOf`/
     `obsOfStation`/`qualityOf`…）。`track.html` 与 `replay.html` 都用它 —— 别在页面里

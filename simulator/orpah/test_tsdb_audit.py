@@ -6,6 +6,7 @@
 （列名、默认值、保留期算术、只清理一次的守卫）。
 跑法：C:\\Python313\\python.exe test_tsdb_audit.py
 """
+import re
 import sys
 import time
 
@@ -38,9 +39,10 @@ class FakeSession:
 
     def execute_query_statement(self, sql):
         self.query_sql.append(sql)
-        # 列名随 SQL 变：上报点取 3 列，事件取 4 列（_read_rows 靠列名建字段）
-        self.cols = (["rssi", "seq", "router_id"] if "rssi" in sql
-                     else ["etype", "sn", "detail", "actor"])
+        # 列名从 SQL 的 SELECT 列表里取（比猜"含 rssi 就 3 列"可靠，
+        # 否则 _read_rows 会因字段数不匹配而 IndexError → 静默返回 None）
+        m = re.match(r"\s*SELECT\s+(.+?)\s+FROM\s", sql, re.S | re.I)
+        self.cols = ([c.strip() for c in m.group(1).split(",")] if m else [])
         return FakeDataset(self.rows, self.cols)
 
 
@@ -173,12 +175,52 @@ t = fresh()
 t.available = False
 ck("未就绪 → 两个窗查询都返回 None（页面据此提示 IoTDB 不可达）",
    t.query_report_range("X", 0, 1) is None and t.query_events_range(0, 1) is None)
+
+print("== 6. 路由器侧观测（多路由器定位的数据源） ==")
+t = fresh()
+ok = t.write_router_obs("S1", "CN-WH01-A", ts=1.789e9, rssi=-67.0, seq=42)
+ck("写入成功", ok)
+path, ts_ms, meas, vals = t.session.inserts[-1]
+ck("路径 = root.orpah.routers.<sid>.<sn>",
+   path == "root.orpah.routers.S1.CN_WH01_A", path)
+ck("measurements 只有 rssi/seq", meas == ["rssi", "seq"], str(meas))
+ck("时间戳毫秒 = ts×1000", ts_ms == int(1.789e9 * 1000), str(ts_ms))
+ck("值落地（rssi 浮点 / seq 整数）", vals == [-67.0, 42], str(vals))
+ck("与设备上报流是两条路径",
+   tsdb.Tsdb._sn_path("CN-WH01-A") != path,
+   f"{tsdb.Tsdb._sn_path('CN-WH01-A')} vs {path}")
+ck("sid/sn 里的 '-' 换成 '_'",
+   tsdb.Tsdb._router_path("S-1", "CN-WH01-A") == "root.orpah.routers.S_1.CN_WH01_A",
+   tsdb.Tsdb._router_path("S-1", "CN-WH01-A"))
+
+t = fresh(rows=[(1000, [-60.0, 1]), (1500, [-70.0, 2])])
+out = t.query_router_range("S2", "CN-WH01-A", 500, 2500)
+ck("窗口查询：时间写进 WHERE",
+   "WHERE time >= 500 AND time <= 2500" in t.session.query_sql[-1], t.session.query_sql[-1])
+ck("窗口查询：升序 + 只取 rssi/seq",
+   "ORDER BY time ASC" in t.session.query_sql[-1]
+   and t.session.query_sql[-1].startswith("SELECT rssi, seq FROM"),
+   t.session.query_sql[-1])
+ck("窗口查询：字段映射", out[0] == {"t": 1000, "rssi": -60.0, "seq": 1}, str(out[:1]))
+
+# 最近查询：真实 IoTDB 按 DESC 返回（假 session 也要按 DESC 给行，否则测不出翻转）
+t2 = fresh(rows=[(1500, [-70.0, 2]), (1000, [-60.0, 1])])
+out = t2.query_router_recent("S2", "CN-WH01-A", 2)
+ck("最近查询：DESC 取最新", "ORDER BY time DESC" in t2.session.query_sql[-1])
+ck("最近查询：返回时翻成升序（与设备流同风格）",
+   [r["t"] for r in out] == [1000, 1500], str([r["t"] for r in out]))
+
+t = fresh()
+t.available = False
+ck("未就绪 → None（不抛）",
+   t.query_router_range("S1", "X", 0, 1) is None
+   and t.query_router_recent("S1", "X") is None)
 t = fresh(days=30)
 t.available = False
 t.session = None
 ck("未连库 → 不清理不报错", t.purge_events() is None)
 
-print("== 5. 环境变量解析 ==")
+print("== 7. 环境变量解析 ==")
 ck("默认 30 天", tsdb.EVENT_RETENTION_DAYS == 30, str(tsdb.EVENT_RETENTION_DAYS))
 ck("空串回退默认", tsdb._env_int("ORPAH_NOT_SET_XYZ", 30) == 30)
 import os

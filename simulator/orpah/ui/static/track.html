@@ -200,7 +200,8 @@ const MAX_HIST = 800;       // 轨迹最多保留点数
 let timer = null;
 let tick = 0;
 let dsMode = "sim";         // sim | real（真实上报 IoTDB 时序）
-let realSamples = [];       // [{t,rssi,seq,router_id}]，时间升序
+let realSamples = [];       // [{t,rssi,seq,router_id}]，时间升序（设备上报流）
+let realObs = {};           // {sid: [{t,rssi,seq}]} 各路由器对该设备的测量（升序）
 let realTimer = null;
 let realSeq = 0;            // 请求序号（丢弃过期响应，防改 SN/条数时串台）
 let client = { x: 0, y: 0 };
@@ -584,6 +585,13 @@ async function refreshSnList() {
       sel.appendChild(o);
     }
     if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+    /* 首次进入（没有上次选择）：默认选**最近有上报的**那台设备 ——
+       否则会停在从没上报过的设备上，页面看起来像坏了。 */
+    else {
+      const withData = (r.devices || []).filter(d => d.last_seen)
+        .sort((a, b) => (b.last_seen || 0) - (a.last_seen || 0));
+      if (withData.length) sel.value = withData[0].sn;
+    }
   } catch (e) { console.error("registry:", e); }
 }
 
@@ -593,6 +601,7 @@ async function loadReal() {
   const info = $("dsInfo");
   if (!sn) {
     realSamples = [];
+    realObs = {};
     info.textContent = T("tk_no_dev");
     updateRealStat(); renderStations(); draw(); return;
   }
@@ -601,17 +610,22 @@ async function loadReal() {
     const r = await fetch(`/api/ts/query?sn=${encodeURIComponent(sn)}&limit=${limit}`).then(x => x.json());
     if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = (r.ok && r.rows) ? r.rows.slice().reverse() : [];   // IoTDB 按时间倒序返回 → 翻正
+    realObs = r.obs || {};                                            // 各路由器各自的测量序列
+    const nObs = Object.keys(realObs).reduce((a, k) => a + (realObs[k] || []).length, 0);
     if (!r.ok) {
       info.textContent = T("tk_iotdb_down");
     } else if (!realSamples.length) {
       info.textContent = T("tk_no_report_iotdb").replace("{sn}", sn);
     } else {
       info.textContent = T("tk_real_info").replace("{sn}", sn)
-        .replace("{n}", realSamples.length) + T("tk_real_caveat");
+        .replace("{n}", realSamples.length)
+        + (nObs ? T("tk_real_obs").replace("{n}", nObs) : "")
+        + T("tk_real_caveat");
     }
   } catch (e) {
     if (my !== realSeq) return;                                       // 丢弃过期响应
     realSamples = [];
+    realObs = {};
     info.textContent = T("tk_query_fail") + e;
   }
   updateRealStat();
@@ -637,8 +651,10 @@ function updateRealStat() {
   $("stMeta").textContent = `seq=${p.seq}，router_id=${p.router_id || T("tk_router_none")}`;
 }
 
-/* ---- 真实模式：定位站位（无人机多点悬停）--------------------------------
-   站位 = 一个**已知坐标**的观测点。观测有两条路（写进同一张表、走同一个内核）：
+/* ---- 真实模式：定位站位（悬停点 / 路由器）------------------------------
+   站位 = 一台路由器（或无人机一个悬停点）的**已知坐标**。观测三条路（写进同一张表、
+   走同一个内核 pos.js）：
+     · 路由器序列：该站位自己的测量序列，取 t 之前最近一条（多路由器，支持移动目标）
      · 时间窗：落在 [t0,t1) 内的 report 取 RSSI 中位数（「打点」实时生成窗口）
      · 手动绑定：把最新一条 report 的 RSSI 直接指派给某站位（不需要窗口）
    定位复用模拟模式同一个 trilaterate()，避免模拟/真实两套实现。          */
@@ -682,7 +698,13 @@ async function stApi(body) {
    观测归集与求解器都在 pos.js（与回放页共用同一实现）。 */
 function computeLoc(t) {
   const A = plA(), n = plN();
-  const obs = obsAt(stations, realSamples, t === undefined ? Date.now() : t, A, n);
+  /* 样本取哪一份：优先该站位自己的路由器序列（多路由器同时观测）；
+     没有则回落到设备上报流（老的「悬停窗口」数据，观测在设备流里）。 */
+  const samplesOf = (sid) => {
+    const own = realObs[sid];
+    return (own && own.length) ? own : realSamples;
+  };
+  const obs = obsAt(stations, samplesOf, t === undefined ? Date.now() : t, A, n);
   const estLin = obs.length >= 2
     ? trilaterate(obs.map(x => ({ x: x.s.x, y: x.s.y })), obs.map(x => x.dist),
                   estHist.length ? estHist[estHist.length - 1] : null)
@@ -743,7 +765,8 @@ function renderStations() {
     tr.querySelector(".stwin").textContent = winText(s);
     tr.querySelector(".stobs").textContent = o
       ? o.rssi.toFixed(1) + " dBm · " +
-        (o.src === "bind" ? T("tk_st_src_bind") : "n=" + o.n)
+        (o.src === "bind" ? T("tk_st_src_bind")
+         : (o.src === "router" ? T("tk_st_src_router") : "") + " n=" + o.n)
       : "—";
     tr.querySelector(".stdist").textContent = o
       ? o.dist.toFixed(1) + " m" + (sigOf(o) ? " ±" + sigOf(o).toFixed(1) : "")

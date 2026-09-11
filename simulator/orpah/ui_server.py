@@ -50,7 +50,8 @@ import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实�
 import keystore as kst                    # noqa: E402  密钥库持久化（多代/轮换/撤销）
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
-import stations as sta                     # noqa: E402  定位站位（无人机悬停测点）
+import stations as sta                     # noqa: E402  定位站位（无人机悬停测点 / 路由器坐标）
+import motion                              # noqa: E402  演示用「移动的人」运动模型 + RSSI 换算
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 import damm32 as d32                      # noqa: E402  校验算法单一源
@@ -91,10 +92,13 @@ EVENTS = queue.Queue(maxsize=1000)   # SSE 事件（满丢最旧）
 class OrpahApp:
     """装配整条 L1 链路 + 状态/计数（供 UI 轮询）。"""
 
-    def __init__(self, every=2.0, sn="CN-WH01-9AF3C1D2", rssi=-55):
+    def __init__(self, every=2.0, sn="CN-WH01-9AF3C1D2", rssi=-55, walk=True):
         self.every = every
         self.sn = sn
         self.rssi = rssi
+        # 演示数据：让被保护对象沿路线走动，并按「多台路由器各自测到它」写观测
+        # （walk=False 则回到旧的恒定 RSSI 行为，便于对照/回归）
+        self.walk = motion.default() if walk else None
         self.paused = False
         self.stop = threading.Event()
         # 三端计数
@@ -133,6 +137,8 @@ class OrpahApp:
         self.stations = sta.StationTable(db_path)   # 定位站位（全局一张）
         if not self.registry.persons:
             self._seed_registry()
+        if not self.stations.list():
+            self._seed_stations()
         # IoTDB 时序库（上报流 + 业务事件；未启动时优雅降级）
         self.tsdb = tsdb.Tsdb()
         # 组件
@@ -161,6 +167,19 @@ class OrpahApp:
                         missing_place="XX市XX公园北门",
                         clothing="粉色连衣裙、白色凉鞋",
                         contact_phone="13800001234")
+
+    def _seed_stations(self):
+        """演示种子：三台路由器（= 三个站位，坐标为各自安装位置，单位米）。
+
+        为什么要有坐标：定位需要**同一时刻 ≥2 个观察者**。演示里由 ui_server 扮三台
+        路由器，每个上报周期按「人到各台的距离 + 路径损耗」各测一个 RSSI
+        （见 `motion.py`）→ 回放里能看到人走动时的连续轨迹。
+        不设时间窗/不绑定：观测走「路由器序列」分支（见 `pos.js` obsOfStation）。
+        """
+        for name, x, y in (("路由器A", 30.0, 0.0),
+                           ("路由器B", -15.0, 26.0),
+                           ("路由器C", -15.0, -26.0)):
+            self.stations.add(x=x, y=y, name=name)
 
     # ---------------- 消息流日志 ----------------
     def _push_flow(self, dirn, msg, stage=""):
@@ -229,9 +248,46 @@ class OrpahApp:
             self.registry.touch(sn)
             self.tsdb.write_report(sn, ts=msg.get("ts"), rssi=msg.get("rssi"),
                                    seq=msg.get("seq"))
+            self._write_router_obs(sn, msg)
             _, newly = self.cases.on_found(sn, self.registry, detail="report")
             if newly:
                 self.tsdb.write_event("case_found", sn=sn, detail="report")
+
+    def _write_router_obs(self, sn, msg):
+        """演示：把「三台路由器各自测到该设备」的观测写库（多路由器定位的数据源）。
+
+        位置由上报时刻决定（`motion.Walk.pos`，确定性）—— 同一份报文无论何时回放，
+        得到的位置一致。写进 root.orpah.routers.<sid>.<sn>（每台一条序列，互不覆盖；
+        若挤在 root.orpah.devices.<sn> 同一时间戳下会 last-write-wins 互相覆盖）。
+        """
+        if not self.walk:
+            return
+        ts = msg.get("ts")
+        t_s = float(ts) if ts else time.time()      # 注意：tsdb 写入接口的 ts 是 epoch **秒**
+        t_ms = int(t_s * 1000)                     # 位置按毫秒算（motion 用 ms）
+        for s in self.stations.list():
+            rssi = self.walk.rssi_to(t_ms, s.x, s.y)
+            self.tsdb.write_router_obs(s.sid, sn, ts=t_s, rssi=rssi,
+                                       seq=msg.get("seq"))
+
+    def router_obs_range(self, sn, t0_ms, t1_ms, limit=20000):
+        """{sid: [{t,rssi,seq}]}：各路由器在某时间窗内对该设备的测量（升序）。
+
+        每台一条序列（含没数据的空表）→ 页面按 sid 取自己那份，不用再按 router_id 筛。
+        """
+        out = {}
+        for s in self.stations.list():
+            rows = self.tsdb.query_router_range(s.sid, sn, t0_ms, t1_ms, limit)
+            out[s.sid] = rows or []
+        return out
+
+    def router_obs_recent(self, sn, limit=500):
+        """{sid: [{t,rssi,seq}]}：各路由器对某设备的**最近** limit 条（升序）。"""
+        out = {}
+        for s in self.stations.list():
+            rows = self.tsdb.query_router_recent(s.sid, sn, limit)
+            out[s.sid] = rows or []
+        return out
 
     def _on_lost(self, snap):
         """Server 走失表变更 → 存快照（前端展示）。"""
@@ -354,11 +410,24 @@ class OrpahApp:
     def _report_loop(self):
         while not self.stop.is_set():
             if not self.paused:
+                self._aim_link_rssi()
                 self.client.send_req_connect()
                 time.sleep(0.25)
                 self.client.report_once()
                 self._id_tick()
             time.sleep(self.every)
+
+    def _aim_link_rssi(self):
+        """设备自身的 REPORT 里的 rssi = **当前与之关联的那台路由器**测到的强度。
+
+        人走到哪台路由器附近，链路就强（报文里那个 rssi 是有物理含义的：
+        STA↔AP 的链路强度），而不是一个写死的常量。
+        """
+        if not self.walk or not self.client:
+            return
+        sid, rssi = self.walk.nearest(int(time.time() * 1000), self.stations.list())
+        if rssi is not None:
+            self.client.rssi = rssi
 
     def _ensure_id_device(self):
         """让 Orpah ID 演示设备与当前 Client SN 一致（SN 变更时重建+重注册）。
@@ -1057,6 +1126,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         points = APP.tsdb.query_report_range(sn, from_ms, to_ms,
                                              limit=REPLAY_MAX_POINTS)
         events = APP.tsdb.query_events_range(from_ms, to_ms, limit=ev_limit)
+        obs = APP.router_obs_range(sn, from_ms, to_ms, limit=REPLAY_MAX_POINTS)
         ts_ok = points is not None
         ev_ok = events is not None
         out = {
@@ -1064,9 +1134,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "sn": sn,
             "from": from_ms, "to": to_ms,
             "points": points or [],
+            "obs": obs,                 # {sid: [{t,rssi,seq}]} 各路由器本窗内的测量
             "events": (events or []) if ev_ok else [],
             "counts": {"points": len(points or []),
-                       "events": len(events or [])},
+                       "events": len(events or []),
+                       "obs": sum(len(v) for v in obs.values())},
             "truncated": bool(points and len(points) >= REPLAY_MAX_POINTS),
             "events_ok": ev_ok,
         }
@@ -1124,7 +1196,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps({"ok": False, "err": str(e)}).encode())
 
     def _api_ts_query(self):
-        """GET /api/ts/query?sn=...&limit=N → IoTDB 里该设备最近上报点。"""
+        """GET /api/ts/query?sn=...&limit=N → 设备上报流 + 各路由器的观测序列。
+
+        `rows` = 设备自己报的链路值（root.orpah.devices.<sn>，时间倒序）；
+        `obs`  = {sid: [{t,rssi,seq}]} 各路由器对**该设备**的测量（时间升序，最多 limit 条）。
+        定位用的是 obs（同一时刻多台各自的测量）；rows 只用于画链路 RSSI 曲线。
+        """
         from urllib.parse import parse_qs
         qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
         sn = (qs.get("sn") or [""])[0]
@@ -1133,8 +1210,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             limit = 100
         rows = APP.tsdb.query_report(sn, limit) if sn else None
+        obs = APP.router_obs_recent(sn, limit) if sn else {}
         self._send(200, json.dumps({"ok": rows is not None, "sn": sn,
-                                    "rows": rows or []}).encode())
+                                    "rows": rows or [], "obs": obs}).encode())
 
     def _api_ts_events(self):
         """GET /api/ts/events?limit=N[&etype=][&sn=] → IoTDB 里的业务事件历史。
@@ -1262,10 +1340,13 @@ def main():
     ap.add_argument("--sn", default="CN-WH01-9AF3C1D2",
                     help="终端序列号（Orpah ID：CC-ORG-UNIQUE[-CHECK]）")
     ap.add_argument("--rssi", type=int, default=-55)
+    ap.add_argument("--no-walk", action="store_true",
+                    help="关闭「移动的人」演示数据（回到恒定 RSSI + 不写路由器观测）")
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
 
-    APP = OrpahApp(every=args.every, sn=args.sn, rssi=args.rssi)
+    APP = OrpahApp(every=args.every, sn=args.sn, rssi=args.rssi,
+                   walk=not args.no_walk)
     if not APP.start():
         return 1
 

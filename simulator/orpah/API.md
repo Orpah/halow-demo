@@ -93,19 +93,28 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 ## 5. `/api/ts/query`（IoTDB 时序查询）
 
-`GET /api/ts/query?sn=<SN>&limit=N` → 该设备最近上报点：
+`GET /api/ts/query?sn=<SN>&limit=N` → 该设备最近上报点 + 各路由器对该设备的测量：
 
 ```json
-{"ok": true, "sn": "CN-WH01-9AF3C1D2", "rows": [{"t": 1789100000000, "rssi": -55.0, "seq": 1, "router_id": ""}]}
+{"ok": true, "sn": "CN-WH01-9AF3C1D2",
+ "rows": [{"t": 1789100000000, "rssi": -55.0, "seq": 1, "router_id": ""}],
+ "obs": {"S1": [{"t": 1789100000000, "rssi": -76.0, "seq": 1}],
+         "S2": [{"t": 1789100000000, "rssi": -73.0, "seq": 1}]}}
 ```
 
 - `t` 为毫秒时间戳；`ok=false` 表示 IoTDB 未就绪或查询失败。
-- 数据模型：设备上报 `root.orpah.devices.<sn>`（测点 rssi/seq/router_id），
-  业务事件 `root.orpah.events`（etype/sn/detail）。
+- `rows` = **设备自己**报的链路值（时间倒序，消费前自行翻正）；`obs` = **各路由器各自**测到该设备的
+  强度 `{sid: [{t,rssi,seq}]}`（时间升序，每台一条序列，含空表）。**定位用 `obs`**（见 §7）。
+- 数据模型：设备上报 `root.orpah.devices.<sn>`（测点 rssi/seq/router_id）；
+  路由器测量 `root.orpah.routers.<sid>.<sn>`（测点 rssi/seq）；业务事件 `root.orpah.events`（etype/sn/detail/actor）。
+- 路由器测量**必须单独一条路径**：同一设备的同一时间戳在 IoTDB 是 last-write-wins，
+  三台路由器的测量挤进 `devices.<sn>` 会互相覆盖（每台一条序列也便于各取各的窗口）。
 - IoTDB 未启动时写入静默降级、每 10s 重连一次，不影响 SQLite/UI。
+- 写入接口的 `ts` 参数是 **epoch 秒**（`write_report` / `write_router_obs` 一致）；传毫秒会被当成
+  天文数字的时间戳而写失败（异常被吞 → 只表现为 `/api/status.tsdb=false`）。
 - `track.html` 的「真实上报」模式消费本接口：按时间升序画 RSSI 时序 + 按 A/n 换算距离。
   单测点只能得「距离环」；配上「定位站位表」（已知坐标，见 §7）即可多点三边定位到点。
-- **`query_report` 按时间倒序返回**，前端消费前需自行翻正。
+- **`query_report` 按时间倒序返回**，前端消费前需自行翻正；`query_router_recent` 内部已翻成升序。
 
 ### `/api/ts/events`（业务事件历史）
 
@@ -211,11 +220,17 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 ### 观测归集（前端 `track.html` 真实模式）
 
-每个站位取**一条**观测，优先级：
+每个站位取**一条**观测，优先级从高到低（实现 = `ui/static/pos.js` 的 `obsOfStation`）：
 
 1. 手动绑定 `rssi`（`bind`）→ 直接用；
-2. 时间窗 `t0` 存在 → 取 `t0 <= t < t1`（`t1` 缺省=至今）内所有 report 的 RSSI **中位数**；
-3. 都没有 → 该站位无观测，不参与定位。
+2. 时间窗 `t0` 存在且 `t0 <= t` → 取 `t0 <= t < t1`（`t1` 缺省=至今）内所有 report 的 RSSI **中位数**
+   —— 「无人机悬停在某点」的模型，**前提是目标静止**；
+3. **路由器序列**：给了该站位自己的测量序列 → 取 `t` 之前**最近一条**，时效 `ROUTER_MAX_AGE_MS = 30 s`
+   —— 多路由器**同时**观测，跟得住移动目标（数据在 `root.orpah.routers.<sid>.<sn>`，见 §5 与 §10）；
+4. 都没有 → 该站位无观测，不参与定位。
+
+**为什么 3 不能省**：单台路由器只能给出距离环，且悬停窗口把不同时刻的测量混在一起；
+人一走动，只有「同一时刻多台各自的最近测量」才能解出连续轨迹（阶段二的核心）。
 
 ≥2 个站位有观测时调用 `track.html` 现成的三边定位（`trilaterate`，≥3 点为最小二乘）。
 **定位计算放在前端**，与模拟模式共用同一个内核，避免两套实现。
@@ -377,11 +392,17 @@ register/issue ──> active ──rotate──> grace ──宽限到期(sweep
 数据全部来自 **IoTDB 时间窗**（`WHERE time >= x AND time <= y`，时间过滤是原生索引，
 与 §5 里「值过滤不能进 WHERE」是两件事）→ 重启不丢、天然的按时间切片。
 
+**回放定位用的是 `obs`（各路由器对该设备的测量），不是 `points`**：`points` 是设备自己报的链路值，
+只用于展示时间轴/报文流；`points` 与 `obs` 都按时间升序。
+
 ```json
 {"ok":true,"sn":"CN-WH01-9AF3C1D2","from":1789143060000,"to":1789144860000,
  "points":[{"t":1789143061000,"rssi":-55.0,"seq":22,"router_id":""}],
+ "obs":{"S1":[{"t":1789143061000,"rssi":-76.0,"seq":22}],
+        "S2":[{"t":1789143061000,"rssi":-73.0,"seq":22}],
+        "S3":[{"t":1789143061000,"rssi":-84.0,"seq":22}]},
  "events":[{"t":1789143060000,"etype":"publish","sn":"CN-WH01-9AF3C1D2","detail":"n=1","actor":"system"}],
- "counts":{"points":795,"events":828},
+ "counts":{"points":795,"events":828,"obs":2400},
  "truncated":false,"events_ok":true}
 ```
 

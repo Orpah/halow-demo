@@ -61,9 +61,9 @@
     <label><span data-i18n="rp_sn">设备 SN</span>
       <select id="rpSn" style="min-width:260px"></select></label>
     <label><span data-i18n="rp_from">起始</span>
-      <input id="rpFrom" type="datetime-local" step="60"></label>
+      <input id="rpFrom" type="datetime-local" step="1"></label>
     <label><span data-i18n="rp_to">结束</span>
-      <input id="rpTo" type="datetime-local" step="60"></label>
+      <input id="rpTo" type="datetime-local" step="1"></label>
     <button class="btn" id="rpLoad" data-i18n="rp_load">拉取</button>
   </div>
   <div class="row" style="margin-top:8px">
@@ -131,9 +131,9 @@ function clockOf(ms) {
   const d = new Date(ms), p = n => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-function dateTimeOf(ms) {
+function dateTimeOf(ms) {               // 带秒：否则快捷窗会漏掉最近这一分钟的数据
   const d = new Date(ms), p = n => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function msOfInput(v) { const ms = Date.parse(v); return isNaN(ms) ? null : ms; }
 function durLeft(sec) {                // 与实时页同一套时长词条
@@ -162,11 +162,9 @@ function evtClass(v) {
 
 const S = {                          // 回放状态
   sn: "", from: 0, to: 0,
-  points: [], events: [], stations: [],
+  points: [], obs: {}, events: [], stations: [],
   t: 0, playing: false, timer: null,
-  subs: {},                          // sid → 该站位窗口内的样本（预筛，避免逐帧扫全量）
   trail: [],                         // 已回放出的估计点（画轨迹）
-  lastEvT: -1,
 };
 
 /* ---------------- 拉取 ---------------- */
@@ -175,15 +173,28 @@ function rpInfo(msg, cls) {
   $("rpInfo").className = "hint" + (cls ? " " + cls : "");
 }
 
+const RP_SN_KEY = "orpah_ui_rp_sn";
+
 async function loadSnList() {
   try {
     const r = await fetch("/api/registry").then(x => x.json());
-    const opts = (r.devices || []).map(d => {
+    const devs = r.devices || [];
+    const opts = devs.map(d => {
       const p = (r.persons || []).find(x => x.pid === d.person_id);
-      return { sn: d.sn, label: d.sn + (p ? " · " + p.name : "") + " · " + (d.status || "") };
+      return { sn: d.sn, last: d.last_seen || 0,
+               label: d.sn + (p ? " · " + p.name : "") + " · " + (d.status || "") };
     });
     $("rpSn").innerHTML = opts.map(o =>
       `<option value="${esc(o.sn)}">${esc(o.label)}</option>`).join("");
+    /* 默认选谁：上次选过的 → 否则**最近有上报的**那台。
+       否则会默认停在从没上报过的设备上，一打开就是空窗。 */
+    let pick = null;
+    try { pick = localStorage.getItem(RP_SN_KEY); } catch (e) { /* ignore */ }
+    if (!pick || !opts.some(o => o.sn === pick)) {
+      const withData = opts.filter(o => o.last).sort((a, b) => b.last - a.last);
+      pick = (withData[0] || opts[0] || {}).sn;
+    }
+    if (pick) $("rpSn").value = pick;
   } catch (e) { /* 离线时保持空 */ }
 }
 
@@ -202,18 +213,14 @@ async function loadReplay() {
     if (!rep.ok) { rpInfo(T("rp_offline"), "err"); return; }
     S.sn = sn; S.from = rep.from; S.to = rep.to;
     S.points = rep.points || [];
+    S.obs = rep.obs || {};                 // {sid: [{t,rssi,seq}]} 各路由器本窗测量（升序）
     S.events = rep.events || [];
     S.stations = st.stations || [];
-    S.t = S.from; S.trail = []; S.lastEvT = -1;
-    /* 预筛：把样本按站位窗口分组一次（obsOfStation 仍做语义判断，这里只是省掉逐帧扫全量） */
-    S.subs = {};
-    for (const s of S.stations) {
-      const t1 = (s.t1 === null || s.t1 === undefined) ? Infinity : s.t1;
-      S.subs[s.sid] = (s.t0 === null || s.t0 === undefined)
-        ? [] : S.points.filter(p => p.t >= s.t0 && p.t < t1);
-    }
+    S.t = S.from; S.trail = [];
+    const nObs = Object.keys(S.obs).reduce((a, k) => a + (S.obs[k] || []).length, 0);
     $("rpEvInfo").textContent = T("rp_counts")
       .replace("{p}", S.points.length).replace("{e}", S.events.length)
+      .replace("{o}", nObs)
       + (rep.truncated ? " · " + T("rp_truncated") : "");
     renderTimeline();
     render();
@@ -245,14 +252,16 @@ function stop() {
 }
 
 /* ---------------- 渲染 ---------------- */
+/* 样本取哪一份：优先该站位自己的路由器序列；没有则回落到设备上报流
+   （回落到 points 是为了兼容老的「悬停窗口」数据 —— 那时观测在设备流里）。 */
+function samplesOf(sid) {
+  const own = S.obs[sid];
+  return (own && own.length) ? own : S.points;
+}
+
 function obsAtNow() {
   const A = parseFloat($("rpA").value), n = parseFloat($("rpN").value);
-  const out = [];
-  for (const s of S.stations) {
-    const o = obsOfStation(s, S.subs[s.sid] || [], S.t);   // 共用语义：绑定优先 / 窗口内中位数 / 不见未来
-    if (o) out.push({ s, rssi: o.rssi, n: o.n, src: o.src, dist: distFromRssi(o.rssi, A, n) });
-  }
-  return out;
+  return obsAt(S.stations, samplesOf, S.t, A, n);   // 共用语义：绑定 > 窗口 > 路由器序列
 }
 
 function render() {
@@ -403,7 +412,10 @@ function renderTimeline() {
 /* ---------------- 交互 ---------------- */
 $("rpPlay").onclick = () => { S.playing ? stop() : play(); };
 $("rpLoad").onclick = loadReplay;
-$("rpSn").onchange = loadReplay;
+$("rpSn").onchange = () => {
+  try { localStorage.setItem(RP_SN_KEY, $("rpSn").value); } catch (e) { /* ignore */ }
+  loadReplay();
+};
 $("rpSeek").oninput = () => {
   const span = Math.max(S.to - S.from, 1);
   S.t = S.from + (+$("rpSeek").value / 1000) * span;

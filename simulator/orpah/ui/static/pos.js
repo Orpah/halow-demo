@@ -264,33 +264,62 @@ function resGrade(rms, medDist) {
 }
 
 /* ---------------- 观测归集（单一实现：实时与回放共用） ----------------
-   站位 s 在**时刻 t** 的观测：
+   站位 s 在**时刻 t** 的观测（优先级从高到低）：
      1) 手动绑定 rssi → 直接用（不受时间窗限制）；
-     2) 时间窗 [t0, t1) 存在且 t0 <= t → 取窗内样本的 RSSI **中位数**；
-     3) 其它 → 无观测。
+     2) 时间窗 [t0, t1) 存在且 t0 <= t → 取窗内样本的 RSSI **中位数**
+        （「无人机悬停在某点」的模型，前提是目标静止）；
+     3) **路由器序列**：给了该站位自己的样本序列 → 取 t 之前**最近一条**
+        （多路由器同时观测；运动目标必须用最近一条，用长窗中位数等于把
+         不同时刻的测量混在一起）；
+     4) 其它 → 无观测。
    **样本一律限于 ts <= t**：回放时不能看未来（否则会提前知道后面的测量）。
-   实时模式传 t = now，行为与重构前完全一致。 */
+   窗口/绑定保持原语义不变，路由器序列是**新增**的低优先级分支（老数据不受影响）。 */
+const ROUTER_MAX_AGE_MS = 30000;   // 「最近一条」的时效：超过就不算当前观测
+
+function latestAt(samples, t) {
+  /* 取 t 之前最近一条（含时效判断）→ {rssi, n, age} 或 null。
+     samples 需按 t 升序；这里仍按最大值兜底（乱序输入也不会取错）。 */
+  let best = null, cnt = 0;
+  for (const p of samples || []) {
+    if (typeof p.rssi !== "number" || p.t > t) continue;
+    if (t - p.t > ROUTER_MAX_AGE_MS) continue;
+    cnt++;
+    if (!best || p.t > best.t) best = p;
+  }
+  if (!best) return null;
+  return { rssi: best.rssi, n: cnt, age: t - best.t };
+}
+
 function obsOfStation(s, samples, t) {
   if (s.rssi !== null && s.rssi !== undefined) {
     return { rssi: s.rssi, n: 1, src: "bind" };
   }
-  if (s.t0 === null || s.t0 === undefined || s.t0 > t) return null;
-  const t1 = (s.t1 === null || s.t1 === undefined) ? Infinity : s.t1;
-  const vals = samples
-    .filter(p => p.t >= s.t0 && p.t < t1 && p.t <= t
-                 && typeof p.rssi === "number")
-    .map(p => p.rssi).sort((a, b) => a - b);
-  if (!vals.length) return null;
-  const m = vals.length >> 1;
-  const med = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
-  return { rssi: med, n: vals.length, src: "window" };
+  if (s.t0 !== null && s.t0 !== undefined && s.t0 <= t) {
+    const t1 = (s.t1 === null || s.t1 === undefined) ? Infinity : s.t1;
+    const vals = samples
+      .filter(p => p.t >= s.t0 && p.t < t1 && p.t <= t
+                   && typeof p.rssi === "number")
+      .map(p => p.rssi).sort((a, b) => a - b);
+    if (vals.length) {
+      const m = vals.length >> 1;
+      const med = vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
+      return { rssi: med, n: vals.length, src: "window" };
+    }
+    return null;                      // 窗已开但窗内还没有样本
+  }
+  const last = latestAt(samples, t);
+  if (last) return { rssi: last.rssi, n: last.n, src: "router" };
+  return null;
 }
 
-/* 时刻 t 的全部观测（含距离换算） */
+/* 时刻 t 的全部观测（含距离换算）
+   samples 可以是**一个数组**（所有站位共用，如实时流的旧用法），
+   也可以是**函数 sid → 该站位的样本序列**（回放/多路由器：每台一份）。 */
 function obsAt(stations, samples, t, A, n) {
+  const of = (typeof samples === "function") ? samples : (() => samples || []);
   const out = [];
   for (const s of stations) {
-    const o = obsOfStation(s, samples, t);
+    const o = obsOfStation(s, of(s.sid) || [], t);
     if (o) out.push({ s, rssi: o.rssi, n: o.n, src: o.src,
                       dist: distFromRssi(o.rssi, A, n) });
   }

@@ -98,6 +98,17 @@ class Tsdb:
         # SN 形如 CN-WH01-9AF3C1D2：'-' 不是合法路径节点，替换为 '_'
         return "root.orpah.devices." + (sn or "?").replace("-", "_")
 
+    @staticmethod
+    def _router_path(sid, sn):
+        """路由器侧测量路径：root.orpah.routers.<sid>.<sn>。
+
+        每台路由器自己一条设备路径（下一级是「在观测谁」）—— 多路由器定位要的是
+        「第 sid 台路由器此刻听到该设备的强度」，与设备自己报的链路值是两个东西，
+        分开存才不会互相覆盖，也才能各取各的时间序列。
+        """
+        return ("root.orpah.routers." + (sid or "?").replace("-", "_")
+                + "." + (sn or "?").replace("-", "_"))
+
     # ---------------- 写入 ----------------
     def write_report(self, sn, ts=None, rssi=None, seq=None, router_id=""):
         """写一条设备上报点（rssi/seq/router_id）。返回是否成功。"""
@@ -174,6 +185,55 @@ class Tsdb:
             self.available = False
             return None
 
+    # ---------------- 路由器侧测量（多路由器定位用） ----------------
+    def write_router_obs(self, sid, sn, ts=None, rssi=None, seq=None):
+        """写一条路由器测量：第 sid 台路由器此刻测到 sn 的 RSSI。
+
+        **ts = epoch 秒**（与 write_report 一致；传毫秒会被当成天文数字的时间戳），
+        None = 用当前时间。
+        与 write_report 的区别：那是**设备自己**报的链路值（root.orpah.devices.<sn>），
+        这是**某台路由器听到它**的强度（root.orpah.routers.<sid>.<sn>）。
+        多路由器定位需要同一时刻多台各自的测量 —— 每台一条序列，互不覆盖。
+        """
+        if not self._ensure() or self.session is None:
+            return False
+        try:
+            ts_ms = int((ts or time.time()) * 1000)
+            with self._lock:
+                self.session.insert_record(
+                    self._router_path(sid, sn), ts_ms,
+                    ["rssi", "seq"],
+                    [TSDataType.FLOAT, TSDataType.INT64],
+                    [float(rssi) if rssi is not None else 0.0,
+                     int(seq) if seq is not None else 0])
+            return True
+        except Exception:
+            self.available = False
+            return False
+
+    def query_router_range(self, sid, sn, t0_ms, t1_ms, limit=20000):
+        """某路由器在某时间窗内对某设备的测量，**按时间升序** → [{t, rssi, seq}]。"""
+        if not self._ensure() or self.session is None:
+            return None
+        lo, hi = int(min(t0_ms, t1_ms)), int(max(t0_ms, t1_ms))
+        return self._read_rows(
+            f"SELECT rssi, seq FROM {self._router_path(sid, sn)} "
+            f"WHERE time >= {lo} AND time <= {hi} "
+            f"ORDER BY time ASC LIMIT {max(1, int(limit))}")
+
+    def query_router_recent(self, sid, sn, limit=500):
+        """某路由器最近 N 条测量，**返回时按时间升序**（与 query_report 同风格）。"""
+        if not self._ensure() or self.session is None:
+            return None
+        rows = self._read_rows(
+            f"SELECT rssi, seq FROM {self._router_path(sid, sn)} "
+            f"ORDER BY time DESC LIMIT {max(1, int(limit))}")
+        if rows is None:
+            return None
+        rows.reverse()
+        return rows
+
+    # ---------------- 设备上报流查询 ----------------
     def query_report(self, sn, limit=100):
         """查询某设备最近上报点 → [{t(ms), rssi, seq, router_id}]。
 
