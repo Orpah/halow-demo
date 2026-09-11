@@ -6,9 +6,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="style.css?v=20260910f">
 <!-- Leaflet 1.9.4 本地化（BSD-2-Clause，见 vendor/leaflet/LICENSE-leaflet.txt）：
-     不再依赖 unpkg CDN，离线部署也能用地图视图。升级时整目录替换并保留许可文件。 -->
-<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<script src="vendor/leaflet/leaflet.js"></script>
+     不再依赖 unpkg CDN，离线部署也能用地图视图。
+     注意：?v= 是缓存依据（服务器对 vendor/ 发长缓存）—— 升级 Leaflet 时必须同步改这两个 v，否则客户端会继续用旧的。 -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1.9.4">
+<script src="vendor/leaflet/leaflet.js?v=1.9.4"></script>
 <style>
   .back { margin-left: 10px; }
   .mono { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
@@ -356,10 +357,16 @@ function mapPoints() {
     ? stations.map(s => ({ x: s.x, y: s.y, label: (s.name || s.sid) }))
     : readAnchors().map(a => ({ x: a.x, y: a.y, label: a.x + ", " + a.y }));
 }
+/* 地图标记的签名：必须含**基点经纬度** —— 投影结果与基点相关，
+   只算点坐标的话，改基点后标记不会重画（圆圈会动、蓝点不动）。 */
+function mapSigOf() {
+  return baseLat() + "," + baseLng() + "|" +
+         mapPoints().map(p => p.x + "," + p.y + "," + p.label).join("|");
+}
 function refreshRouters() {
   if (!lmap) return;
   const pts = mapPoints();
-  mapSig = pts.map(p => p.x + "," + p.y + "," + p.label).join("|");
+  mapSig = mapSigOf();
   lRouters.forEach(m => m.remove());
   lRouters = [];
   for (const a of pts) {
@@ -492,8 +499,16 @@ function applyView() {
 $("view").onchange = applyView;
 $("tileSrc").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } refreshTileNote(); if ($("view").value === "map") applyView(); };
 $("tileUrl").onchange = () => { if (lmap) { lmap.remove(); lmap = null; mapSig = ""; } if ($("view").value === "map") applyView(); };
-$("baseLat").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
-$("baseLng").onchange = () => { if (lmap) lmap.setView([baseLat(), baseLng()], lmap.getZoom()); };
+/* 改基点 = 换坐标系原点：地图要重新居中，**站位/距离环/估计点也必须重算**。
+   只 setView 的话，地图跳到新场地而图形还留在旧场地，要等下一次刷新才对上。 */
+function onBaseChange() {
+  if (!lmap) return;                     // 画布视图不用 Leaflet，且画布坐标与基点无关
+  if (dsMode === "real") renderStations();   // 内部按新基点重画站位（地图或画布）
+  else draw();
+  lmap.setView([baseLat(), baseLng()], lmap.getZoom());
+}
+$("baseLat").onchange = onBaseChange;
+$("baseLng").onchange = onBaseChange;
 
 /* ---- 真实上报模式（IoTDB 时序）---- */
 function fmtTime(ms) {
@@ -826,9 +841,8 @@ function renderStations() {
     setInp(".sty", s.y);
   });
   drawLoc(obs, est);
-  // 地图视图（真实模式）：站位标记变了就重画，并刷新距离环/估计
-  const msig = mapPoints().map(p => p.x + "," + p.y + "," + p.label).join("|");
-  if (lmap && msig !== mapSig) refreshRouters();
+  // 地图视图（真实模式）：标记变了就重画（含基点变化），并刷新距离环/估计
+  if (lmap && mapSigOf() !== mapSig) refreshRouters();
   if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est);
   $("stUsed").textContent = T("tk_st_used_fmt")
     .replace("{n}", obs.length).replace("{t}", stations.length);

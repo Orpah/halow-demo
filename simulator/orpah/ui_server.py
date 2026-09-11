@@ -560,8 +560,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "css": "text/css", "png": "image/png", "jpg": "image/jpeg",
                  "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp",
                  "svg": "image/svg+xml"}.get(p.rsplit(".", 1)[-1], "text/plain")
-        cache = ("public, max-age=86400, immutable"
-                 if rel.startswith("uploads/") else "no-store")
+        # uploads/（照片，uuid 命名）与 vendor/（第三方库，引用处带 ?v= 版本号）内容按 URL 不变
+        # → 长缓存；其余（自己写的 html/js/css）一律 no-store，改完刷新即可见，不让"改了不生效"。
+        if rel.startswith("uploads/") or rel.startswith("vendor/"):
+            cache = "public, max-age=86400, immutable"
+        else:
+            cache = "no-store"
         with open(p, "rb") as f:
             self._send(200, f.read(), ctype,
                        headers={"Cache-Control": cache})
