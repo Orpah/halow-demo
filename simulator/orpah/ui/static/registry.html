@@ -170,6 +170,9 @@ let scrolled = false;
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+/* 拼进选择器用的转义（SN 只含 A-Z0-9-，仍走标准转义防意外） */
+const cssQ = (s) => (window.CSS && CSS.escape)
+  ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 function fmtT(ts) {
   if (ts === null || ts === undefined) return "—";
   const d = new Date(ts * 1000);
@@ -208,12 +211,16 @@ let pendingPhoto = "";
 
 function render(r) {
   cache = r;
-  // 绑定下拉（恢复选中）
+  // 绑定下拉：同样只在人员集合变化时重建（每秒重建会把用户正在展开的选项冲掉）
   const sel = $("addPerson");
-  const cur = sel.value;
-  sel.innerHTML = `<option value="">${esc(T("opt_unbound"))}</option>` +
-    r.persons.map(p => `<option value="${esc(p.pid)}">${esc(p.name)}</option>`).join("");
-  if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+  const psig = r.persons.map(p => p.pid + "\u0000" + p.name).join("|");
+  if (sel.dataset.sig !== psig) {
+    sel.dataset.sig = psig;
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${esc(T("opt_unbound"))}</option>` +
+      r.persons.map(p => `<option value="${esc(p.pid)}">${esc(p.name)}</option>`).join("");
+    if (sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+  }
 
   const nameOf = (pid) => {
     const p = r.persons.find(x => x.pid === pid);
@@ -272,47 +279,67 @@ function render(r) {
   });
 
   const tbody = $("deviceBody");
-  tbody.innerHTML = rows.map(d => {
-    const name = d.person_id ? nameOf(d.person_id) : "—";
-    const opts = STATUSES.map(s =>
-      `<option value="${s}" ${s === d.status ? "selected" : ""}>${SL[s]}</option>`).join("");
-    return `<tr data-sn="${esc(d.sn)}">
-      <td><input type="checkbox" class="chk" data-sn="${esc(d.sn)}"></td>
-      <td class="mono">${esc(d.sn)}</td>
-      <td class="person-name">${esc(name)}</td>
-      <td class="mono">${esc(d.cc)}-${esc(d.org)}</td>
-      <td><span class="badge st-${esc(d.status)}">${esc(SL[d.status] || d.status)}</span></td>
-      <td class="mono">${fmtT(d.first_seen)}</td>
-      <td class="mono">${fmtT(d.last_seen)}</td>
-      <td><select class="stsel">${opts}</select></td>
-      <td><button class="btn sm danger" data-act="del">${esc(T("btn_del"))}</button></td>
-    </tr>`;
-  }).join("");
+  // 只在「设备集合/顺序」变化时整表重建；否则就地改单元格。
+  // 原因：轮询每 1s 一次，整表重建会销毁用户正在操作的原生 <select>（下拉一被销毁
+  // 选择就丢了 → 表现为「状态操作点不动」），并清空批量勾选。
+  const sns = rows.map(d => d.sn).join("|");
+  if (tbody.dataset.sns !== sns) {
+    tbody.dataset.sns = sns;
+    tbody.innerHTML = rows.map(d => {
+      const name = d.person_id ? nameOf(d.person_id) : "—";
+      const opts = STATUSES.map(s =>
+        `<option value="${s}" ${s === d.status ? "selected" : ""}>${SL[s]}</option>`).join("");
+      return `<tr data-sn="${esc(d.sn)}">
+        <td><input type="checkbox" class="chk" data-sn="${esc(d.sn)}"></td>
+        <td class="mono">${esc(d.sn)}</td>
+        <td class="person-name" data-c="person">${esc(name)}</td>
+        <td class="mono" data-c="org">${esc(d.cc)}-${esc(d.org)}</td>
+        <td><span class="badge st-${esc(d.status)}" data-c="badge">${esc(SL[d.status] || d.status)}</span></td>
+        <td class="mono" data-c="first">${fmtT(d.first_seen)}</td>
+        <td class="mono" data-c="last">${fmtT(d.last_seen)}</td>
+        <td><select class="stsel" data-c="sel">${opts}</select></td>
+        <td><button class="btn sm danger" data-act="del">${esc(T("btn_del"))}</button></td>
+      </tr>`;
+    }).join("");
+  } else {
+    rows.forEach(d => {
+      const tr = tbody.querySelector(`tr[data-sn="${cssQ(d.sn)}"]`);
+      if (!tr) return;
+      const set = (c, v) => { const e = tr.querySelector(`[data-c="${c}"]`); if (e) e.textContent = v; };
+      set("person", d.person_id ? nameOf(d.person_id) : "—");
+      set("org", `${d.cc}-${d.org}`);
+      const badge = tr.querySelector('[data-c="badge"]');
+      if (badge) { badge.className = "badge st-" + d.status; badge.textContent = SL[d.status] || d.status; }
+      set("first", fmtT(d.first_seen));
+      set("last", fmtT(d.last_seen));
+      const sel = tr.querySelector('[data-c="sel"]');
+      // 只在下拉当前值与服务端不一致时同步（用户正在下拉里选时其 value 尚未变，不会被冲掉）
+      if (sel && sel.value !== d.status) sel.value = d.status;
+    });
+  }
 
-  // 全选联动
+  // 全选联动（勾选状态存在 DOM 上，靠上面的「不重建」保住）
   const checks = [...tbody.querySelectorAll(".chk")];
   const chkAll = $("chkAll");
   chkAll.checked = checks.length > 0 && checks.every(c => c.checked);
   chkAll.onchange = () => checks.forEach(c => c.checked = chkAll.checked);
 
-  // 行内状态切换
-  tbody.querySelectorAll("select.stsel").forEach(s => {
-    s.onchange = async () => {
-      const sn = s.closest("tr").dataset.sn;
-      await api({ action: "set_status", sn, status: s.value });
-      load();
-    };
-  });
-
-  // 删除设备
-  tbody.querySelectorAll("button[data-act='del']").forEach(b => {
-    b.onclick = async () => {
-      const sn = b.closest("tr").dataset.sn;
-      if (!confirm(T("confirm_del_dev").replace("{sn}", sn))) return;
-      await api({ action: "remove_device", sn });
-      load();
-    };
-  });
+  // 行内状态切换 / 删除设备：事件委托（重建与否都不用重新绑定）
+  tbody.onchange = async (e) => {
+    const s = e.target.closest("select.stsel");
+    if (!s) return;
+    const tr = s.closest("tr");
+    await api({ action: "set_status", sn: tr.dataset.sn, status: s.value });
+    load();
+  };
+  tbody.onclick = async (e) => {
+    const b = e.target.closest("button[data-act='del']");
+    if (!b) return;
+    const sn = b.closest("tr").dataset.sn;
+    if (!confirm(T("confirm_del_dev").replace("{sn}", sn))) return;
+    await api({ action: "remove_device", sn });
+    load();
+  };
 
   // 编辑 / 删除走失者
   pbody.querySelectorAll("button[data-act]").forEach(b => {
