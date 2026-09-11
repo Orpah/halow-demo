@@ -89,6 +89,31 @@ index 报文流据此把丢失设备 SN 标红；SN 已链接 `registry.html?sn=
 另含 `tsdb: bool`（IoTDB 是否在线）。
 registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
+**Orpah ID 相关字段**（index 的「Orpah ID 签名上报」卡片用）：
+
+| 字段 | 说明 |
+|---|---|
+| `id_demo` | 最近一条上报的验签结果：`sn/alg/level/trust/accepted/error/kid/gen/nonce/sig` |
+| `id_reports` | 合成上报流（环形 20 条，最新在前），表格直接渲染 |
+| `id_report_total` | 累计条数 |
+| `id_revoked` | 当前设备是否已吊销（按钮文案随之切换） |
+| **`spoof_kinds`** | **防 spoof 演示的攻击清单** `[{kind, zh, en, expect}]`（来自 `spoof.UI_KINDS`，脚本/页面同一份）。页面按当前语言取 `zh`/`en` 生成下拉，`expect` 用于「期望 vs 实际」对比——**后端不返回本地化文案，只给两种语言让页面挑**，避免中英混排 |
+
+### `POST /api/ctl`（链路控制，body 带 `action`）
+
+已有：`pause`/`resume`/`set_sn`/`every`/`mark`/`untrack`/`revoke`/`unrevoke`/`replay`/`stale`。
+
+**新增 `spoof`（防 spoof 演示，2026-09-12）**：`{action:"spoof", kind:"<攻击类型>"}`
+
+- 服务端用 `spoof.build_case()` 造一条攻击报文，**经既有空口链路注入**
+  （client→STA→空口→AP→Router→UDP→Server），不是离线自演 —— 验签结果由 server 回
+  `_on_id_report` → `id_demo`/`id_reports`/`id_reject` 事件/签名失败率告警都能看到。
+- 返回 `{ok:true, kind, zh, en, expect, note}`；`kind` 非法 → `{ok:false, err:"bad_kind", kinds:[...]}`。
+- `kind` 取自 `spoof.UI_KINDS`（**排除 `revoked`**：页面用的是活密钥库，跑一次会把在跑的设备搞成验不过；
+  撤销场景用现有的 `revoke`/`unrevoke` 按钮演示）。
+- `replay` 用**最近一条上报的 nonce**（一定已被 server 记过）→ 必被 nonce 去重拦下。
+- 攻击清单与「是哪道防线拦下的」见 `ROADMAP.md` §四；端到端脚本 `demo_spoof.py`、自检 `test_spoof.py`。
+
 ---
 
 ## 5. `/api/ts/query`（IoTDB 时序查询）

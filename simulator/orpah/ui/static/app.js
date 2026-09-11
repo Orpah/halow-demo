@@ -376,6 +376,10 @@ async function refresh() {
     renderFounds(s.founds || []);
     renderId(s.id_demo || {});
     renderIdReports(s.id_reports || []);
+    fillSpoofKinds(s.spoof_kinds || []);
+    spoofKinds = s.spoof_kinds || spoofKinds;
+    lastIdNonce = (s.id_demo && s.id_demo.nonce) || lastIdNonce;
+    spoofCompare(s.id_demo || {});
     idRevoked = !!s.id_revoked;
     const btnRev = $("btnIdRevoke");
     if (btnRev) btnRev.textContent = T(idRevoked ? "btn_unrevoke" : "btn_revoke");
@@ -427,6 +431,100 @@ $("btnIdReplay").onclick = async () => {
 $("btnIdStale").onclick = async () => {
   await postCtl({ action: "stale" });
 };
+
+/* ---------- 防 spoof：把攻击报文真的注入空口，看服务器怎么拦 ---------- */
+let spoofKinds = [];        // /api/status.spoof_kinds（脚本/UI 同一份，见 spoof.py）
+let spoofRunning = false;
+let lastIdNonce = "";       // 最近一条验签结果的 nonce（用来等"这条攻击的结果到了"）
+
+function spoofOptText(o) {
+  const name = OrpahI18n.lang === "en" ? (o.en || o.kind) : (o.zh || o.kind);
+  return name + "  →  " + (o.expect || T("spoof_accept"));
+}
+
+function fillSpoofKinds(list) {
+  const sel = $("idSpoofKind");
+  if (!sel || !list || !list.length) return;
+  const sig = list.map(o => o.kind).join("|");
+  if (sel.dataset.sig === sig && OrpahI18n.lang === sel.dataset.lang) return;
+  const keep = sel.value;
+  sel.innerHTML = list.map(o =>
+    `<option value="${esc(o.kind)}">${esc(spoofOptText(o))}</option>`).join("");
+  sel.dataset.sig = sig;
+  sel.dataset.lang = OrpahI18n.lang;
+  if (keep && list.some(o => o.kind === keep)) sel.value = keep;
+}
+
+function spoofMsg(html, cls) {
+  const el = $("spoofMsg");
+  if (!el) return;
+  el.innerHTML = html;
+  el.className = "hint" + (cls ? " " + cls : "");
+}
+
+async function spoofOne(kind) {
+  const r = await postCtl({ action: "spoof", kind });
+  let info = {};
+  try { info = await r.json(); } catch (e) { /* ignore */ }
+  if (!info.ok) { spoofMsg(T("spoof_fail") + (info.err || ""), "err"); return null; }
+  const o = spoofKinds.find(x => x.kind === kind) || info;
+  const name = OrpahI18n.lang === "en" ? (o.en || kind) : (o.zh || kind);
+  spoofMsg(T("spoof_sent").replace("{k}", esc(name))
+    .replace("{e}", esc(info.expect || T("spoof_accept"))) + " …");
+  // 验签结果由 server 异步回（经真链路），等下一轮 id_demo 更新后再比对
+  return { kind, name, expect: info.expect, note: info.note };
+}
+
+/* 把"期望 vs 实际"写进结果行；由 refresh() 在 id_demo 更新时调 */
+let spoofPending = null;
+function spoofCompare(d) {
+  if (!spoofPending || !d || d.sn === undefined) return;
+  const got = d.accepted ? null : (d.error || "?");
+  const ok = got === spoofPending.expect;
+  const mark = ok ? "✓" : "✗";
+  const tn = t => (t == null ? T("spoof_accept") : t);
+  spoofMsg(T("spoof_res").replace("{k}", esc(spoofPending.name))
+    .replace("{e}", esc(tn(spoofPending.expect)))
+    .replace("{g}", esc(tn(got)))
+    .replace("{m}", mark), ok ? "" : "err");
+  spoofPending = null;
+}
+
+$("btnIdSpoof").onclick = async () => {
+  const kind = $("idSpoofKind").value;
+  if (!kind) return;
+  const p = await spoofOne(kind);
+  if (p) spoofPending = p;
+};
+
+$("btnIdSpoofAll").onclick = async () => {
+  if (spoofRunning) return;
+  spoofRunning = true;
+  $("btnIdSpoofAll").disabled = true;
+  $("btnIdSpoofStop").style.display = "";
+  const list = spoofKinds.slice();
+  const hits = [];
+  for (let i = 0; i < list.length && spoofRunning; i++) {
+    const p = await spoofOne(list[i].kind);
+    if (!p) continue;
+    hits.push(p);
+    // 等该条的验签结果（id_demo 的 nonce 变化 = 新结果到了）
+    const t0 = Date.now();
+    let last = lastIdNonce;
+    while (Date.now() - t0 < 3000 && lastIdNonce === last) {
+      await new Promise(res => setTimeout(res, 120));
+    }
+    spoofPending = null;
+    await new Promise(res => setTimeout(res, 150));
+  }
+  spoofRunning = false;
+  $("btnIdSpoofAll").disabled = false;
+  $("btnIdSpoofStop").style.display = "none";
+  const n = hits.length;
+  spoofMsg(T("spoof_all_done").replace("{n}", n)
+    + " " + T("spoof_all_hint"), "");
+};
+$("btnIdSpoofStop").onclick = () => { spoofRunning = false; };
 
 applyI18n();               // 本文件在 </body> 前加载，DOM 已就绪，直接应用
 connect();

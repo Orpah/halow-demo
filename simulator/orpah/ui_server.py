@@ -52,6 +52,7 @@ import registry as reg                    # noqa: E402  设备清册（SN↔走�
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
 import stations as sta                     # noqa: E402  定位站位（无人机悬停测点 / 路由器坐标）
 import motion                              # noqa: E402  演示用「移动的人」运动模型 + RSSI 换算
+import spoof                               # noqa: E402  防 spoof：攻击报文构造（脚本/UI 共用）
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 import damm32 as d32                      # noqa: E402  校验算法单一源
@@ -129,6 +130,7 @@ class OrpahApp:
         self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
+        self.id_attacker = None            # 防 spoof 演示：攻击者设备（自造钥匙，未登记）
         # 数字签名工具：临时密钥对（供 /api/sig 演示 ES256/HS256）
         self.sig_dev = None
         # 设备清册 + 走失案件（SQLite 持久化；首次启动播种）
@@ -451,17 +453,48 @@ class OrpahApp:
         except Exception as e:  # 无 cryptography 时退化为错误展示
             self.id_demo = {"t": time.strftime("%H:%M:%S"), "err": str(e)}
 
-    def _send_id_report(self, ts=None):
-        """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
+    def _legit_id_report(self, ts=None):
+        """一条**合法签名**上报表（周期上报与 spoof 演示的攻击基准都用它）。"""
         self._ensure_id_device()
-        r = self.id_dev.report(
+        return self.id_dev.report(
             level=0, ts=ts,
             seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
                            "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
             battery_mv=3700, firmware="1.0.3")
+
+    def _send_id_report(self, ts=None):
+        """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
+        r = self._legit_id_report(ts=ts)
         self._last_id_report = r
         self.client.send_id_report(r)
         return r
+
+    def spoof_attack(self, kind):
+        """防 spoof 演示：造一条攻击报文并经**既有空口链路**上行 → (ok, info)。
+
+        走的就是真实链路（client→STA→AP→router→server），验签结果由 server 回
+        `_on_id_report` → 页面/`id_reject` 事件都能看到，不是“离线自说自话”。
+        攻击构造与 `demo_spoof.py` 共用 `spoof.py`，两边不会漂移。
+        """
+        if kind not in spoof.UI_KINDS:
+            return False, {"err": "bad_kind", "kinds": spoof.UI_KINDS}
+        if self.id_attacker is None:
+            # 攻击者自造一对钥匙（SN 未登记）—— 冒充只能靠“用别人的 SN + 自己的签名”
+            self.id_attacker = oid.Device(cc="CN", org="WHOFF")
+        self._ensure_id_device()
+        used_nonce = None
+        if kind == "replay" and self._last_id_report:
+            used_nonce = (self._last_id_report.get("payload") or {}).get("nonce")
+        try:
+            report, expect, note = spoof.build_case(
+                kind, self.id_dev, int(time.time()),
+                attacker=self.id_attacker, used_nonce=used_nonce)
+        except Exception as e:
+            return False, {"err": str(e)}
+        self.client.send_id_report(report)
+        zh, en, _, _ = spoof.case_info(kind)
+        return True, {"kind": kind, "zh": zh, "en": en,
+                      "expect": expect, "note": note}
 
     def _on_id_report(self, rec):
         """Server 验签结果回调：更新卡片 + 签名上报流（带 trust）。"""
@@ -560,11 +593,16 @@ class OrpahApp:
             "id_demo": self.id_demo,
             "id_reports": list(self.id_reports),
             "id_report_total": self.id_report_total,
+            # 防 spoof 演示的攻击清单（脚本/UI 同一份，见 spoof.py；页面按语言取 zh/en）
+            "spoof_kinds": [{"kind": k, "zh": spoof.case_info(k)[0],
+                             "en": spoof.case_info(k)[1],
+                             "expect": spoof.case_info(k)[2]}
+                            for k in spoof.UI_KINDS],
             "id_revoked": (self.id_ks.is_revoked(self.client.sn)
                            if self.client else False),
         }
 
-    def cmd(self, action, sn=None, every=None, note=""):
+    def cmd(self, action, sn=None, every=None, note="", kind=None):
         if action == "pause":
             self.paused = True
         elif action == "resume":
@@ -587,6 +625,9 @@ class OrpahApp:
             self.client.send_id_report(self._last_id_report)
         elif action == "stale":
             self._send_id_report(ts=int(time.time()) - 3600)
+        elif action == "spoof":
+            ok, info = self.spoof_attack(kind or "legit")
+            return info if not ok else dict({"ok": True}, **info)
         return {"ok": True}
 
     def stop_all(self):
@@ -1323,7 +1364,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
             return
-        r = APP.cmd(req.get("action"), sn=req.get("sn"), every=req.get("every"))
+        r = APP.cmd(req.get("action"), sn=req.get("sn"), every=req.get("every"),
+                    note=req.get("note") or "", kind=req.get("kind"))
         self._send(200, json.dumps(r).encode())
 
 

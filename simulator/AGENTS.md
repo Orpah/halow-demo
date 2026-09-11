@@ -37,6 +37,18 @@
   改完请跑 `python orpah/test_keys.py`（生命周期单测）+ `python orpah/demo_id.py`（端到端验收）；
   实在要换算法就删 `orpah.db` 重新播种（会一并清掉清册/案件/站位）。
 - **orpah 进程不要改客户端 SN 做测试**（会真的造出新的密钥代次并写进密钥库/审计）。
+- **防 spoof（空口无认证）演示（2026-09-12，P1）**：前提是 ORPAH 空口**开放/无认证** ——
+  任何人都能往空口里丢一条 ORPAH-ID-REPORT。防线顺序：**格式 → SN 校验位（Damm32/mod97）
+  → 时间窗/nonce 去重 → 吊销表 → 设备公钥验签**。
+  - 攻击构造**只有一份**：`orpah/spoof.py`（12 种，含 1 条合法对照）——
+    `demo_spoof.py`（真链路端到端）、`test_spoof.py`（离线逐条）、页面（index 选类型注入）共用，
+    否则“演示的”与“测的”会漂移。
+  - 页面入口：index 的 Orpah ID 卡片 →「注入伪造上报」/「跑全部攻击」（走真空口链路，落 `id_reject`）。
+  - **已知边界（必须如实展示，不要包装成“防住了”）**：`xport`（路由器侧观测）**不在签名预像里**，
+    篡改它验签照样通过；而定位数据恰恰来自路由器侧测量 → **能冒充路由器就能伪造定位**。
+    已记 ROADMAP 开放问题，动手补前先与用户对齐。
+  - ⚠ `spoof.CASES` 里 `revoked` **会改密钥库状态，必须放最后**；且 `unrevoke` 会把各代转成
+    retired（之后验签就 `unknown_device`）—— 页面因此把 `revoked` 排除在 `UI_KINDS` 之外。
 - **IoTDB 查询：时间可进 `WHERE`，值不行（2026-09-12，回放要按窗取数）**：
   - **时间过滤写进 SQL**（`WHERE time >= <ms> AND time <= <ms>` + `ORDER BY time ASC`）——
     时间戳是 IoTDB 的原生索引，准确且快。`tsdb.query_report_range` / `query_events_range`
@@ -119,6 +131,10 @@
     ③ 或直接在页面上操作（浏览器发的就是 UTF-8）。
   - 破坏是**不可逆**的（服务端收到时就是 `?`，无从还原），只能重新写入正确值。
   - **入库前的自检**：写完中文用 API 读回一眼（`repr()`），别只看 POST 的返回。
+  - **同一个坑的第二种用法（2026-09-12 踩到）**：**不要用 PowerShell 改写含中文的源码文件** ——
+    `(Get-Content f.py -Raw) -replace ... | Set-Content f.py -Encoding UTF8` 会把所有中文变成乱码
+    （`Get-Content` 默认按 ANSI 代码页读 UTF-8 文件），而且**破坏后编译直接语法错**。
+    改源码一律用编辑器工具；已在终端里改坏的就 `Remove-Item` 重写。
 
 ## 1. 定位与启动
 

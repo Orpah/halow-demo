@@ -142,6 +142,14 @@
     <button class="btn" id="btnIdStale" data-i18n="btn_stale">超窗上报</button>
     <span class="hint" data-i18n="id_ctl_hint">演示：撤销→上报被拒；重放→nonce 去重；超窗→时间窗口拒绝。</span>
   </div>
+  <div class="config-row id-ctl">
+    <span class="hint" data-i18n="spoof_title">防 spoof（空口无认证）</span>
+    <select id="idSpoofKind" style="min-width:230px"></select>
+    <button class="btn" id="btnIdSpoof" data-i18n="btn_spoof">注入伪造上报</button>
+    <button class="btn" id="btnIdSpoofAll" data-i18n="btn_spoof_all">跑全部攻击</button>
+    <button class="btn" id="btnIdSpoofStop" data-i18n="btn_stop" style="display:none">停止</button>
+  </div>
+  <p class="hint" id="spoofMsg" data-i18n="spoof_idle">按「注入伪造上报」把攻击报文真的扔进空口 —— 防线：格式 → SN 校验位（Damm32/mod97）→ 时间窗/nonce → 吊销表 → **设备公钥验签**。</p>
 </section>
 
 <!-- ============ 发现记录（走失命中） ============ -->
