@@ -112,18 +112,19 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 `GET /api/ts/events?limit=N[&etype=<类型>][&sn=<SN>]` → 事件倒序：
 
 ```json
-{"ok": true, "etype": "", "sn": "",
- "rows": [{"t": 1789100000000, "etype": "publish", "sn": "", "detail": "n=2 targets=1 CN-...=1"}]}
+{"ok": true, "etype": "", "sn": "", "retention_days": 30, "purged_upto": 1786548902866,
+ "rows": [{"t": 1789100000000, "etype": "publish", "sn": "", "detail": "n=2 targets=1 CN-...=1", "actor": "system"}]}
 ```
 
-| etype | 何时写 | detail 形态 |
-|---|---|---|
-| `publish` | Server 发布/更新 LOST-TABLE | `n=<项数> targets=<台数> <sn>=<1|0>,…` |
-| `found` | Server 收到 ORPAH-FOUND（走失命中） | `router <ip>:<port>` |
-| `id_report` | Server 验完一条 Orpah ID 上报 | `alg=… level=… trust=… accepted=…`（失败附 `err=…`） |
-| `case_mark` | 立案（去重后只写一次） | `case_id` |
-| `case_found` | 案件进入已发现（`newly` 时才写） | 触发来源 |
-| `case_close` | 结案 | `<case_id>:closed\|revoked` |
+| etype | 何时写 | detail 形态 | actor |
+|---|---|---|---|
+| `publish` | Server 发布/更新 LOST-TABLE | `n=<项数> targets=<台数> <sn>=<1\|0>,…` | `system` |
+| `found` | Server 收到 ORPAH-FOUND（走失命中） | `router <ip>:<port>` | `system` |
+| `id_report` | Server 验完一条 Orpah ID 上报 | `alg=… level=… trust=… accepted=…` | `system` |
+| `id_reject` | 同上但 `accepted=false`（验签被拒） | 同上 + `err=<原因>` | `system` |
+| `case_mark` | 立案（去重后只写一次） | `case_id` | 操作者（POST 传的 `actor`） |
+| `case_found` | 案件进入已发现（`newly` 时才写） | 触发来源 | `system` |
+| `case_close` | 结案 | `<case_id>:closed\|revoked` | 操作者（POST 传的 `actor`） |
 
 - `limit` 上限 500（默认 50）。`etype` / `sn` 在**服务端本地过滤**（多取 10 倍再筛，上限 5000），
   因为 IoTDB 树模型对「非投影列」做值过滤不可靠。
@@ -133,6 +134,27 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   IoTDB 同设备同时间戳是 last-write-wins → 同一毫秒的多条事件会互相覆盖。
   故未显式传 `ts` 时把时间戳钳成严格递增（最多偏移几毫秒）；显式传 `ts`（业务时间）则原样保留。
 - 逐条报文流不重复写事件：已作为设备测点存在 `root.orpah.devices.<sn>`（见上）。
+
+#### 审计：`actor`（谁）
+
+`root.orpah.events` 的第四个字段 `actor`：
+
+- 人为操作（立案/结案）由页面随 POST 带上 → 落库为该操作者；
+  页面用共享组件 `ui_i18n.js` 的 `bootActorBox()`（只要放 `<span id="actorBox"></span>`），
+  值存 `localStorage["orpah_ui_actor"]`，取用接口 `OrpahI18n.actor()`。
+- 自动事件（publish/found/id_report/id_reject）不传 → 记 `system`；操作者留空 → 记 `system`。
+- **`actor` 列是后加的**：更早写入的行回读为 `null`，本接口统一归一成 `""`（页面显示为无标签）。
+- `index.html` 事件历史只给**人为操作**渲染操作者标签（`system` 不显），避免逐条噪声。
+- **尚未纳入审计的写操作**（改动这些端点的状态不会产生事件）：`/api/registry` 增删改、
+  `/api/stations` 增删改/打点/绑定。
+
+#### 审计：保留期限
+
+- 保留天数由环境变量 `ORPAH_EVENT_RETENTION_DAYS` 决定（默认 **30**，`0` = 不清理）。
+- 进程启动首次连上 IoTDB 后按期限清理一次（`delete_data`，只删早于 `now - N天` 的），
+  只跑一次；IoTDB 比本进程晚起时，在第一次成功重连后补跑。
+- 返回值：`retention_days` = 当前策略天数；`purged_upto` = 最近一次清理的截止时间(ms)，
+  未清理过为 `null`。页面在旁边显示「保留 30 天 / 保留全部」。
 
 ---
 
@@ -205,4 +227,41 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 ```
 
 省略 `t0`/`t1` 则由页面「打点」实时生成；脚本预演时可直接把悬停时刻写进 `t0`/`t1`（epoch 毫秒）。
+
+---
+
+## 8. `/api/alerts`（告警红点）
+
+`GET /api/alerts` → 当前**活跃告警**（无参数）：
+
+```json
+{"ok": true, "counts": {"crit": 1, "warn": 0, "total": 1},
+ "alerts": [{"kind": "case_overtime", "level": "crit", "key": "case_overtime:C001",
+             "msg": "alert_case_overtime", "since": 1789104728,
+             "case_id": "C001", "person_id": "P002", "gap": 35856}]}
+```
+
+**无状态**：每次请求都用当前快照（设备清册 + 走失案件 + 最近签名上报）重算，
+不存告警表、没有确认/关闭流程 → 条件消失则告警自动消失，无需状态机。
+
+规则（阈值可在 `alerts.py` 常量或 `evaluate(..., **th)` 覆盖）：
+
+| kind | level | 条件 | 阈值 |
+|---|---|---|---|
+| `no_report` | `warn` | 启用中且**曾上报过**的设备，距上次上报超过 N 秒 | `no_report_sec=30` |
+| `case_overtime` | `crit` | `open` 状态的案件立案超过 N 秒仍未发现 | `case_overtime_sec=180` |
+| `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 50% | `sig_window=5` |
+
+字段说明：
+
+- `key` = `<kind>:<对象>`，用于前端判断「是不是新告警」（新 key → 徽标闪烁一次）。
+- `msg` = **i18n 键**（不是成品文案）；页面用 `T(msg)` 取模板，再用告警对象里
+  同名字段替换 `{占位符}`（`gap` 会先格式化成 `1h2m`/`3m20s`/`45s`）。
+- `since` = 告警起算时间（设备用 `last_seen`、案件用 `created`、签名用首条样本时间），
+  页面显示为「持续 X」。
+- 排序：`crit` 先于 `warn`，同级按 `since` 升序。
+- 阈值未满样本时不告警（如签名样本不足 `sig_window` 条）；设备从未上报过、
+  或状态非「启用」的，不参与 `no_report`。
+- 页面：`index.html` 页头徽标（`#alertBadge`，`crit` 红 / `warn` 橙）+ 告警卡片，
+  3 秒轮询；无告警时徽标与卡片整体隐藏。
 

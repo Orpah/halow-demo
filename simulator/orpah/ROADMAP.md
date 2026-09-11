@@ -45,8 +45,12 @@
 ## 三、案件闭环 + 安全事件与运维
 
 - [x] **走失案件闭环（以人为单位，非单 SN）**：某人走失 → 标记（其名下所有设备进入走失态）→ 路由器发现任一台即视为发现该人 → 找回/撤销 → 结案。case 状态机 + 页面（`cases.py` + `case.html`，2026-09-11 完成）。多设备定位聚合并入「真实 report 聚合」。
-- [x] **审计日志**：走失标记、撤销、重放、超窗、验签失败的持久化审计（谁/何时/哪个 SN/前后状态/结果）+ **数据保留期限/最小化**意识。→ **已做一半**（2026-09-11）：所有业务事件落 IoTDB `root.orpah.events`（`publish`/`found`/`id_report`/`case_mark`/`case_found`/`case_close`），`/api/ts/events` 可回读、`index.html` 有「事件历史」区，**重启后仍在**。**未做**：审计里的「谁」（操作者/角色）、数据保留期限、超出演示的完整覆盖面。
-- [ ] **告警与通知**：RSSI 突变、长未上报、校验位连续失败、签名失败率超阈、走失超时 → 规则引擎 + 通知（页面红点/Webhook/邮件；演示可用 SSE 弹窗）。
+- [x] **审计日志**（2026-09-11 完成）：走失标记、撤销、发现、验签（含被拒）、发布等业务事件持久化到 IoTDB `root.orpah.events`，`/api/ts/events` 可回读、`index.html` 有「事件历史」区，**重启后仍在**。
+  - **谁**：事件带 `actor` 字段——人为操作（立案/结案）由页面随 POST 带上（共享组件 `ui_i18n.js` 的 `bootActorBox()`，值存 localStorage），自动事件记 `system`；事件历史只给人为操作显示操作者标签。
+  - **保留期限**：`ORPAH_EVENT_RETENTION_DAYS`（默认 30 天，0=不清理），启动连上库后按期限清理一次；`/api/ts/events` 回 `retention_days`/`purged_upto`，页面显示「保留 30 天」。
+  - **可筛选**：验签被拒的单写 `id_reject`（原来混在 `id_report` 的 detail 里，无法按类型筛）。
+  - **未覆盖**（后续）：`/api/registry` 增删改、`/api/stations` 增删改/打点/绑定 这些写操作不产生审计事件；也无「谁」的鉴权/角色（仅自填标识）。
+- [x] **告警与通知**（2026-09-11 完成，仅「页面红点」部分）：`alerts.py` 无状态规则引擎（长未上报 / 走失超时 / 签名失败率）→ `GET /api/alerts`，`index.html` 页头徽标 + 告警卡片，3s 轮询；条件消失则告警自动消失。未做：Webhook/邮件通知、SSE 弹窗、RSSI 突变/校验位连续失败规则。
 - [ ] **回放**：按时间段回放报文流 + 定位轨迹 + 安全事件。
 - [ ] **重放/篡改自动化测试台**：批量用例（黄金样本、边界 SN、过期 nonce、错 CC）一键跑并出报告。
 
@@ -71,7 +75,8 @@
 | `case.html` | `/api/cases`、`/api/registry` | **SQLite** `cases`/`case_events` | |
 | `track.html`（真实模式） | `/api/ts/query` | **IoTDB** `root.orpah.devices.<sn>` | 模拟模式纯前端，无状态 |
 | `track.html`（真实模式 · 定位站位） | `/api/stations` | **SQLite** `stations` | 站位坐标 / 时间窗 / 手动绑定；定位计算在前端（复用模拟模式内核） |
-| `index.html` | `/api/status`、`/api/events`、`/api/ctl`、`/api/ts/events` | **IoTDB** `root.orpah.events`（事件历史） | 拓扑计数/报文流环形仍是内存态（**重启归零**，属设计：当前状态展示） |
+| `index.html` | `/api/status`、`/api/events`、`/api/ctl`、`/api/alerts`、`/api/ts/events` | **IoTDB** `root.orpah.events`（事件历史） | 拓扑计数/报文流环形仍是内存态（**重启归零**，属设计：当前状态展示）；告警**无存储**（每次按快照重算） |
+| `case.html`（操作者输入框） | `/api/cases` + POST 带 `actor` | **localStorage** `orpah_ui_actor` → **IoTDB** `actor` 列 | 共享组件 `ui_i18n.js` 的 `bootActorBox()` |
 | `sig.html` | `/api/sig` | 无（内存 KeyStore） | `KeyStore.save/load` 存在但 UI 未接；重启丢密钥 |
 | `checksum.html` / `damm32.html` | `/api/checksum` | 无 | 纯计算，产出用完即弃 |
 | `rssi.html` | 无 | 无 | 纯前端算法演示 |
@@ -110,8 +115,8 @@
 | **P0** | 设备清册 + SN 状态（含多客户端绑定） | ✅ 完成 |
 | **P0** | 走失案件闭环（基础） | ✅ 完成 |
 | **P0** | 真实 report 聚合·阶段一（单无人机） | ✅ 完成（站位表 + 时间窗/手动绑定，见 §二） |
-| **P0** | 审计日志 | 🟡 事件已落库可回读；缺「谁（操作者/角色）」、保留期限 |
-| **P0** | 告警红点 | ❌ 未做 |
+| **P0** | 审计日志（含操作者 + 保留期限 + 被拒上报可筛） | ✅ 完成 |
+| **P0** | 告警红点（长未上报 / 走失超时 / 签名失败率） | ✅ 完成（通知渠道未做） |
 | **P1** | 密钥生命周期/吊销、GDOP + 加权 LS + 误差椭圆、回放、离线地图、无认证防 spoof 演示、真实 report 聚合·阶段二（多路由器） | — |
 | **P2** | 多租户权限、Wi-Fi 抓包对照、无源能耗模型、批量合规测试用例、隐私最小化/时钟可信深化 | — |
 
