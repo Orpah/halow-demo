@@ -20,6 +20,11 @@
   .row input.age { width: 60px; }
   .row input.photo { width: 200px; }
   .row input.mid { width: 160px; }
+  .filepick { display: flex; align-items: center; gap: 8px; }
+  .fname {
+    color: var(--mut); font-size: 12px; max-width: 170px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .thumb { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; }
   table.reg { border-collapse: collapse; width: 100%; margin-top: 12px; }
   table.reg th, table.reg td { padding: 6px 10px; text-align: left; font-size: 13px; }
@@ -88,7 +93,12 @@
     <label><span data-i18n="f_comm">沟通能力</span> <input class="mid" id="personCommunicate" data-i18n-ph="ph_comm" placeholder="如 能说姓名"></label>
   </div>
   <div class="row" style="margin-top:8px">
-    <label><span data-i18n="f_photo">照片</span> <input type="file" id="personPhotoFile" accept="image/*"></label>
+    <span class="filepick">
+      <span data-i18n="f_photo">照片</span>
+      <button type="button" class="btn sm" id="photoPickBtn" data-i18n="btn_choose_file">选择文件</button>
+      <span class="fname" id="photoPickName" data-i18n="no_file">未选择文件</span>
+      <input type="file" id="personPhotoFile" accept="image/*" hidden>
+    </span>
     <img id="personPhotoThumb" class="thumb" hidden data-i18n-alt="ph_thumb" alt="缩略图">
     <label><span data-i18n="f_note">备注</span> <input class="note" id="personNote" data-i18n-ph="ph_note" placeholder="备注"></label>
     <button class="btn" id="btnAddPerson" data-i18n="btn_add_person">添加人员</button>
@@ -414,12 +424,22 @@ $("btnAddPerson").onclick = async () => {
   $("personHeight").value = ""; $("personBuild").value = "";
   $("personFeatures").value = ""; $("personHealth").value = "";
   $("personMental").value = ""; $("personCommunicate").value = "";
-  pendingPhoto = ""; $("personPhotoFile").value = ""; $("personPhotoThumb").hidden = true;
+  pendingPhoto = ""; $("personPhotoFile").value = "";
+  $("personPhotoThumb").hidden = true; setPhotoName();
   load();
 };
 
+// 原生 <input type=file> 的「选择文件 / 未选择文件」是浏览器 chrome 文字（跟随浏览器界面语言，
+// 页面无法翻译）→ 隐藏原生控件，用自己的按钮 + 文件名标签。
+function setPhotoName() {
+  const f = $("personPhotoFile").files[0];
+  $("photoPickName").textContent = f ? f.name : T("no_file");
+}
+$("photoPickBtn").onclick = () => $("personPhotoFile").click();
+
 $("personPhotoFile").onchange = async () => {
   const f = $("personPhotoFile").files[0];
+  setPhotoName();
   if (!f) return;
   try {
     const resp = await fetch("/api/upload?filename=" + encodeURIComponent(f.name), {
