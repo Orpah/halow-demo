@@ -8,6 +8,13 @@
 - 定位：在 halow-demo 内做 ORPAH-over-HaLow 的 L1/L2 原型（成熟后抽 orpah-demo）。
   L1 = 数据通路最小骨架（Client 上行 payload 到 Server）；L2 = 全消息流 + 走失表 +
   跟踪状态（SPEC §9，纯 PC 无硬件）。
+- **⚠ 范围原则（2026-09-11 用户定，最高约束）：ORPAH 是技术搜寻手段，demo 边界取最小。**
+  只做「用无线技术找到人」这一段（登记走失态/下发走失表/路由器发现上报/服务器回执落库/
+  RSSI 定位/审计与告警）——**不是公安办案系统**。默认**不引入**：组织与机构建模、
+  角色/权限体系、警员身份、案件分配/派单/办案流程、多租户隔离。
+  新需求先过判据：**「让找人更快更准」→ 做；「让管理/流程更完整」→ 默认不做，先记
+  `orpah/ROADMAP.md` §〇。** 需要「谁」时止步于审计标签（自由文本 `actor`）；需要「谁负责」
+  时先确认是否存在真实运营方（demo 目前无登录者）。细节与已应用示例见 `ROADMAP.md` §〇。
 - 分层（对齐 `Protocol/docs/orpah-over-halow/SPEC.md`）：链路 = 以太网帧(ethertype
   `0x88B5`) 经模拟器二层桥透传；Router→Server 段用真实 UDP。角色：Client=`client.py`+STA
   模拟器、Router=`router.py`+AP 模拟器、Server=`server.py`(UDP `19447`)。
