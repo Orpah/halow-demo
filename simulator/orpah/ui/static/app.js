@@ -448,13 +448,14 @@ if ($("btnEvtRefresh")) {
    红点用轮询（3s）而不是 SSE：比 1s 的 /api/status 慢一档，规则评估很轻。 */
 let alertKeys = new Set();     // 上一轮的告警 key：用来判断"新告警"
 
-/* 持续时长：紧凑且语言无关（1h2m / 3m20s / 45s） */
+/* 持续时长：中文用 小时/分钟/秒，英文用 h/m/s（单位走字典，不写死文案） */
 function fmtGap(sec) {
   sec = Math.max(0, Math.floor(sec || 0));
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  if (h) return h + "h" + m + "m";
-  if (m) return m + "m" + s + "s";
-  return s + "s";
+  const vals = { h: h, m: m, s: s };
+  let out = T(h ? "dur_hm" : (m ? "dur_ms" : "dur_s"));
+  Object.keys(vals).forEach(k => { out = out.split("{" + k + "}").join(String(vals[k])); });
+  return out;
 }
 
 /* 用告警自带字段填 msg 模板 */
