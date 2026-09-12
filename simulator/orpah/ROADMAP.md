@@ -369,7 +369,23 @@
     但服务器目前把它当可信上报方。缓解方向（待定）：路由器侧身份/签名（server 对路由器认证）、
     多路由器交叉校验、异常值检测。**动手前先与用户对齐**（可能超出 demo 边界）。
   - **未做**：真实空口（需硬件，见 §四其余项）、攻击流量的 UI 独立面板（目前复用签名上报流 + 事件历史）。
-- [ ] **Wi-Fi 抓包 → ORPAH 报文解析** 与 **HaLow/UDP 模拟器**双源对照。
+- [x] **Wi-Fi 抓包 → ORPAH 报文解析** 与 **HaLow/UDP 模拟器**双源对照（2026-09-12 完成）：
+  - 新增 `capture.py`：classic pcap 读写 + 逐帧解析 + **双源对照**（`compare()` = 纯计数差集，
+    `diff`/`only_capture`/`only_ref`）。解析**复用协议层单一源**（`orpah_proto.parse_eth_frame`
+    + `decode_msg`），不在工具里另写一套帧/报文解析。
+  - **格式错误要吵不要静默**：pcapng（Wireshark 默认新格式）→ `PcapError` 并给出
+    `editcap -F pcap in.pcapng out.pcap`；截断/魔数不符/非对象参照 JSON 同理。
+    （静默跳过会把“格式没支持”错当成“抓包里没有 ORPAH 报文”。）
+  - 非 Ethernet 链路层（Radiotap/Linux SLL 等）**明确警告**并说明需先按该链路类型解封装，
+    而不是甩一堆 `not-orpah`。
+  - **双源对照只算差、不猜映射**：参照计数由调用方自己从它的来源（`/api/status`、IoTDB 事件数）
+    数出来（`--ref-json`），因为“哪些计数该与哪些报文对齐”是业务口径。
+  - CLI：`python capture.py --pcap orpah.pcap [--limit N] [--json] [--ref-json ref.json]`；
+    真机抓包：`tcpdump -i eth0 -s 0 -w orpah.pcap 'ether proto 0x88b5'`。
+  - 测试：`test_capture.py`（27 项：往返字节一致 / 四类格式错误 / 五类报文计数 / 脏帧不连坐 /
+    ID 报文抽 alg+level / 对照四情形 / 参照 JSON 容错 / CLI 退出码），已并入 `run_checks.py`（离线 11 套件）。
+  - **诚实边界**：没有能抓 HaLow 空口的嗅探器时，只能抓 **RJ45/网口侧**或用模拟器自己写出的 pcap；
+    后者验的是**解析器与对照逻辑**，**不能替代真机抓包**（真机侧留待阶段二上机时用）。
 - [ ] **多租户/多组织**：SN 按组织隔离、角色权限（看客/运维/管理员）。（与 §三「案件经办/分配」同族：那里的 L3 就是本项；**做 L3 前先确认 L2 是否真需要**）
 - [x] **时钟可信：无 RTC 设备的 ts 处理（2026-09-12 完成）**
   - **现状盘点（开始前）**：协议层已经对了 —— `orpah_id.verify_report` 对 `ts=0` **跳过时间窗**

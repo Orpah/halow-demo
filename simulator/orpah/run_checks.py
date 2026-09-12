@@ -46,6 +46,7 @@ SUITES = [
     ("UI 服务器契约", "test_server.py", []),
     ("批量合规用例（黄金样本/SN 边界/报文）", "checks_batch.py", []),
     ("降级策略（§8.2 选级 / §8.3 服务端）", "test_levels.py", []),
+    ("抓包解析 / 双源对照", "test_capture.py", []),
 ]
 # 端到端 demo：会起模拟器/占端口，默认不跑
 E2E = [
