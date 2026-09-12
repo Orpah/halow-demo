@@ -501,11 +501,11 @@ function stop() {
 }
 
 /* ---------------- 渲染 ---------------- */
-/* 样本取哪一份：优先该站位自己的路由器序列；没有则回落到设备上报流
-   （回落到 points 是为了兼容老的「悬停窗口」数据 —— 那时观测在设备流里）。 */
+/* 样本取哪一份：走 pos.js 的 `samplesFor`（**单一判据**，与实时页共用）——
+   该站位空表 = 这台没测到（不能回落到 points：那等于把设备自己到最近路由器的强度
+   当成该站位的测量）；只有整个 per-station 序列都缺席（老数据源）才回落到 points。 */
 function samplesOf(sid) {
-  const own = S.obs[sid];
-  return (own && own.length) ? own : S.points;
+  return samplesFor(S.obs, sid, S.points);
 }
 
 function obsAtNow() {
@@ -596,7 +596,8 @@ function precomputeFrames() {
   const A = parseFloat($("rpA").value), n = parseFloat($("rpN").value);
   const times = new Set();
   for (const s of S.stations) {
-    (S.obs[s.sid] && S.obs[s.sid].length ? S.obs[s.sid] : S.points)
+    // 与 `samplesOf` 同一个判据（否则“该站位空表”会被设备流的时刻污染候选帧）
+    samplesFor(S.obs, s.sid, S.points)
       .forEach(p => { if (p.t >= S.from && p.t <= S.to) times.add(p.t); });
   }
   const frames = [];

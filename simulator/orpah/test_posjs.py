@@ -35,7 +35,7 @@ const EXPORT = ["rssiFromDist", "distFromRssi", "trilaterate", "wlsLocate", "ell
                 "resGrade", "latestAt", "obsOfStation", "obsAt", "kalmanTrack",
                 "pathJitter", "obsSegments", "segIndexAt", "nextValidAt",
                 "truthAt", "errorsOf", "quantileOf", "cdfOf",
-                "gdopOf", "suggestStation"];
+                "gdopOf", "suggestStation", "samplesFor"];
 const src = fs.readFileSync(process.argv[2], "utf8")
           + "\nmodule.exports = {" + EXPORT.join(",") + "};\n";
 const m = { exports: {} };
@@ -201,6 +201,48 @@ ck("补站位：确定性（两次调用逐位相同）", JSON.stringify(r1) ===
 ck("补站位：坐标取到 0.1 m（现场可照读）",
    Math.abs(r1.x * 10 - Math.round(r1.x * 10)) < 1e-9);
 
+/* ---- 样本源判据 samplesFor（空表 ≠ 没这个数据源） ---- */
+const s1 = [{ t: 3000, rssi: -70 }, { t: 2000, rssi: -72 }, { t: 1000, rssi: -75 }];
+const devSamples = [{ t: 3000, rssi: -60 }, { t: 2000, rssi: -61 }];
+ck("samplesFor：该站位有序列 → 用它",
+   P.samplesFor({ S1: s1, S2: [] }, "S1", devSamples) === s1);
+ck("samplesFor：★该站位**空表** → 返回空（**不能**回落到设备流：那是别的测量）",
+   P.samplesFor({ S1: s1, S2: [], S3: [] }, "S2", devSamples).length === 0);
+ck("samplesFor：序列里没这个 sid → 也是空（不是设备流）",
+   P.samplesFor({ S1: s1 }, "S9", devSamples).length === 0);
+ck("samplesFor：整个 per-station 序列都缺席（老数据源）→ 回落到设备流",
+   P.samplesFor({}, "S1", devSamples) === devSamples
+   && P.samplesFor(undefined, "S1", devSamples) === devSamples);
+ck("samplesFor：没有设备流也不炸（给空表）", P.samplesFor({}, "S1", undefined).length === 0);
+
+/* 端到端：空表站位不能凭空多出一个观测（修复前实测：3 个观测、S2/S3 拿设备流那条） */
+const st3 = [{ sid: "S1", x: 30, y: 0 }, { sid: "S2", x: -15, y: 26 }, { sid: "S3", x: -15, y: -26 }];
+const sOf = (obsMap) => (sid) => P.samplesFor(obsMap, sid, devSamples);
+const withEmpty = P.obsAt(st3, sOf({ S1: s1, S2: [], S3: [] }), 3000, -40, 2.5);
+ck("obsAt：只有 S1 有序列 → 只出 1 个观测（不再拿设备流充数）",
+   withEmpty.length === 1 && withEmpty[0].s.sid === "S1", JSON.stringify(withEmpty.map(o => o.s.sid)));
+const legacy2 = P.obsAt(st3, sOf({}), 3000, -40, 2.5);
+ck("obsAt：老数据源（per-station 全缺席）→ 3 个观测都来自设备流（悬停窗口语义保留）",
+   legacy2.length === 3 && legacy2.every(o => o.src === "router"));
+
+/* ---- 顺序无关（后端保证升序，但 latestAt 自己也不能靠它） ---- */
+const asc = [{ t: 1000, rssi: -75 }, { t: 2000, rssi: -72 }, { t: 3000, rssi: -70 }];
+const desc = asc.slice().reverse();
+const mixed = [asc[1], asc[2], asc[0]];
+ck("latestAt：升序/降序/乱序给出同一条（取 t 之前最近一条，不依赖输入顺序）",
+   P.latestAt(asc, 2500).rssi === P.latestAt(desc, 2500).rssi
+   && P.latestAt(asc, 2500).rssi === P.latestAt(mixed, 2500).rssi);
+ck("latestAt：时效（>30s 不算；时效常量是 **ms**）与“不看未来”仍在",
+   P.latestAt(asc, 3000 + 40000) === null && P.latestAt(asc, 1500).rssi === -75);
+
+/* ---- 近共线（cond 有限但极大）也要给建议，且分类如实 ---- */
+const nearCol = [{ x: -20, y: 0 }, { x: 0, y: 0.05 }, { x: 20, y: 0 }];
+const advNear = P.suggestStation(xy(nearCol), null);
+ck("补站位：近共线（cond 有限但巨大）→ 仍给建议、仍要求离开直线",
+   advNear && advNear.reason === "layout" && isFinite(advNear.condBefore)
+   && advNear.condBefore > 500 && Math.abs(advNear.y) > 5,
+   JSON.stringify(advNear));
+
 console.log("");
 if (fails.length) {
   console.log("定位内核：失败 " + fails.length + " 项：" + fails.join("；"));
@@ -208,6 +250,28 @@ if (fails.length) {
 }
 console.log("定位内核（pos.js）全部通过");
 """
+
+
+def page_guard():
+    """两页必须调用 `samplesFor`（**单一判据**），不许再各写一份 `(own && own.length) ? …` 三元。
+
+    为什么要在 Python 侧查：判据在 pos.js，但**调用点在两个 HTML 页面**里；
+    以前两页各写一份同样的三元表达式，其中「空表 ≠ 没有该数据源」的语义一旦漂移，
+    两页会对同一时刻给出不同位置（本仓最忌讳的那种不一致）。
+    """
+    bad = []
+    for page, needle in (("track.html", "samplesFor(realObs"),
+                         ("replay.html", "samplesFor(S.obs")):
+        p = os.path.join(HERE, "ui", "static", page)
+        with open(p, encoding="utf-8") as f:
+            src = f.read()
+        if needle not in src:
+            bad.append(page)
+    if bad:
+        print(f"  FAIL 这两页没有走 samplesFor（单一判据）：{', '.join(bad)}")
+        return 1
+    print("  OK   两页都走 samplesFor（样本源判据单一源）")
+    return 0
 
 
 def main():
@@ -218,6 +282,7 @@ def main():
         return 1
     fd, path = tempfile.mkstemp(suffix=".js", prefix="posjstest_")
     os.close(fd)
+    fail = 0
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(HARNESS)
@@ -225,12 +290,21 @@ def main():
                            encoding="utf-8", errors="replace", timeout=120)
         out = (r.stdout or "") + (r.stderr or "")
         print(out.rstrip())
-        return 0 if r.returncode == 0 and "FAIL" not in out else 1
+        n_ok = out.count("  OK ")
+        n_bad = out.count("  FAIL ")
+        print(f"  （pos.js 检查 {n_ok} 条通过 / {n_bad} 条失败）")
+        if r.returncode != 0 or "FAIL" in out:
+            fail = 1
     finally:
         try:
             os.remove(path)
         except OSError:
             pass
+    fail += page_guard()
+    if fail:
+        print("定位内核：有问题（见上）")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

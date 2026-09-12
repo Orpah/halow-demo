@@ -462,6 +462,22 @@ function obsOfStation(s, samples, t) {
   return null;
 }
 
+/* 「这个站位该用哪份样本」—— **单一判据**，实时页与回放页共用（以前两页各写一份三元表达式）。
+   为什么需要它：后端 `router_obs_range()` **会给每台站位一条序列，没数据就是空表**
+   （`{S1:[…], S2:[], S3:[]}`），而老数据源（悬停窗口那套）压根没有 per-station 序列，
+   观测落在**设备上报流**里。于是“空”有两种含义，必须分开：
+     · 有 per-station 序列的数据源 + 该站位空表 → 这台**没测到** → 返回 `[]`（无观测）。
+       若回落到设备流，就等于把“**设备自己**到最近那台路由器的强度”当成**该站位**的测量：
+       几台站位会拿到同一份相关值，定位给出一个看着正常（RMS/GDOP 都好）的**错位置**。
+       —— 2026-09-13 实测复现：`{S1:200 条, S2:[], S3:[]}` → 3 个观测、
+       S2/S3 距离都等于设备流那条（30.2 m）→ 估计 (-1.9, 0.0)。
+     · **整个** per-station 序列都没有（老数据源 / 旧后端）→ 回落到设备流，保留悬停窗口语义。 */
+function samplesFor(routerObs, sid, deviceSamples) {
+  const map = routerObs || {};
+  if (Object.keys(map).length) return map[sid] || [];   // 有 per-station 数据 → 空表就是“没测到”
+  return deviceSamples || [];                           // 老数据源 → 观测在设备流里
+}
+
 /* 时刻 t 的全部观测（含距离换算）
    samples 可以是**一个数组**（所有站位共用，如实时流的旧用法），
    也可以是**函数 sid → 该站位的样本序列**（回放/多路由器：每台一份）。 */
@@ -527,6 +543,8 @@ function kalmanTrack(frames, opts) {
       P = mat4();
       P[0][0] = P[1][1] = KF_SIG0 * KF_SIG0;
       P[2][2] = P[3][3] = KF_VEL0 * KF_VEL0;
+      // 输出的 cov **故意**给测量协方差 R：重置帧的“位置”就是该帧测量本身
+      // （没有滤波历史可言），R 正是它的协方差；后验 P 此时只反映新种子，反而会让人以为“已经融合过了”。
       out.push({ t: f.t, x: f.x, y: f.y, vx: 0, vy: 0, cov: { a: R.a, b: R.b, c: R.c },
                  reset: true });
       continue;
