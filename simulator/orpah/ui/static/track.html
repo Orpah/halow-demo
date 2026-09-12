@@ -700,10 +700,14 @@ function renderStations() {
     const o = bySid[s.sid];
     tr.querySelector(".stno").textContent = i + 1;
     tr.querySelector(".stwin").textContent = winText(s);
+    // 观测来源标签 + 样本数 n：bind 的 n 恒为 1（pos.js obsOfStation）→ 不显示，只给「手动」；
+    // router 给「路由器 n=N」；window 是默认模式（旁边「观测窗口」列已说明），不标名、只给 n=N。
+    // 注：下面第二个分支整体带括号（原写法少一层括号时，`+ " n="` 会优先与三元的结果拼接，
+    // 使 window 输出成 "·  n=42" 双空格）。2026-09-12 审查核实：router 标签并未丢失。
     tr.querySelector(".stobs").textContent = o
       ? o.rssi.toFixed(1) + " dBm · " +
         (o.src === "bind" ? T("tk_st_src_bind")
-         : (o.src === "router" ? T("tk_st_src_router") : "") + " n=" + o.n)
+         : (o.src === "router" ? T("tk_st_src_router") + " " : "") + "n=" + o.n)
       : "—";
     tr.querySelector(".stdist").textContent = o
       ? o.dist.toFixed(1) + " m" + (sigOf(o) ? " ±" + sigOf(o).toFixed(1) : "")
