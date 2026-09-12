@@ -39,7 +39,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
-                         ERR_FORMAT, ERR_LOG, sn_err)
+                         ERR_FORMAT, ERR_LOG, sn_err, effective_ts)
 import orpah_id as oid                     # Orpah ID 验签（§9.3）
 
 LOG = True
@@ -266,6 +266,9 @@ class OrpahServer:
             v = oid.verify_report(report, self.keystore,
                                   used_nonces=self.id_nonces)
         sig = (report or {}).get("sig") or ""
+        # 时钟可信（§5.5）：ts=0/缺失/荒谬 → 验签层已跳过时间窗，这里再把「时间是从设备来的
+        # 还是服务器接收时刻」记下来（审计需要能区分，否则事后无从分辨）。
+        ts_eff, ts_src = effective_ts(payload.get("ts"), None)
         rec = {
             "t": time.strftime("%H:%M:%S"),
             "sn": sn or "-",
@@ -279,6 +282,8 @@ class OrpahServer:
             "gen": v.get("gen"),
             "sig": sig[:36] + ("…" if len(sig) > 36 else ""),
             "nonce": payload.get("nonce", ""),
+            "ts_src": ts_src,          # device / server（留痕用，见 orpah_proto.effective_ts）
+            "ts_eff": ts_eff,          # 实际用于记录的时刻（秒）
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)

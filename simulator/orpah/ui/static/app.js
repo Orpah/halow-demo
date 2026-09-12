@@ -100,6 +100,7 @@ function renderRows(rows) {
       seenRows[seq] = tr;
     }
     tr.querySelector(".tm").textContent = r.tm || "";
+    tr.querySelector(".tm").title = r.ts_src === "server" ? T("reports_ts_server") : "";
     tr.querySelector(".sq").textContent = seq;
     const snCell = tr.querySelector(".sn");
     snCell.textContent = "";
@@ -297,9 +298,11 @@ function renderId(d) {
   const t = $("idTrust");
   const ok = d.accepted;
   const trustTxt = d.trust && d.trust !== "-" ? " · " + T("trust_" + d.trust) : "";
+  // 设备无时钟（ts=0）：标一句，别让人以为设备报了 1970（库里/审计用的是服务器接收时刻）
+  const noClock = d.ts_src === "server" ? " · " + T("id_no_clock") : "";
   t.textContent = ok
-    ? T("id_ok") + trustTxt
-    : T("id_bad") + (d.error ? " · " + d.error : "");
+    ? T("id_ok") + trustTxt + noClock
+    : T("id_bad") + (d.error ? " · " + d.error : "") + noClock;
   t.className = ok ? "ok" : "bad";
   $("idSig").textContent = d.sig || "-";
   $("idNonce").textContent = d.nonce || "-";
@@ -365,8 +368,12 @@ async function refresh() {
     $("chipServer").className = "chip" + (s.server_recv > 0 ? " ok" : "");
     // 报文流表格（全量真相）
     lostSns = new Set(s.lost_sns || []);
+    // 时间列：设备无时钟（ts=0/缺失，见 orpah_proto.effective_ts）→ 显示**服务器接收时刻**并加 *，
+    // 与库里真正用的时间一致（否则界面显示 1970、库里却是现在，对不上）
+    const hhmmss = v => new Date((v || 0) * 1000).toTimeString().slice(0, 8);
     const rows = (s.reports || []).map(x => ({
-      ...x, tm: new Date((x.ts || 0) * 1000).toTimeString().slice(0, 8),
+      ...x,
+      tm: x.ts ? hhmmss(x.ts) : (x.ts_eff ? hhmmss(x.ts_eff) + "*" : "--"),
     }));
     renderRows(rows);
     // L2：消息流面板 + 走失表状态 + 服务器发布记录 + 发现记录

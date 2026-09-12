@@ -191,6 +191,7 @@
       "id_trust": "验签结果",
       "id_sig": "签名 sig",
       "id_nonce": "nonce",
+      "id_no_clock": "设备无时钟（ts=0）",
       "id_ok": "✓ 验签通过",
       "id_bad": "✗ 验签失败",
       "trust_high": "高 · ECDSA",
@@ -248,6 +249,7 @@
       "doc_replay": "回放 — ORPAH-over-HaLow",
       "doc_checksum": "SN 校验码工具 — ORPAH-over-HaLow",
       "doc_damm32": "Damm32 构造 / 验证工具 — ORPAH-over-HaLow",
+      "reports_ts_server": "设备无时钟（ts=0）：该行时间取自服务器接收时刻（库里也按此存），带 * 标记",
       "sn_link_title": "在设备清册中查看该 SN",
 
       /* ---- 设备清册 registry.html ---- */
@@ -1017,6 +1019,7 @@
       "id_trust": "Verify",
       "id_sig": "sig",
       "id_nonce": "nonce",
+      "id_no_clock": "no device clock (ts=0)",
       "id_ok": "\u2713 verified",
       "id_bad": "\u2717 rejected",
       "trust_high": "High \u00b7 ECDSA",
@@ -1074,6 +1077,7 @@
       "doc_replay": "Replay \u2014 ORPAH-over-HaLow",
       "doc_checksum": "SN checksum tool \u2014 ORPAH-over-HaLow",
       "doc_damm32": "Damm32 builder / verifier \u2014 ORPAH-over-HaLow",
+      "reports_ts_server": "Device has no clock (ts=0): this row's time is the server receive time (also what is stored); marked with *",
       "sn_link_title": "View this SN in the device registry",
 
       /* ---- device registry registry.html ---- */

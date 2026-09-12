@@ -47,6 +47,7 @@ from server import OrpahServer            # noqa: E402
 from router import RouterBridge           # noqa: E402
 from client import ClientHost             # noqa: E402
 import orpah_id as oid                    # noqa: E402  Orpah ID 身份/真实性层
+import orpah_proto as P                   # noqa: E402  报文常量/编解码 + 时钟归一化 effective_ts
 import keystore as kst                    # noqa: E402  密钥库持久化（多代/轮换/撤销）
 import registry as reg                    # noqa: E402  设备清册（SN↔走失者）
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
@@ -242,30 +243,39 @@ class OrpahApp:
         """Server 收到 REPORT。"""
         self.server_recv += 1
         self._remember(msg, "server")
+        # 时钟可信（§5.5）：**一次**算出本条上报的有效时刻，然后所有落库/审计/展示都用它 ——
+        # 以前是 write_report / _write_router_obs / registry.touch 各自 time.time() 兑底，
+        # 既会有毫秒级偏差，也会出现「设备流存服务器时间、报文流还显示 0（1970）」的不一致。
+        rx = time.time()
+        ts_s, ts_src = P.effective_ts(msg.get("ts"), rx)
+        msg["ts_src"] = ts_src                 # 只改服务器侧这份副本，供前端标注；报文原文不动
+        if ts_src == P.TS_SRC_SERVER:
+            msg["ts_eff"] = ts_s
         self._push_flow("up", msg, "server")
         self._emit("server", msg)
         # 设备清册：更新最近见时间；IoTDB 写上报点；走失案件：被看到即触发「发现」
         if msg.get("sn"):
             sn = msg["sn"]
-            self.registry.touch(sn)
-            self.tsdb.write_report(sn, ts=msg.get("ts"), rssi=msg.get("rssi"),
+            self.registry.touch(sn, ts=ts_s)
+            self.tsdb.write_report(sn, ts=ts_s, rssi=msg.get("rssi"),
                                    seq=msg.get("seq"))
-            self._write_router_obs(sn, msg)
+            self._write_router_obs(sn, msg, ts_s)
             _, newly = self.cases.on_found(sn, self.registry, detail="report")
             if newly:
                 self.tsdb.write_event("case_found", sn=sn, detail="report")
 
-    def _write_router_obs(self, sn, msg):
+    def _write_router_obs(self, sn, msg, ts_s):
         """演示：把「三台路由器各自测到该设备」的观测写库（多路由器定位的数据源）。
 
         位置由上报时刻决定（`motion.Walk.pos`，确定性）—— 同一份报文无论何时回放，
         得到的位置一致。写进 root.orpah.routers.<sid>.<sn>（每台一条序列，互不覆盖；
         若挤在 root.orpah.devices.<sn> 同一时间戳下会 last-write-wins 互相覆盖）。
+        ts_s 由调用方给出（= `effective_ts` 的结果）：**必须与设备流用同一个时刻**，
+        否则定位/回放按时间对齐时两边对不上。
         """
         if not self.walk:
             return
-        ts = msg.get("ts")
-        t_s = float(ts) if ts else time.time()      # 注意：tsdb 写入接口的 ts 是 epoch **秒**
+        t_s = float(ts_s)                           # 注意：tsdb 写入接口的 ts 是 epoch **秒**
         t_ms = int(t_s * 1000)                     # 位置按毫秒算（motion 用 ms）
         for s in self.stations.list():
             rssi = self.walk.rssi_to(t_ms, s.x, s.y, sid=s.sid)
@@ -504,6 +514,8 @@ class OrpahApp:
             "level": rec["level"], "trust": rec["trust"],
             "accepted": rec["accepted"], "sig": rec.get("sig", ""),
             "nonce": rec.get("nonce", ""), "error": rec.get("error"),
+            # 时钟可信：设备无时钟（ts=0）→ 卡片上标一句，别让人以为设备报了 1970
+            "ts_src": rec.get("ts_src"), "ts_eff": rec.get("ts_eff"),
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)
@@ -520,6 +532,8 @@ class OrpahApp:
                     f"trust={rec.get('trust')} "
                     f"accepted={rec.get('accepted')}" +
                     (f" gen={rec.get('gen')}" if rec.get("gen") is not None else "") +
+                    # 设备无时钟（ts=0）时如实标出：审计要能区分“设备说的时间”与“服务器看到的时间”
+                    (" ts_src=server" if rec.get("ts_src") == P.TS_SRC_SERVER else "") +
                     (f" err={rec.get('error')}" if rec.get("error") else "")))
 
     # ---------------- 密钥库（P1 密钥/证书生命周期） ----------------
@@ -567,6 +581,9 @@ class OrpahApp:
             m = r["msg"]
             rows.append({
                 "seq": seq, "sn": m.get("sn"), "ts": m.get("ts"),
+                # 时钟可信：设备无时钟（ts=0/缺失）时，把「实际用于记录的时刻 + 来源」带给前端
+                # （前端据此把时间列显示成服务器接收时刻并加 *，否则界面显示 1970 而库里是现在）
+                "ts_src": m.get("ts_src"), "ts_eff": m.get("ts_eff"),
                 "rssi": m.get("rssi"), "client": "client" in r["seen"],
                 "router": "router" in r["seen"], "server": "server" in r["seen"],
             })
