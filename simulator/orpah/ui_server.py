@@ -824,6 +824,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/api/replay"):
             self._api_replay()
             return
+        if self.path.startswith("/api/truth"):
+            self._api_truth()
+            return
         if self.path.startswith("/api/checksum"):
             self._api_checksum()
             return
@@ -1319,6 +1322,69 @@ class Handler(http.server.BaseHTTPRequestHandler):
         }
         self._send(200, json.dumps(out).encode())
 
+    def _api_truth(self, body=None):
+        """模拟器**地面真值**轨迹（`motion.Walk` 的行走模型）—— 只用于演示里量“定位误差”。
+
+        GET  /api/truth?from=<epoch ms>&to=<epoch ms>[&step=<ms>] → **等间隔采样**（画真值路线）
+        POST /api/truth   body `{"times": [t1, t2, …]}`           → **指定时刻精确取点**
+
+        两者都在一起返回：`{ok, src:"motion.Walk", step, n, points:[{t,x,y}], speed,
+        loop_sec, total_m}`；`--no-walk`（无行走模型）→ `{ok:false, code:"no_walk"}`。
+
+        **为什么既有网格又有逐时刻**：网格点之间要靠页面线性插值，而插值误差随步长**平方**增长
+        （实测 250ms 步长 → 2.9cm；12h 窗被点数上限逼到 10.8s/点 → 米级）。算误差 CDF 时
+        真值本身不能成为误差源，所以按帧时刻 POST 精确取点；网格那份只用来画路线。
+
+        口径（重要，别在真机上报这个指标）：**地面真值只有演示环境有**（真机部署没有真值）。
+        所以页面必须如实标「仅模拟环境」；真机的定位质量看**不需要真值**的 RMS 残差 /
+        95% 椭圆 / 搜索半径（`pos.js` 里那套）。
+
+        采样/取点都在 `motion.truth_samples()` / `motion.truth_at()`（单一源，
+        `test_motion.py` 锁住“与 walk.pos 逐点一致”）。
+        """
+        if not APP.walk:
+            self._send(200, json.dumps({"ok": False, "code": "no_walk",
+                                        "err": "no_walk"}).encode())
+            return
+        walk = APP.walk
+        meta = {"speed": walk.speed, "loop_sec": round(walk.loop_sec, 3),
+                "total_m": round(walk.total, 3)}
+        if body is not None:
+            times = body.get("times") or []
+            pts = motion.truth_at(APP.walk, times)
+            if not pts:
+                self._send(200, json.dumps({"ok": False, "code": "no_times",
+                                            "err": "no_times"}).encode())
+                return
+            self._send(200, json.dumps({
+                "ok": True, "src": "motion.Walk", "step": None, "n": len(pts),
+                "from": pts[0]["t"], "to": pts[-1]["t"], "points": pts, **meta,
+            }).encode())
+            return
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        now_ms = int(time.time() * 1000)
+        try:
+            to_ms = int((qs.get("to") or [now_ms])[0])
+        except ValueError:
+            self._send(200, json.dumps({"ok": False, "code": "bad_param",
+                                        "err": "bad_param"}).encode())
+            return
+        from_q = (qs.get("from") or [""])[0].strip()
+        from_ms = int(from_q) if from_q.lstrip("-").isdigit() else to_ms - 30 * 60_000
+        span = min(abs(to_ms - from_ms), 720 * 60_000)      # 与回放同一上限（12h）
+        to_ms = max(to_ms, from_ms)
+        from_ms = to_ms - span
+        step_q = (qs.get("step") or [""])[0].strip()
+        pts, step = motion.truth_samples(
+            APP.walk, from_ms, to_ms,
+            step=(int(step_q) if step_q.isdigit() else None))
+        self._send(200, json.dumps({
+            "ok": True, "src": "motion.Walk",
+            "from": from_ms, "to": to_ms, "step": step, "n": len(pts),
+            "points": pts, **meta,
+        }).encode())
+
     def _api_checksum(self):
         """校验码工具：算法单一源（damm32.py / luhn32.py / mod97.py）。
 
@@ -1520,6 +1586,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/sig":
             self._api_sig()
+            return
+        if self.path.startswith("/api/truth"):
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(n) or b"{}")
+            except Exception as e:
+                self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+                return
+            self._api_truth(body=req)
             return
         if self.path != "/api/ctl":
             self._send(404, b"not found", "text/plain")

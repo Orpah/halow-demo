@@ -48,6 +48,7 @@ SUITES = [
     ("降级策略（§8.2 选级 / §8.3 服务端）", "test_levels.py", []),
     ("抓包解析 / 双源对照", "test_capture.py", []),
     ("设备时钟漂移（长基线）", "demo_clock.py", []),
+    ("定位内核（pos.js，node 跑原文）", "test_posjs.py", []),
 ]
 # 端到端 demo：会起模拟器/占端口，默认不跑
 E2E = [

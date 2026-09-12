@@ -34,6 +34,16 @@ RSSI_MIN, RSSI_MAX = -95, -30          # 实测可达范围（钳制）
 # 无噪声时平滑只会引入滞后。用 **(sid, t) 哈希** 生成伪随机，不用随机库 → 仍然可复现。
 NOISE_DB = 2.0
 
+# 真值轨迹采样（`/api/truth` 用）：单次点数上限与步长下限。
+# 网格采样只用于**画真值路线**；算误差 CDF 要用 `truth_at()`（按帧时刻精确取点）——
+# 因为页面在网格点之间做线性插值，而插值误差随步长**平方**增长：
+# 实测步长 250ms（v=1.2m/s、路线含直角拐角）插值误差最大 **2.9cm**；10.8s（12h 窗受上限所迫）
+# 则会涨到**米级** —— 那就把真值本身搞成大误差源了。
+TRUTH_MAX_POINTS = 4000
+TRUTH_MIN_STEP_MS = 250
+TRUTH_MAX_STEP_MS = 60_000
+TRUTH_MAX_TIMES = 5000      # `truth_at` 单次请求的时刻数上限（页面会先抽稀）
+
 # 闭合路线（局部坐标，米）：绕三台路由器走一圈，含几处折返，看起来像人在找路
 WAYPOINTS = [
     (0.0, 0.0), (12.0, 6.0), (24.0, 10.0), (26.0, 20.0), (14.0, 25.0),
@@ -84,6 +94,50 @@ def path_loss(dist_m, A=RSSI_A, n=RSSI_N):
 
 def dist(ax, ay, bx, by):
     return math.hypot(float(ax) - float(bx), float(ay) - float(by))
+
+
+def truth_samples(walk, from_ms, to_ms, step=None, cap=TRUTH_MAX_POINTS):
+    """真值轨迹采样 → `(points, step_ms)`：`walk.pos(t)` 在 `[from, to]` 上等间隔取点。
+
+    `points` = `[{t, x, y}]`（升序，含区间两端附近；坐标取 3 位小数 = 毫米级，只为省载荷）。
+
+    **口径（写给后来的自己）**：地面真值**只有演示环境有** —— `Walk` 是模拟器里的行走模型，
+    真机部署根本没有真值。所以这函数只服务「演示里量定位误差（CDF）」，**不是产品指标**；
+    真机的定位质量只能看**不需要真值**的那套（残差 RMS / GDOP / 95% 椭圆 / 搜索半径）。
+
+    `step` 缺省按窗口自适应（目标 ≤ `cap` 点，不小于 `TRUTH_MIN_STEP_MS`）。
+    容错：`from > to` 自动交换（调用方传反不报错）。
+    """
+    from_ms, to_ms = int(from_ms), int(to_ms)
+    if to_ms < from_ms:
+        from_ms, to_ms = to_ms, from_ms
+    span = to_ms - from_ms
+    if step:
+        st = min(max(int(step), TRUTH_MIN_STEP_MS), TRUTH_MAX_STEP_MS)
+    else:
+        st = min(max(span // max(1, int(cap)), TRUTH_MIN_STEP_MS), TRUTH_MAX_STEP_MS)
+    pts, t = [], from_ms
+    while t <= to_ms and len(pts) <= int(cap):
+        x, y = walk.pos(t)
+        pts.append({"t": t, "x": round(float(x), 3), "y": round(float(y), 3)})
+        t += st
+    return pts, st
+
+
+def truth_at(walk, times, cap=TRUTH_MAX_TIMES):
+    """指定时刻的真值位置 → `[{t, x, y}]`（升序、去重、上限 `cap` 个时刻）。
+
+    为什么要有它（与 `truth_samples` 的分工）：网格采样后页面要**插值**才能拿到任意时刻的真值，
+    而插值误差随步长平方增长（实测 250ms → 2.9cm；12h 窗被点数上限逼到 10.8s/点 → 米级）。
+    算「定位误差 CDF」时真值本身不能成为误差源，所以按**帧时刻**直接精确取点。
+    口径同 `truth_samples`：真值只有演示环境有，不是产品指标。
+    """
+    uniq = sorted({int(t) for t in (times or [])})[:max(1, int(cap))]
+    out = []
+    for t in uniq:
+        x, y = walk.pos(t)
+        out.append({"t": t, "x": round(float(x), 3), "y": round(float(y), 3)})
+    return out
 
 
 def noise_db(sid, t_ms, amp=NOISE_DB):

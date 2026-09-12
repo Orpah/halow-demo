@@ -47,7 +47,7 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
 | 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / **设备时钟**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
 | 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
-| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py` |
+| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py` |
 | 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据；长基线才给漂移，原因可见：基线不足/噪声） | `orpah_proto.effective_ts` / `clock.py`（`ClockTracker`） | `test_clock.py`（64 条）+ `demo_clock.py` + 首页「上报控制」拨偏演示 |
 | 抓包解析 / 双源对照（pcap → ORPAH 报文；与 UDP 侧计数对差） | `capture.py`（解析复用 `orpah_proto` 单一源） | `test_capture.py` |
 | 存储：SQLite（元数据）+ IoTDB（时序/事件） | `registry`/`cases`/`keystore`/`stations` + `tsdb.py` | `test_tsdb_audit.py` |
@@ -236,7 +236,7 @@ python demo_l1.py --n 3        # 进程内建 AP+STA 模拟器 + Server/Router/C
 
 ```bash
 cd simulator/orpah
-python run_checks.py            # 12 个离线套件（各模块自检 + 批量合规 + 抓包解析 + 时钟漂移演示），约 2 秒
+python run_checks.py            # 13 个离线套件（各模块自检 + 批量合规 + 抓包解析 + 时钟漂移 + pos.js 内核），约 2 秒
 python run_checks.py --e2e      # 再加 5 个端到端 demo（L1/L2/L3/L3b/防 spoof），1-3 分钟
 ```
 - 报告写到 `checks_report.md`（含 git HEAD、每套件结果/耗时/关键输出、失败详情）。
@@ -310,9 +310,10 @@ simulator/
     ├── demo_spoof.py     # 【验收】防 spoof 真·端到端（攻击注入空口，Server 侧断言）
     ├── demo_id.py        # 【验收】Orpah ID 22 用例（四级降级签名 + 篡改/重放/超窗/坏 CHECK/撤销）
     ├── demo_hw1.py       # 【验收·未真机验证】阶段二真机自检：代次/族、关联、跨空口 UDP、raw 0x88B5
-    ├── run_checks.py     # 【测试台】12 个离线套件一键跑 + 出报告（--e2e 再加 5 个 demo）
+    ├── run_checks.py     # 【测试台】13 个离线套件一键跑 + 出报告（--e2e 再加 5 个 demo）
     ├── test_*.py         # 【测试台】各模块自检：motion / keys / spoof / alerts / metrics / clock /
-    │                     #   tsdb_audit / server / levels / capture（共 10 个，全部并入 run_checks.py）
+    │                     #   tsdb_audit / server / levels / capture / posjs（pos.js 原文用 node 跑）
+    ├── test_posjs.py     # 【测试台】定位内核 pos.js 的离线自检（node 执行同一份源码，不复制算法）
     ├── capture.py        # 【工具】pcap → ORPAH 报文解析 + 双源对照（真机抓包在网口侧；见文件头）
     ├── checks_batch.py   # 【测试台】表驱动批量用例（黄金样本 / SN 边界 / parse_sn / 报文编解码）
     ├── checks_report.md  # 【测试台】最近一次报告（入库，同 host/test_results.txt 惯例）
@@ -359,7 +360,7 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
 6. 真机（阶段二，**需硬件**）：按 `docs/real-hw-stage2.md` 的五组清单上机；`demo_hw1.py`
    负责能自动判的部分（固件代次/族、关联状态、跨空口 UDP、raw `0x88B5` 透传）。
    **两者均未经真机验证**，烧录/上机由用户执行。
-7. **一键回归**：`python run_checks.py`（12 个离线套件，~2s）→ `checks_report.md`；
+7. **一键回归**：`python run_checks.py`（13 个离线套件，~2s）→ `checks_report.md`；
    加 `--e2e` 跑 5 个端到端 demo（**需先停 orpah-ui**，否则端口串扰；脚本会自己拒绝）。
    ⚠ 报告口径是全量的：离线单跑会把它覆盖成 9/9（e2e 行消失），详见「方式 3」。
 

@@ -159,6 +159,26 @@
   </div>
 </section>
 
+<!-- ============ 1b · 定位误差 CDF（**仅模拟环境**有地面真值） ============ -->
+<section class="card">
+  <h3 data-i18n="rp_cdf_head">定位误差 CDF（对照地面真值）</h3>
+  <p class="hint" data-i18n="rp_cdf_note">**只有本演示环境有地面真值**（`motion.py` 的行走模型，真机部署没有真值）：逐帧比较「估计位置 vs 真值位置」画累积分布。真机的定位质量请看**不需要真值**的那套指标：残差 RMS / GDOP / 95% 椭圆 / 搜索半径。</p>
+  <canvas id="cdfCanvas" width="620" height="240"></canvas>
+  <div class="stat mono">
+    <div class="cell"><span class="k" data-i18n="rp_cdf_n">参与帧数</span><span class="v" id="cdfN">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_p50">原始 P50</span><span class="v" id="cdfP50">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_p90">原始 P90</span><span class="v" id="cdfP90">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_p95">原始 P95</span><span class="v" id="cdfP95">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_max">原始最大</span><span class="v" id="cdfMax">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_sp50">平滑 P50</span><span class="v v-ok" id="cdfSmP50">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_sp90">平滑 P90</span><span class="v v-ok" id="cdfSmP90">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_sp95">平滑 P95</span><span class="v v-ok" id="cdfSmP95">-</span></div>
+    <div class="cell"><span class="k" data-i18n="rp_cdf_smax">平滑最大</span><span class="v" id="cdfSmMax">-</span></div>
+  </div>
+  <p class="hint" id="cdfInfo"></p>
+  <p class="hint" data-i18n="rp_cdf_legend">红=原始逐帧定位误差、绿=卡尔曼平滑后误差；横轴=误差（米，按 P95 截断显示）、纵轴=累积比例。真值点按 `/api/truth` 采样后线性插值（误差 &lt;1cm 量级）。</p>
+</section>
+
 <!-- ============ 2 · 事件时间线 ============ -->
 <section class="card">
   <h3 data-i18n="rp_sec2">2 · 事件时间线</h3>
@@ -222,6 +242,8 @@ const S = {                          // 回放状态
   frames: [], sm: [],                // 原始位置帧（含协方差）与卡尔曼平滑后的帧
   jitRaw: 0, jitSm: 0,               // 轨迹抖动（相邻帧距离均值）：原始 vs 平滑
   trail: [],                         // 已回放出的估计点（画轨迹；null = 缺口断开）
+  truth: [], truthWhy: null,         // 地面真值轨迹（**仅模拟环境**有）+ 拿不到的原因
+  truthIdx: [],                      // 取到真值的帧在 S.frames/S.sm 里的下标（与 truth 同序一一对应）
 };
 
 /* ---- 地图视图（Leaflet）----
@@ -378,6 +400,8 @@ async function loadReplay() {
     S.obs = rep.obs || {};                 // {sid: [{t,rssi,seq}]} 各路由器本窗测量（升序）
     S.events = rep.events || [];
     S.stations = st.stations || [];
+    S.truth = []; S.truthWhy = null;       // 真值在 precomputeFrames() 后按帧时刻取（见 loadTruth）
+    S.truthN = 0;
     S.t = S.from; S.trail = [];
     mapFitDone = false;                   // 新数据 → 下次开地图重新框景
     const nObs = Object.keys(S.obs).reduce((a, k) => a + (S.obs[k] || []).length, 0);
@@ -388,6 +412,8 @@ async function loadReplay() {
     rpInfo("");                     // 先清掉「拉取中…」，再由 analyzeValid 写「光标已落…」
     analyzeValid();
     precomputeFrames();             // 全窗位置帧 + 卡尔曼平滑（一次算完，之后每帧只取 t<=光标）
+    await loadTruth();              // 按**帧时刻**精确取真值（网格插值会随步长平方放大误差）
+    renderCdf();                    // 误差 CDF（仅模拟环境有真值；无真值就如实说“不适用”）
     renderTimeline();
     render();
   } catch (e) {
@@ -594,7 +620,101 @@ function smoothAt(t) {
   return null;
 }
 
-/* ---------------- 轨迹导出（GPX / GeoJSON） ----------------
+/* 取真值：按**帧时刻**逐点精确取（POST /api/truth），不做网格插值。
+   为什么不用网格 GET：网格点之间要插值，而插值误差随步长**平方**增长 —— 步长 250ms 时
+   实测 2.9cm（还行），但 12h 窗口被点数上限逼到 10.8s/点就是**米级**，真值自己会变成误差源。
+   帧数超过服务端上限（`motion.TRUTH_MAX_TIMES`）时**均匀抽稀**并如实报告实际帧数。 */
+async function loadTruth() {
+  const times = S.frames.map(f => f.t);
+  if (!times.length) { S.truth = []; S.truthIdx = []; S.truthWhy = "no_frames"; return; }
+  const step = Math.ceil(times.length / 4000);
+  const idx = times.map((_, i) => i).filter(i => i % step === 0);
+  try {
+    const r = await fetch("/api/truth", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ times: idx.map(i => times[i]) }),
+    }).then(x => x.json());
+    S.truth = (r && r.ok) ? (r.points || []) : [];
+    S.truthIdx = S.truth.length === idx.length ? idx : [];   // 数量对不上就不配对（宁可不用）
+    S.truthWhy = (r && r.ok) ? null : ((r && r.code) || "err");
+  } catch (e) {
+    S.truth = []; S.truthIdx = []; S.truthWhy = "err";
+  }
+}
+
+/* ---------------- 定位误差 CDF（仅模拟环境） --------------
+   口径：地面真值只有演示环境有（`motion.Walk`，走 `/api/truth`）。真机没有真值，
+   所以这里的结果**不能当产品指标**；真机看残差/椭圆/搜索半径。无真值 → 如实说“不适用”，
+   **不拿残差冒充误差**（残差是自洽性，残差小不等于位置对）。 */
+function renderCdf() {
+  const cv = $("cdfCanvas");
+  /* 按**下标配对**算误差（帧 ↔ 同序真值点）：不走插值，真值本身不引入误差。 */
+  const errOf = (arr) => S.truthIdx
+    .map((i, k) => (arr[i] ? Math.hypot(arr[i].x - S.truth[k].x, arr[i].y - S.truth[k].y) : NaN))
+    .filter(Number.isFinite);
+  const raw = cdfOf(S.truthIdx.length ? errOf(S.frames) : []);
+  const sm = cdfOf(S.truthIdx.length ? errOf(S.sm) : []);
+  const fmt = (v) => v === null ? "-" : v.toFixed(1) + " m";
+  $("cdfN").textContent = String(raw.n);
+  $("cdfP50").textContent = fmt(raw.p50);
+  $("cdfP90").textContent = fmt(raw.p90);
+  $("cdfP95").textContent = fmt(raw.p95);
+  $("cdfMax").textContent = fmt(raw.max);
+  $("cdfSmP50").textContent = fmt(sm.p50);
+  $("cdfSmP90").textContent = fmt(sm.p90);
+  $("cdfSmP95").textContent = fmt(sm.p95);
+  $("cdfSmMax").textContent = fmt(sm.max);
+  if (!S.truth.length) {
+    $("cdfInfo").textContent = S.truthWhy === "no_walk" ? T("rp_cdf_no_walk")
+      : (S.truthWhy === "no_frames" ? T("rp_cdf_no_frames") : T("rp_cdf_no_truth"));
+  } else if (!raw.n) {
+    $("cdfInfo").textContent = T("rp_cdf_no_frames");
+  } else {
+    const d = (sm.p50 !== null && raw.p50 !== null) ? (raw.p50 - sm.p50) : null;
+    $("cdfInfo").textContent = T("rp_cdf_sum").replace("{n}", raw.n)
+      .replace("{r}", raw.mean.toFixed(1)).replace("{s}", (sm.mean === null ? "-" : sm.mean.toFixed(1)))
+      .replace("{d}", d === null ? "-" : (d >= 0 ? "-" : "+") + Math.abs(d).toFixed(1));
+  }
+  drawCdf(raw, sm, cv);
+}
+
+/* 画 CDF：横轴按 P95 截断（不拿个别极端帧把曲线压成一竖） ——
+   真被截掉的帧在信息行里用计数说明，画面不隐藏“仍有更差的情况”。 */
+function drawCdf(raw, sm, cv) {
+  const g = cv.getContext("2d");
+  g.clearRect(0, 0, cv.width, cv.height);
+  const PL = 46, PR = 14, PT = 12, PB = 26;
+  const W = cv.width - PL - PR, H = cv.height - PT - PB;
+  const xmax = Math.max(1, (raw.p95 || 1) * 1.15);
+  const X = (v) => PL + Math.min(v, xmax) / xmax * W;
+  const Y = (p) => PT + (1 - p) * H;
+  /* 网格 + 轴（0/50/100% 线 + 5 条纵向参考线） */
+  g.strokeStyle = "#30363d"; g.lineWidth = 1;
+  g.font = "11px monospace"; g.fillStyle = "#8b949e";
+  [0, 0.5, 1].forEach(p => {
+    g.beginPath(); g.moveTo(PL, Y(p)); g.lineTo(PL + W, Y(p)); g.stroke();
+    g.fillText((p * 100).toFixed(0) + "%", 6, Y(p) + 4);
+  });
+  for (let i = 0; i <= 5; i++) {
+    const v = xmax * i / 5;
+    g.beginPath(); g.moveTo(PL + W * i / 5, PT); g.lineTo(PL + W * i / 5, PT + H); g.stroke();
+    g.fillText(v.toFixed(v < 10 ? 1 : 0), PL + W * i / 5 - 8, PT + H + 16);
+  }
+  g.fillText(T("rp_cdf_unit"), PL + W / 2 - 18, PT + H + 16);
+  /* 曲线：起点补 (0,0)、末点补 (xmax, 1) —— CDF 本来就从 0 升到 1 */
+  const line = (pts, color) => {
+    if (!pts.length) return;
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    g.moveTo(X(0), Y(0));
+    for (const [e, p] of pts) g.lineTo(X(e), Y(p));
+    g.lineTo(PL + W, Y(1));
+    g.stroke();
+  };
+  line(raw.pts, "#f85149");      // 原始（与画布上“红线=估计轨迹”同色系）
+  line(sm.pts, "#3fb950");       // 平滑（与“绿线=平滑轨迹”同色）
+}
+
+/* 轨迹导出（GPX / GeoJSON） ----------------
    导出**整窗**轨迹（不是只导已回放的部分）—— 导出是给野外/GIS 用的成果，缺时间段被截掉。
    分段规则与画布/地图上的轨迹一致：相邻帧间隔 > ROUTER_MAX_AGE_MS（观测时效）算缺口，
    **断开成多段**；跨缺口的直线不是真走出来的路，绝不能连起来。
@@ -724,6 +844,20 @@ function draw(obs, est, ell) {
       if (started) ctx.lineTo(X, Y); else { ctx.moveTo(X, Y); started = true; }
     }
     ctx.stroke();
+  }
+  /* 地面真值路线（灰白细线，**仅模拟环境**有）：让 CDF 那张图有个视觉对照 ——
+   “红线离真值路线多远”就是误差本身。真机没有真值 → 这段不画。
+   点取自 S.truth（按帧时刻精确取样，与误差计算同一份数据）。 */
+  if (S.truth.length > 1) {
+    ctx.strokeStyle = "rgba(201,209,217,.45)"; ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    S.truth.forEach((p, i) => {
+      const X = cx + p.x * SCALE, Y = cy - p.y * SCALE;
+      if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
   /* 平滑轨迹（恒速卡尔曼，绿）：与原始（红）并列画，不改原始结果 */
   if (smoothOn() && S.sm.length > 1) {

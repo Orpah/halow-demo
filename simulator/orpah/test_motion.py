@@ -216,6 +216,61 @@ for _page, (_ida, _idn) in PAGES.items():
        _va == motion.RSSI_A and _vn == motion.RSSI_N, f"A={_va} n={_vn}")
     ck(f"{_page} 开页取 /api/config（HTML 里的只是兜底）", '"/api/config"' in _txt)
 
+# ---- 真值轨迹采样（`/api/truth` 的逻辑，单一源在 motion.truth_samples）----------
+# 口径：地面真值**只有演示环境有**（真机没有）→ 这组只服务“演示里量定位误差”。
+_w = motion.Walk()
+_t0 = motion.WALK_EPOCH_MS + 7_000
+_pts, _st = motion.truth_samples(_w, _t0, _t0 + 60_000)
+ck("真值采样：点数/步长默认自适应（60s 窗 → 250ms 步长，≤ 上限）",
+   _st == motion.TRUTH_MIN_STEP_MS and len(_pts) <= motion.TRUTH_MAX_POINTS + 1,
+   f"step={_st} n={len(_pts)}")
+ck("真值采样：时间升序、等步长、含区间两端",
+   all(_pts[i]["t"] < _pts[i + 1]["t"] for i in range(len(_pts) - 1))
+   and _pts[0]["t"] == _t0 and _pts[1]["t"] - _pts[0]["t"] == _st
+   and _pts[-1]["t"] <= _t0 + 60_000)
+ck("真值采样：**与 walk.pos 逐点一致**（不是另写一套行走模型）",
+   all(abs(p["x"] - round(_w.pos(p["t"])[0], 3)) < 1e-9
+       and abs(p["y"] - round(_w.pos(p["t"])[1], 3)) < 1e-9 for p in _pts))
+_big, _stb = motion.truth_samples(_w, _t0, _t0 + 720 * 60_000)      # 12h 窗口
+ck("真值采样：12h 窗口仍受点数上限约束（步长自适应放大）",
+   len(_big) <= motion.TRUTH_MAX_POINTS + 1 and _stb > motion.TRUTH_MIN_STEP_MS,
+   f"step={_stb} n={len(_big)}")
+_ex, _ste = motion.truth_samples(_w, _t0, _t0 + 60_000, step=100)   # 强行要更密
+ck("真值采样：显式 step 也夹到下限（不让载荷失控）", _ste == motion.TRUTH_MIN_STEP_MS)
+_rev, _ = motion.truth_samples(_w, _t0 + 60_000, _t0)              # 传反
+ck("真值采样：from/to 传反自动交换（不抛异常、时间仍升序）",
+   _rev[0]["t"] == _t0 and _rev[-1]["t"] <= _t0 + 60_000)
+# 页面在真值点之间做**线性插值**才能拿到任意时刻的真值；但插值误差随步长**平方**增长，
+# 所以算误差 CDF 改用 `truth_at()` 逐帧精确取点。这里两条都实测：
+# 网格插值：250ms 步长下 ≤3cm（远小于米级定位误差）—— 但长窗口步长被点数上限逼大就会涨到米级。
+import math as _math                                                # noqa: E402
+_mid_err = 0.0
+for i in range(len(_pts) - 1):
+    a, b = _pts[i], _pts[i + 1]
+    tm = (a["t"] + b["t"]) / 2
+    gx, gy = _w.pos(tm)
+    ix, iy = (a["x"] + b["x"]) / 2, (a["y"] + b["y"]) / 2
+    _mid_err = max(_mid_err, _math.hypot(gx - ix, gy - iy))
+ck("网格采样：250ms 步长下点间线性插值误差实测 ≤4cm（可作为路线对照；不适合当误差基准）",
+   _mid_err < 0.04, f"max={_mid_err:.4f}m")
+_big_step = _stb / 1000.0
+ck("网格采样：步长 10× 时插值误差涨到 10× 以上（平方增长 —— 这就是要逐帧精确取点的理由）",
+   _big_step > 1.0, f"长窗步长={_big_step:.2f}s")
+
+# 逐帧精确取点（误差 CDF 用的就是它）：与 walk.pos 逐点一致、升序去重、上限生效。
+_fr, _ = motion.truth_samples(_w, _t0, _t0 + 20_000, step=1000)
+_ta = motion.truth_at(_w, [p["t"] for p in _fr])
+ck("truth_at：与网格采样同刻取点 → 坐标逐位一致（同一真值源）",
+   len(_ta) == len(_fr) and all(abs(a["x"] - b["x"]) < 1e-9 and abs(a["y"] - b["y"]) < 1e-9
+                                for a, b in zip(_ta, _fr)))
+_td = motion.truth_at(_w, [5, 3, 3, 1, 9000, -7])
+ck("truth_at：升序去重（乱序/重复输入不报错、不产生重复点）",
+   [p["t"] for p in _td] == [-7, 1, 3, 5, 9000])
+ck("truth_at：上限生效（给 10 倍时刻只取前 cap 个，时间仍升序）",
+   len(motion.truth_at(_w, list(range(0, motion.TRUTH_MAX_TIMES * 10, 7)))) <= motion.TRUTH_MAX_TIMES)
+ck("truth_at：空输入 → 空表（页面显示“不适用”，不编 0）",
+   motion.truth_at(_w, []) == [] and motion.truth_at(_w, None) == [])
+
 print()
 if FAIL:
     print(f"失败 {len(FAIL)} 项：" + "；".join(FAIL))

@@ -204,6 +204,64 @@ function median(vals) {
   return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 }
 
+/* ---------------- 真值对照：逐帧误差 + CDF（回放页「定位误差 CDF」用） ----------------
+   **口径（重要）**：地面真值**只有演示环境有**（`motion.Walk` 的行走模型，经 `/api/truth` 给出）。
+   真机部署没有真值 → 真机的定位质量只能看**不需要真值**的那套：RMS 残差 / 95% 椭圆 / 搜索半径
+   （`qualityOf` / `ellipseOf`）。所以这组函数只在有 truth 数据时才有意义，页面必须如实标注。
+   误差 = 估计点与真值点的欧氏距离（米）；**没有真值就跳过，不编 0**。 */
+
+/* 真值轨迹（[{t,x,y}] 升序）→ t 时刻真值位置（两点间按时间线性插值）。
+   真值是**匀速折线**、采样点本身落在折线上（`/api/truth` 自适应步长 ≤0.45s），
+   插值误差 ≲ (v·step)²/(8R) < 1cm 量级 —— 与定位误差（米级）不在一个量级。 */
+function truthAt(points, t) {
+  if (!points || !points.length) return null;
+  if (t <= points[0].t) return { x: points[0].x, y: points[0].y };
+  const last = points[points.length - 1];
+  if (t >= last.t) return { x: last.x, y: last.y };
+  let lo = 0, hi = points.length - 1;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (points[m].t <= t) lo = m; else hi = m;
+  }
+  const a = points[lo], b = points[hi], k = (t - a.t) / ((b.t - a.t) || 1);
+  return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+}
+
+/* 逐帧误差（米）：frames 与真值都有才计一条。 */
+function errorsOf(frames, truth) {
+  const out = [];
+  for (const f of (frames || [])) {
+    if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
+    const g = truthAt(truth, f.t);
+    if (!g) continue;
+    out.push(Math.hypot(f.x - g.x, f.y - g.y));
+  }
+  return out;
+}
+
+/* 分位数（升序数组；p∈[0,1]，线性插值）。空 → null（不给 0 假装量过）。 */
+function quantileOf(sorted, p) {
+  const v = sorted || [];
+  if (!v.length) return null;
+  const idx = (v.length - 1) * Math.min(Math.max(p, 0), 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return v[lo] + (v[hi] - v[lo]) * (idx - lo);
+}
+
+/* 误差数组 → {n, pts:[[err,p],…], p50,p90,p95,max,mean}（pts 直接喂 CDF 曲线）。 */
+function cdfOf(errs) {
+  const v = (errs || []).filter(x => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) {
+    return { n: 0, pts: [], p50: null, p90: null, p95: null, max: null, mean: null };
+  }
+  return {
+    n: v.length,
+    pts: v.map((x, i) => [x, (i + 1) / v.length]),
+    p50: quantileOf(v, 0.5), p90: quantileOf(v, 0.9), p95: quantileOf(v, 0.95),
+    max: v[v.length - 1], mean: v.reduce((s, x) => s + x, 0) / v.length,
+  };
+}
+
 /* 残差 + 几何强度
    残差 = 测量距离 − 估计点到该站位的距离；RMS 越小越可信。
    GDOP = sqrt(trace((HᵀH)^-1))，H 为估计点到各站位的单位向量：
