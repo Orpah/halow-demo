@@ -53,7 +53,8 @@
   }
   /* 搜索框宽度只管文本输入 —— 勾选框别跟着变 210px（否则勾选框与文字之间一大片空白） */
   .toolbar input:not([type="checkbox"]) { width: 210px; }
-  .toolbar label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+                   margin-left: 20px; }   /* 与左侧状态下拉拉开一点（贴太近会看成同一组） */
   .toolbar input[type="checkbox"] { width: auto; margin: 0; }
   .ev-toggle { color: var(--acc); border-color: var(--bd); }
   .row input {
