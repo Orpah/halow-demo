@@ -94,6 +94,25 @@ def parse_mac(s):
     return bytes(out)
 
 
+def tcp_port_in_use(port):
+    """该 TCP 端口是否已被（别的进程的）监听方占着。
+
+    为什么需要这个：**Windows 的 SO_REUSEADDR 允许两个进程同时绑定同一端口**
+    （Linux 不允许），于是「自己的模拟器」与「别人正在跑的 demo」会**静默共处**：
+    客户端连上去可能落到另一个进程，表现为莫名其妙的假数据/假失败（本仓真踩过：
+    test_sim.py 的 9401/9402 与 orpah-over-halow 的 ui_server 撞了，串口空口那条
+    数据用例恒红，而“已连接”却是真的——只不过连的是别人的模拟器）。
+    启动时探一下、占用了就喊一声，比事后排靠谱得多。
+    """
+    if not port:
+        return False
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
 def mac_str(b):
     return ":".join("%02x" % x for x in b)
 
@@ -158,6 +177,7 @@ class Console:
         self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.srv.bind(("127.0.0.1", self.port))
         self.srv.listen(4)
+        self.port = self.srv.getsockname()[1]   # 传 0 时由内核分配：回填实际端口
         threading.Thread(target=self._accept, daemon=True).start()
 
     def _accept(self):
@@ -271,12 +291,14 @@ class Link:
         self.pending = []
         self.tx_pkts = 0
         self.rx_pkts = 0
+        self.link_port = None        # 实际监听的 TCP 端口（传 0 时由内核分配）
 
     def listen(self, port):
         self.srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.srv.bind(("127.0.0.1", port))
         self.srv.listen(1)
+        self.link_port = self.srv.getsockname()[1]
         threading.Thread(target=self._accept, daemon=True).start()
 
     def _accept(self):
@@ -404,6 +426,7 @@ class HostPort:
         self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.srv.bind(("127.0.0.1", self.port))
         self.srv.listen(1)
+        self.port = self.srv.getsockname()[1]   # 传 0 时由内核分配：回填实际端口
         threading.Thread(target=self._accept, daemon=True).start()
 
     def _accept(self):
@@ -1106,23 +1129,34 @@ class Core:
         self._t0 = time.monotonic()
         self._last5 = 0.0
         self._last_stats = 0.0
+        # 端口占用要**喊出来**：Windows 的 SO_REUSEADDR 允许两进程绑同一端口，
+        # 会静默串扰（客户端可能连到别人的模拟器/demo）——详见 tcp_port_in_use 注释
+        for what, p in (("AT 控制台", console_port),
+                        ("空口", None if link_serial else link_port),
+                        ("host 数据口", host_port)):
+            if tcp_port_in_use(p):
+                msg = (f"[{name}] 警告：{what}端口 {p} 已被占用（另一个实例/别仓 demo 在跑？）"
+                       f" —— Windows 下两个进程会同时绑成功，可能静默串扰")
+                print(msg, flush=True)
+                self.out("log", msg)
         if link_serial:
             # 串口空口：直接连真实 CH32V203 板的 UART2（自动重连），不走 TCP
             self.link.open_serial(link_serial, link_baud)
             self.link_port_desc = f"serial:{link_serial}"
         else:
             self.link.listen(link_port)
-            self.link_port_desc = f"tcp:{link_port}"
+            self.link_port_desc = f"tcp:{self.link.link_port}"
             if peer_link:
                 threading.Thread(target=self.link.connect, args=(peer_link,),
                                  daemon=True).start()
         self.console.start()
-        if host_port:
+        if host_port is not None:            # 0 = 开了但让内核分配端口；None = 不开
             self.hostport = HostPort(self, host_port)
             self.hostport.start()
         self.out("log", f"[{self.name}] " + L(
-            "sim_start_host" if host_port else "sim_start",
-            console=console_port, link=self.link_port_desc, host=host_port or ""))
+            "sim_start_host" if self.hostport else "sim_start",
+            console=self.console.port, link=self.link_port_desc,
+            host=self.hostport.port if self.hostport else ""))
         if autoconf:
             self._autoconf()
 
@@ -1168,8 +1202,10 @@ def main():
     ap = argparse.ArgumentParser(description="TXW8301 模拟器 PC 版（无硬件）")
     ap.add_argument("--name", default="A")
     ap.add_argument("--role", default="STA", choices=["AP", "STA", "APSTA", "GROUP"])
-    ap.add_argument("--console", type=int, default=9001, help="AT 控制台 TCP 端口")
-    ap.add_argument("--link", type=int, default=9011, help="虚拟空口 TCP 端口")
+    ap.add_argument("--console", type=int, default=9001,
+                    help="AT 控制台 TCP 端口（0 = 内核自动分配，启动行里会打印实际端口）")
+    ap.add_argument("--link", type=int, default=9011,
+                    help="虚拟空口 TCP 端口（0 = 自动分配）")
     ap.add_argument("--peer", default=None, help="对端空口 host:port（连接方）")
     ap.add_argument("--ssid", default="halowlink")
     ap.add_argument("--tj45", action="store_true",
@@ -1184,7 +1220,7 @@ def main():
                          "设置后不再使用 TCP 空口")
     ap.add_argument("--link-baud", type=int, default=115200)
     ap.add_argument("--host", type=int, default=None,
-                    help="host 数据口 TCP 端口（可选）：host 经此注入/读取数据帧，"
+                    help="host 数据口 TCP 端口（可选；0 = 自动分配）：host 经此注入/读取数据帧，"
                          "语义对齐 SPI MACBUS 的 DATA_TX/DATA_RX")
     args = ap.parse_args()
 
@@ -1198,7 +1234,10 @@ def main():
                 family=family, link_serial=args.link_serial,
                 link_baud=args.link_baud, host_port=args.host)
     core.cfg.ssid = args.ssid
-    print(f"[{args.name}] 就绪 (family={family}): AT 控制台 127.0.0.1:{args.console}  空口 :{args.link}")
+    # 启实际端口（端口传 0 时由内核分配，这里才看得到）
+    print(f"[{args.name}] 就绪 (family={family}): AT 控制台 127.0.0.1:{core.console.port}"
+          f"  空口 {core.link_port_desc}"
+          + (f"  host 数据口 :{core.hostport.port}" if core.hostport else ""))
     core.loop()
 
 

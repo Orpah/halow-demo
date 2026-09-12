@@ -12,6 +12,8 @@
 2. **无线状态机**：AP / STA / APSTA / GROUP 工作模式、扫描/关联/连接、配对、漫游开关。
 3. **链路指标**：可配置/可注入的 RSSI、连接状态、STA 数。
 4. **数据通路**：host 经 SPI 下发/上收的以太网帧，通过"虚拟空口"转发到对端模拟器。
+5. **host 数据口**（仅 PC 模拟器）：把上面的数据通路开放给上层程序（TCP，语义对齐 SPI
+   MACBUS 的 DATA_TX/DATA_RX）—— 见 [host_port.md](host_port.md)。
 
 **不模拟**：802.11ah PHY/MAC 空中帧、真正的射频调制解调、加密算法（WPA-PSK 仅做参数
 校验与"是否加密"标记，不做真实加解密，便于调试）。
@@ -86,6 +88,19 @@ Host A --SPI DATA_TX(以太网帧)--> 模拟器A[SPI从机]
 - **单播**：按目的 MAC（`AT+MAC_ADDR` / 学习表）定向到某台对端。
 - **广播/组播**：`ff:ff:ff:ff:ff:ff` 或组播地址（`AT+JOINGROUP`）广播到链路上所有在线对端。
 - 帧携带 14 字节以太网头 + 载荷，与 `AT+TXDATA` 描述一致（长度含以太网头）。
+
+### 4.1 PC 模拟器的 host 数据口
+
+固件侧的 host 是 SPI 主设备；PC 模拟器没有 SPI，于是另外开一个 **TCP 数据口**给
+上层程序（`host/sim.py --host <port>`，或 `Core(..., host_port=...)`）：
+
+```
+上层程序 --TCP(AA 55 TYPE LEN CRC + 以太网帧)--> 模拟器 host 口 --> Wifi.send_data --> 空口
+上层程序 <--TCP(同格式)--------------------- 模拟器 host 口 <-- Wifi.handle_frame(命中本机/广播) <-- 空口
+```
+
+帧格式与空口帧**同构**，方向语义与 SPI 的 DATA_TX/DATA_RX 对齐 —— 将来换真实 SPI，
+上层程序只需换底层收发。细节（含「哪些帧会被丢弃」）见 [host_port.md](host_port.md)。
 
 ## 5. 事件上报（异步）
 

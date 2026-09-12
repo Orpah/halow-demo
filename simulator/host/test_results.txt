@@ -28,8 +28,12 @@
   [PASS] 串口空口 A(AP) CONNECTED
   [PASS] 串口空口 B 收到数据帧  (len=20)
   [PASS] 串口空口 A 输出 FRAME:TX
-== 7. 收尾 ==
+== 7. host 数据口（--host）：DATA_TX / DATA_RX ==
+  [PASS] A host 注入 -> 空口 -> B host 收到  (len=27)
+  [PASS] B host 注入 -> 空口 -> A host 收到  (len=27)
+  [PASS] 短帧/坏 CRC/非 DATA 帧被丢弃，好帧仍按序到达  (len=23)
+== 8. 收尾 ==
 
-结果: 24/24 通过
+结果: 27/27 通过
 
 --- stderr ---

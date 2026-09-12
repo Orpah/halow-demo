@@ -51,6 +51,16 @@
 			"group": "build"
 		},
 		{
+			"label": "sim-run-checks",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe",
+			"args": [
+				"f:\\git\\halow-demo\\simulator\\run_checks.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
 			"label": "list-ports",
 			"type": "shell",
 			"command": "C:\\Python313\\python.exe",
@@ -95,76 +105,6 @@
 				"--target",
 				"hc01"
 			],
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "orpah-ui",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe",
-			"args": [
-				"f:\\git\\halow-demo\\simulator\\orpah\\ui_server.py",
-				"--every",
-				"1.5"
-			],
-			"isBackground": true,
-			"options": {
-				"env": { "PYTHONIOENCODING": "utf-8" }
-			},
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "orpah-demo-cli",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe",
-			"args": [
-				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l1.py",
-				"--n",
-				"2"
-			],
-			"options": {
-				"env": { "PYTHONIOENCODING": "utf-8" }
-			},
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "orpah-demo-l2",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe",
-			"args": [
-				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l2.py"
-			],
-			"options": {
-				"env": { "PYTHONIOENCODING": "utf-8" }
-			},
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "orpah-demo-l3",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe",
-			"args": [
-				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l3.py"
-			],
-			"options": {
-				"env": { "PYTHONIOENCODING": "utf-8" }
-			},
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "orpah-demo-l4",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe",
-			"args": [
-				"f:\\git\\halow-demo\\simulator\\orpah\\demo_l4.py"
-			],
-			"options": {
-				"env": { "PYTHONIOENCODING": "utf-8" }
-			},
 			"problemMatcher": [],
 			"group": "build"
 		}

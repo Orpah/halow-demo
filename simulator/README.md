@@ -29,6 +29,7 @@ simulator/
 │   ├── architecture.md        # 总体架构、数据通路、模块划分
 │   ├── AT_commands.md         # 模拟器 AT 命令参考（对齐 T-Halow-RJ45 文档）
 │   ├── spi_protocol.md        # SPI 宿主接口帧协议（模拟 TXW8301 MACBUS_SPI）
+│   ├── host_port.md           # PC 模拟器的 host 数据口（上层程序的数据面，跨仓契约）
 │   ├── hardware.md            # 硬件设计（引脚分配 / 原理框图 / 接线）
 │   ├── Fritzing_Build_Guide.md# Fritzing 搭建指南（元件导入 + netlist）
 │   ├── toolchain.md           # 项目工具链（blender2step 工作流）
@@ -44,8 +45,8 @@ simulator/
 │   ├── Periph/                # GPIO / UART / SPI 从机 驱动
 │   └── Simulator/             # TXW8301 模拟核心（AT / 状态机 / 链路）
 ├── host/
-│   ├── sim.py                 # PC 版模拟器（纯软件，无硬件，TCP 控制台+虚拟空口）
-│   ├── test_sim.py / run_tests.py  # 回归测试（AT/连接/转发/配对，14 项）
+│   ├── sim.py                 # PC 版模拟器（纯软件，无硬件，TCP 控制台+虚拟空口+host 数据口）
+│   ├── test_sim.py / run_tests.py  # 回归测试（AT/连接/转发/配对/串口空口/host 数据口，27 项）
 └── tools/
     ├── sim_config.py          # 上位机工具（UART/SPI 访问模拟器，类 thalow_config.py）
     ├── ui/                    # Web 仪表盘（server.py + 前端，双机视图/控制台/帧监视/配置）
@@ -109,7 +110,11 @@ python server.py --host-sim        # 进程内启动 AP+STA 两台 PC 模拟器�
   也用于交叉验证固件逻辑（曾发现 3 处固件 bug：beacon 长度、查询解析、配对格式）。
 - 帧监视：点"帧监视: 开"后，在设备 A 控制台发 `AT+TXDATA=20` + 20 字节原始数据，
   即可在帧监视器看到 A `TX` / B `RX` 两条记录（无硬件演示数据通路）。
-- 回归测试：`python host/run_tests.py`（24/24 通过）。
+- 回归测试：`python host/run_tests.py`（**27/27 通过**；结果同时写进 `host/test_results.txt`）。
+- 一键自检：`python run_checks.py`（套件 = 模拟器回归 + 界面文案字典 + 静态检查 py/js/json/tasks，
+  报告写 `simulator/checks_report.md`）。
+- **给上层程序用的数据面**（不是 AT 敲帧）：`--host <port>` 开一个 host 数据口，
+  语义对齐 SPI MACBUS 的 DATA_TX/DATA_RX —— 见 [docs/host_port.md](docs/host_port.md)。
 - 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）、`docs/ui_hostsim_demo.png`、
   `docs/ui_hostsim_tj45_demo.png`。
 

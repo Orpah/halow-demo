@@ -3,6 +3,10 @@
 模拟器通过 **SPI1 从机**向 host 提供与 TXW8301 `MACBUS_SPI` 语义对齐的总线接口。
 本文定义电气连接、帧格式、命令字与应答、事件通知机制。
 
+> **PC 模拟器另有「host 数据口」（TCP）**：没有 SPI 硬件时给上层程序用的数据面，
+> 帧格式与本文的 DATA 帧同构（`AA 55 TYPE LEN CRC + 以太网帧`），语义对齐
+> DATA_TX / DATA_RX。见 [host_port.md](host_port.md)。
+
 > 设计目标：**host 侧驱动在真实 TXW8301 与模拟器之间可移植**。真实芯片的
 > MACBUS 帧细节属于厂商私有协议，此处按 `mac_bus` 的 write/recv 语义
 > （`mac_bus_write` / `mac_bus_recv` / `DATA_AREA_SIZE=1700`）设计了

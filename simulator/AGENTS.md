@@ -108,6 +108,27 @@ ORPAH-over-HaLow 的业务全链路（Router 桥 / 走失表 / 报文集 / ID �
 - 数据模式期间暂停该设备轮询（`poll_paused_until`，`AT+TXDATA=` 后 30s），
   防轮询字节污染/提前结束数据帧。
 
+## 5b. 自检入口、端口与 tasks.json（2026-09-13 补）
+
+- **一键自检 = `python simulator/run_checks.py`**（套件：模拟器回归 `host/run_tests.py`、
+  界面文案 `tools/ui/chk_i18n.py`、静态检查 py/js/json/tasks）。**改完任何东西先跑它**。
+  判定 = 退出码 0 **且** 输出无 `FAIL` / `Traceback`；报告写 `simulator/checks_report.md`（入库，
+  便于"上次是不是全绿"）。真机相关 demo 不在套件里（要硬件）。
+- **host 数据口是跨仓契约**（`orpah-over-halow` 靠它跑数据面）：帧格式、方向语义、
+  「哪些帧会被丢弃」的唯一说明在 `docs/host_port.md`。改 `HostPort` / `send_data` /
+  帧格式 → 必须同步该文档与 `docs/spi_protocol.md`（否则上层静默对不上）。
+- **端口：测试与多实例一律用 0（内核自动分配）**，用 `core.console.port` /
+  `core.link.link_port` / `core.hostport.port` 回读实际端口。固定端口在 Windows 上会
+  **静默串扰**：`SO_REUSEADDR` 允许两个进程同时绑定同一端口（Linux 不允许），本仓真踩过 ——
+  `test_sim.py` 旧版硬编码 9401/9402，与 `orpah-over-halow` 正在跑的 `ui_server`（占 9401 那套）
+  撞车，于是**测试的客户端连到了别人的模拟器**：串口空口那条数据用例恒红，而"已连接"却是真的
+  （连的是别人的模拟器）。现在启动时会 `sim.tcp_port_in_use()` 探一下并**打印告警**；
+  `SO_REUSEADDR` 不要移除（还要靠它快速重启）。
+- **`.vscode/tasks.json` 是 tracked 文件，但会被工具追加**：`create_and_run_task` 每跑一条命令
+  就往里加一个一次性任务（本仓曾积累到 **239 个**，其中 231 个指向已迁出的 `simulator/orpah`）。
+  **提交前清理**，只留人类写的 `sim-*` 几条；跑一次性命令优先用**不落盘**的终端方式。
+  `run_checks.py` 的静态检查会守住「label 唯一 + 本仓引用的路径都存在」，但不会替你删死任务。
+
 ## 6. 踩坑记录（2026-09 补，务必记住）
 
 - **顶部 TX/RX 计数曾始终 0**：后端只初始化 `state["tx"]/["rx"]=0` 从不递增，

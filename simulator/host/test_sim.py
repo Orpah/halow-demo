@@ -14,6 +14,14 @@ import sys
 import threading
 import time
 
+# 中文输出统一 UTF-8（Windows 控制台默认 GBK：直接 print 中文会在管道里乱码，
+# run_tests.py / run_checks.py 按 UTF-8 解读时也对不上）
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sim
 
@@ -23,6 +31,58 @@ PASS = []
 def check(name, cond, detail=""):
     PASS.append(cond)
     print(f"  [{'PASS' if cond else 'FAIL'}] {name}" + (f"  ({detail})" if detail else ""))
+
+
+class HostClient:
+    """host 数据口客户端（对应真实 SPI MACBUS 的 DATA_TX / DATA_RX）。
+
+    帧格式与空口 Link 完全一致：AA 55 TYPE LEN_H LEN_L CRC-8/ATM payload。
+    这个类**故意在本文件里重写一份**（不 import 上层驱动）：它要独立验证模拟器
+    侧的实现，若复用同一份编解码代码，两边一起错也测不出来。
+    """
+
+    def __init__(self, port):
+        self.s = socket.create_connection(("127.0.0.1", port))
+        self.s.settimeout(0.05)
+        self.buf = b""
+
+    def send_frame(self, eth, crc_ok=True):
+        p = bytes(eth)
+        hdr = bytes([0xAA, 0x55, sim.LINK_TYPE_DATA, len(p) >> 8, len(p) & 0xFF])
+        crc = sim.crc8(hdr[2:] + p)
+        self.s.sendall(hdr + bytes([crc if crc_ok else (crc ^ 0xFF)]) + p)
+
+    def recv_frame(self, secs=1.0):
+        """取一帧（DATA 类型）的载荷；超时返回 None。"""
+        end = time.time() + secs
+        while time.time() < end:
+            if len(self.buf) >= 6:
+                if self.buf[0] != 0xAA or self.buf[1] != 0x55:
+                    self.buf = self.buf[1:]
+                    continue
+                ln = (self.buf[3] << 8) | self.buf[4]
+                if len(self.buf) >= 6 + ln:
+                    body = self.buf[2:5] + self.buf[6:6 + ln]
+                    if self.buf[2] == sim.LINK_TYPE_DATA and self.buf[5] == sim.crc8(body):
+                        p = self.buf[6:6 + ln]
+                        self.buf = self.buf[6 + ln:]
+                        return p
+                    self.buf = self.buf[1:]
+                    continue
+            try:
+                d = self.s.recv(4096)
+                if not d:
+                    break
+                self.buf += d
+            except socket.timeout:
+                continue
+        return None
+
+    def close(self):
+        try:
+            self.s.close()
+        except OSError:
+            pass
 
 
 class Client:
@@ -57,8 +117,14 @@ class Client:
 
 
 def main():
-    coreA = sim.Core("A", "AP", 9201, 9211, None)
-    coreB = sim.Core("B", "STA", 9202, 9212, ("127.0.0.1", 9211))
+    # 端口一律传 0（内核自动分配，再用 core.console.port / core.link.link_port 回读）：
+    # 固定端口会与「另一个模拟器 / 兄弟仓正在跑的 demo」撞上，而 **Windows 的
+    # SO_REUSEADDR 允许两进程同时绑定同一端口** → 静默串扰（本仓真踩过：本文件旧版
+    # 用 9401/9402，与 orpah-over-halow 的 ui_server 撞车，串口空口那条数据用例恒红，
+    # 而“已连接”却是真的——连的是别人的模拟器）。
+    # A/B 顺带开 host 数据口：第 7 节用它验证「上层程序走数据面」的通路
+    coreA = sim.Core("A", "AP", 0, 0, None, host_port=0)
+    coreB = sim.Core("B", "STA", 0, 0, ("127.0.0.1", coreA.link.link_port), host_port=0)
 
     stop = threading.Event()
 
@@ -74,7 +140,7 @@ def main():
     time.sleep(0.5)
 
     print("== 1. AT 基础 ==")
-    a = Client(9201)
+    a = Client(coreA.console.port)
     a.send("AT")
     check("A 返回 OK", a.contains("OK", 0.6))
     a.send("AT+VERSION?")
@@ -85,7 +151,7 @@ def main():
     check("A SSID", a.contains("SSID:halowlink", 0.6))
 
     print("== 2. 自动连接（AP+STA 同 SSID） ==")
-    b = Client(9202)
+    b = Client(coreB.console.port)
     b.send("AT+MODE?")
     check("B MODE=STA", b.contains("MODE:STA", 0.6))
     time.sleep(2.0)                       # 等 beacon + 关联
@@ -136,10 +202,10 @@ def main():
     check("B 配对后连接", "CONN_STATE:CONNECTED" in b.buf)
 
     print("== 5. 泰芯 AH 兼容模式（family=tah：状态带 + 前缀） ==")
-    coreT = sim.Core("T", "AP", 9301, 9311, None, family=sim.FAMILY_TAH)
+    coreT = sim.Core("T", "AP", 0, 0, None, family=sim.FAMILY_TAH)
     threading.Thread(target=loop, args=(coreT,), daemon=True).start()
     time.sleep(0.4)
-    t = Client(9301)
+    t = Client(coreT.console.port)
     t.send("AT+MODE")                     # 裸命令查询（thalow_config.py resync/status 用）
     check("T 裸 AT+MODE -> +MODE:AP", t.contains("+MODE:AP", 0.6))
     t.send("AT+VERSION")
@@ -186,8 +252,8 @@ def main():
 
     _rs.Serial = _FakeSerial            # 让 Link.open_serial 用假串口
     try:
-        coreSA = sim.Core("SA", "AP", 9401, 9411, None, link_serial="SERA")
-        coreSB = sim.Core("SB", "STA", 9402, 9412, None, link_serial="SERB")
+        coreSA = sim.Core("SA", "AP", 0, 0, None, link_serial="SERA")
+        coreSB = sim.Core("SB", "STA", 0, 0, None, link_serial="SERB")
     finally:
         _rs.Serial = _real_serial
 
@@ -195,8 +261,8 @@ def main():
     threading.Thread(target=loop, args=(coreSB,), daemon=True).start()
     time.sleep(2.5)                     # 等串口打开 + beacon + 关联
 
-    sa = Client(9401)
-    sb = Client(9402)
+    sa = Client(coreSA.console.port)
+    sb = Client(coreSB.console.port)
     sb.send("AT+CONN_STATE")
     sb.pump(1.0)
     check("串口空口 B(STA) CONNECTED", "CONN_STATE:CONNECTED" in sb.buf)
@@ -220,7 +286,37 @@ def main():
     sa.s.close()
     sb.s.close()
 
-    print("== 7. 收尾 ==")
+    print("== 7. host 数据口（--host）：DATA_TX / DATA_RX ==")
+    # 语义 = 真实 SPI MACBUS：host 注入的帧走空口转发出去，从空口收到、
+    # 目的为本机/广播的帧推回 host。两端都开 host 口，所以可以端到端对拍。
+    hA = HostClient(coreA.hostport.port)
+    hB = HostClient(coreB.hostport.port)
+    time.sleep(0.3)                       # 等 TCP 连上 + AP 侧 STA 表非空
+    bcast = bytes([0xFF] * 6)
+    f_a2b = bcast + coreA.cfg.mac + bytes([0x88, 0xB5]) + b"HOST-PORT-A2B"
+    hA.send_frame(f_a2b)
+    got = hB.recv_frame(2.0)
+    check("A host 注入 -> 空口 -> B host 收到", got == f_a2b,
+          f"len={len(got) if got else 0}")
+    f_b2a = bcast + coreB.cfg.mac + bytes([0x88, 0xB5]) + b"HOST-PORT-B2A"
+    hB.send_frame(f_b2a)
+    got2 = hA.recv_frame(2.0)
+    check("B host 注入 -> 空口 -> A host 收到", got2 == f_b2a,
+          f"len={len(got2) if got2 else 0}")
+    # 坏帧不能进空口，也不能把后面的好帧带歪：短帧(<14B)、CRC 错帧、非 DATA 类型都丢掉
+    hA.send_frame(b"TOO-SHORT")                       # 10B：低于最小以太网帧长
+    hA.send_frame(bcast + coreA.cfg.mac + bytes([0x88, 0xB5]) + b"BAD-CRC",
+                  crc_ok=False)
+    hA.s.sendall(bytes([0xAA, 0x55, sim.LINK_TYPE_BEACON, 0, 3, 0, 1, 2, 3]))  # 非 DATA 类型
+    f_after = bcast + coreA.cfg.mac + bytes([0x88, 0xB5]) + b"AFTER-BAD"
+    hA.send_frame(f_after)
+    got3 = hB.recv_frame(2.0)
+    check("短帧/坏 CRC/非 DATA 帧被丢弃，好帧仍按序到达", got3 == f_after,
+          f"len={len(got3) if got3 else 0}")
+    hA.close()
+    hB.close()
+
+    print("== 8. 收尾 ==")
     stop.set()
     a.s.close()
     b.s.close()
