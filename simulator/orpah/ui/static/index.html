@@ -143,6 +143,11 @@
     </table>
   </div>
   <div class="config-row id-ctl">
+    <label><span data-i18n="id_level_mode">降级演示</span>
+      <select id="idLevelMode" style="min-width:260px"></select></label>
+    <span class="hint" data-i18n="id_level_hint">切换「哪个环节坏了」→ 下一条 ID 上报按 §8.2 自动选级（L1 签名失败 / L2 SE 不可用 / L3 无可用密钥）；L2 出 warn、L3 出 crit 告警。</span>
+  </div>
+  <div class="config-row id-ctl">
     <button class="btn" id="btnIdRevoke" data-i18n="btn_revoke">撤销设备</button>
     <button class="btn" id="btnIdReplay" data-i18n="btn_replay">重放上一条</button>
     <button class="btn" id="btnIdStale" data-i18n="btn_stale">超窗上报</button>

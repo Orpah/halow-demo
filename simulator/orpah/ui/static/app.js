@@ -300,8 +300,11 @@ function renderId(d) {
   const trustTxt = d.trust && d.trust !== "-" ? " · " + T("trust_" + d.trust) : "";
   // 设备无时钟（ts=0）：标一句，别让人以为设备报了 1970（库里/审计用的是服务器接收时刻）
   const noClock = d.ts_src === "server" ? " · " + T("id_no_clock") : "";
+  // §8.3：L2 = SE 不可用（仍更新定位）/ L3 = 只做覆盖发现（不当人员出现）—— 卡片上说清
+  const deg = d.degraded ? " · " + T("id_degraded") : "";
+  const cov = d.coverage_only ? " · " + T("id_coverage_only") : "";
   t.textContent = ok
-    ? T("id_ok") + trustTxt + noClock
+    ? T("id_ok") + trustTxt + deg + cov + noClock
     : T("id_bad") + (d.error ? " · " + d.error : "") + noClock;
   t.className = ok ? "ok" : "bad";
   $("idSig").textContent = d.sig || "-";
@@ -409,6 +412,10 @@ async function refresh() {
     renderIdReports(s.id_reports || []);
     fillSpoofKinds(s.spoof_kinds || []);
     spoofKinds = s.spoof_kinds || spoofKinds;
+    // §8.2 降级演示下拉：选项来自 /api/status（单一源），选中值回显当前模式
+    fillIdLevelModes(s.id_level_modes || []);
+    const selLv = $("idLevelMode");
+    if (selLv && document.activeElement !== selLv && s.id_level) selLv.value = s.id_level;
     lastIdNonce = (s.id_demo && s.id_demo.nonce) || lastIdNonce;
     spoofCompare(s.id_demo || {});
     idRevoked = !!s.id_revoked;
@@ -462,6 +469,25 @@ $("btnIdReplay").onclick = async () => {
 $("btnIdStale").onclick = async () => {
   await postCtl({ action: "stale" });
 };
+
+/* ---------- §8.2 降级演示：切换「哪个环节坏了」---------- */
+function fillIdLevelModes(list) {
+  const sel = $("idLevelMode");
+  if (!sel || !list || !list.length) return;
+  const sig = list.join("|");
+  if (sel.dataset.sig === sig && OrpahI18n.lang === sel.dataset.lang) return;
+  const keep = sel.value;
+  sel.innerHTML = list.map(k =>
+    `<option value="${esc(k)}">${esc(T("id_lv_" + k))}</option>`).join("");
+  sel.dataset.sig = sig;
+  sel.dataset.lang = OrpahI18n.lang;
+  if (keep && list.includes(keep)) sel.value = keep;
+}
+if ($("idLevelMode")) {
+  $("idLevelMode").onchange = async () => {
+    await postCtl({ action: "id_level", level: $("idLevelMode").value });
+  };
+}
 
 /* ---------- 防 spoof：把攻击报文真的注入空口，看服务器怎么拦 ---------- */
 let spoofKinds = [];        // /api/status.spoof_kinds（脚本/UI 同一份，见 spoof.py）

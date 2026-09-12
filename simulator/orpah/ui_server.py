@@ -93,6 +93,15 @@ UDP_SRV = 19447
 
 EVENTS = queue.Queue(maxsize=1000)   # SSE 事件（满丢最旧）
 
+# 演示用的降级级别模式（§8.2）：模式 → 喂给 `Device.report()` 的「哪个环节坏了」。
+# 注意不是直接写死 level —— 交给 `orpah_id.pick_level()` 算出来，走的是规格里那条路径。
+ID_LEVEL_MODES = {
+    "auto":      {},                                  # 全正常 → pick_level → L0
+    "sign_fail": {"sign_ok": False},                  # Step2 Slot0 签名失败 → L1
+    "se_fail":   {"se_ok": False},                    # Step1 SE 不可用（有 HMAC）→ L2
+    "no_key":    {"se_ok": False, "hmac_ok": False},   # Step3 无可用密钥 → L3
+}
+
 
 class OrpahApp:
     """装配整条 L1 链路 + 状态/计数（供 UI 轮询）。"""
@@ -135,6 +144,7 @@ class OrpahApp:
         self.id_dev = None
         self.id_used = oid.NonceCache()
         self.id_demo = {}
+        self.id_level = "auto"             # 演示降级模式（§8.2，见 ID_LEVEL_MODES）
         self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
@@ -484,13 +494,19 @@ class OrpahApp:
             self.id_demo = {"t": time.strftime("%H:%M:%S"), "err": str(e)}
 
     def _legit_id_report(self, ts=None):
-        """一条**合法签名**上报表（周期上报与 spoof 演示的攻击基准都用它）。"""
+        """一条**合法签名**上报表（周期上报与 spoof 演示的攻击基准都用它）。
+
+        级别由 `self.id_level`（演示模式）经 **§8.2 的 `pick_level`** 自动选出：
+        默认 `auto` → L0；`sign_fail` → L1；`se_fail` → L2；`no_key` → L3。
+        传的是"哪个环节坏了"而不是直接写死 level —— 走的才是规格里那条路径。
+        """
         self._ensure_id_device()
         return self.id_dev.report(
-            level=0, ts=ts,
+            ts=ts,
             seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
                            "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
-            battery_mv=3700, firmware="1.0.3")
+            battery_mv=3700, firmware="1.0.3",
+            **ID_LEVEL_MODES.get(self.id_level, ID_LEVEL_MODES["auto"]))
 
     def _send_id_report(self, ts=None):
         """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
@@ -545,13 +561,20 @@ class OrpahApp:
             "level": rec["level"], "trust": rec["trust"],
             "accepted": rec["accepted"], "sig": rec.get("sig", ""),
             "nonce": rec.get("nonce", ""), "error": rec.get("error"),
+            # §8.3：L2 = SE 不可用（仍更新定位，标 degraded）/ L3 = 无可用密钥（只做覆盖发现）
+            "degraded": rec.get("degraded"),
+            "coverage_only": rec.get("coverage_only"),
             # 时钟可信：设备无时钟（ts=0）→ 卡片上标一句，别让人以为设备报了 1970
             "ts_src": rec.get("ts_src"), "ts_eff": rec.get("ts_eff"),
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)
         self._emit("id_report", rec)
-        if rec.get("sn"):
+        # 「最近见」只由**能当人员出现**的结果刷新（§8.3）：`orpah_id.counts_as_presence`
+        # = accepted 且非 coverage_only → L0/L1/L2 算，**被拒的（含伪造）与 L3 不算**。
+        # 2026-09-12 实测踩过：原来无条件 touch，一条验签失败的伪造上报就把 last_seen 从
+        # 1789199499 推到 1789199504 → 伪造报文能“报平安”，把「长未上报」告警永远抑住。
+        if rec.get("sn") and oid.counts_as_presence(rec):
             self.registry.touch(rec["sn"])
         # 落库（内存 deque 有上限，历史看「事件历史」区）
         # 验签不通过 → 单记 id_reject，才能在事件历史里按类型筛出「被拒上报」
@@ -562,6 +585,9 @@ class OrpahApp:
             detail=(f"alg={rec.get('alg')} level={rec.get('level')} "
                     f"trust={rec.get('trust')} "
                     f"accepted={rec.get('accepted')}" +
+                    # §8.3 降级标记（只在成立时写，L0/L1 的审计行保持与原来逐字一致）
+                    (" degraded=1" if rec.get("degraded") else "") +
+                    (" coverage_only=1" if rec.get("coverage_only") else "") +
                     (f" gen={rec.get('gen')}" if rec.get("gen") is not None else "") +
                     # 设备无时钟（ts=0）时如实标出：审计要能区分“设备说的时间”与“服务器看到的时间”
                     (" ts_src=server" if rec.get("ts_src") == P.TS_SRC_SERVER else "") +
@@ -652,6 +678,8 @@ class OrpahApp:
             "id_demo": self.id_demo,
             "id_reports": list(self.id_reports),
             "id_report_total": self.id_report_total,
+            "id_level": self.id_level,               # 当前降级模式（§8.2 演示）
+            "id_level_modes": list(ID_LEVEL_MODES),  # 页面下拉选项（单一源）
             # 防 spoof 演示的攻击清单（脚本/UI 同一份，见 spoof.py；页面按语言取 zh/en）
             "spoof_kinds": [{"kind": k, "zh": spoof.case_info(k)[0],
                              "en": spoof.case_info(k)[1],
@@ -661,7 +689,7 @@ class OrpahApp:
                            if self.client else False),
         }
 
-    def cmd(self, action, sn=None, every=None, note="", kind=None):
+    def cmd(self, action, sn=None, every=None, note="", kind=None, level=None):
         if action == "pause":
             self.paused = True
         elif action == "resume":
@@ -672,6 +700,12 @@ class OrpahApp:
                 self._ensure_id_device()   # 按新 SN 重建 Orpah ID 设备并重注册密钥
         elif action == "every" and every and every > 0:
             self.every = float(every)
+        elif action == "id_level":
+            # 演示降级策略（§8.2）：切换"哪个环节坏了"，下一条 ID 上报就走对应的降级路径。
+            # 非法值不改（返回实际生效值，前端据此回弹）
+            if level in ID_LEVEL_MODES:
+                self.id_level = level
+            return {"ok": True, "id_level": self.id_level}
         elif action == "mark" and sn and self.srv:
             self.srv.mark_tracked(sn, note=note or "ui")
         elif action == "untrack" and sn and self.srv:
@@ -1480,7 +1514,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
             return
         r = APP.cmd(req.get("action"), sn=req.get("sn"), every=req.get("every"),
-                    note=req.get("note") or "", kind=req.get("kind"))
+                    note=req.get("note") or "", kind=req.get("kind"),
+                    level=req.get("level"))
         self._send(200, json.dumps(r).encode())
 
 

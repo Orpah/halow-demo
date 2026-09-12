@@ -277,6 +277,9 @@ class OrpahServer:
             "trust": v.get("trust") if v.get("accepted") else "-",
             "accepted": bool(v.get("accepted")),
             "error": v.get("error"),
+            # §8.3 降级语义（原样带给下游：ui_server 判定"能否当人员出现"、alerts 出降级告警）
+            "coverage_only": bool(v.get("coverage_only")),   # L3：只做覆盖发现
+            "degraded": bool(v.get("degraded")),             # L2：SE 不可用但仍更新定位
             # 命中的密钥代次（多代并存 → 审计“用的是哪一代钥匙”）
             "kid": v.get("kid"),
             "gen": v.get("gen"),

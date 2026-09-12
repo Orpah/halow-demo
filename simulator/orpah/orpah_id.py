@@ -63,6 +63,37 @@ LEVEL_TO_ALG = {0: ALG_ES256, 1: ALG_HS256, 2: ALG_HS256, 3: ALG_NONE}
 # 信任分级（§8.1/§8.3）
 TRUST_BY_LEVEL = {0: "high", 1: "medium", 2: "low", 3: "none"}
 
+
+def pick_level(se_ok=True, sign_ok=True, hmac_ok=True):
+    """按 §8.2 降级流程选级别 → `(level, reason)`。**策略唯一源**（设备侧与测试都调它）。
+
+    §8.2 的流程照字面实现：
+      Step1 SE（ATECC608B）I2C 通信失败 → 看 CH32 有无 HMAC 密钥：有→L2 / 无→L3
+      Step2 SE 通、`atcab_sign(Slot0)` 失败 → L1（改用 Slot 5 的 HMAC）
+      Step2 SE 通、签名成功 → L0（正常 ECDSA）
+    """
+    if not se_ok:
+        return (2, "se_unavailable") if hmac_ok else (3, "no_key")
+    if not sign_ok:
+        return 1, "slot0_sign_failed"
+    return 0, "normal"
+
+
+def counts_as_presence(result):
+    """这条验签结果能否**当作人员出现**（§8.3）。
+
+    能：`accepted` 且非 `coverage_only`（L0/L1/L2 —— L2 仍更新定位，只标 `degraded`）。
+    不能：被拒的（伪造/重放/超窗/…）与 L3（`alg=none` 裸上报，**只做覆盖发现**）。
+
+    为什么要抽成一个函数：服务端「刷新最近见 / 抑制长未上报告警」的依据必须与验签裁决**同一源**。
+    2026-09-12 实测踩过——`ui_server._on_id_report` 原来无条件 `registry.touch()`，
+    于是一条**验签失败**的伪造上报也能刷新「最近见」（静置 3.5s 后 last_seen 1789199499 →
+    注入伪造报文后 1789199504）→ 攻击者只要定期往空口扔伪造报文，就能让设备永远不报「长未上报」。
+    """
+    if not result or not result.get("accepted"):
+        return False
+    return not result.get("coverage_only")
+
 # 密钥代次状态（§6.3 生命周期）
 KEY_ACTIVE = "active"      # 当前代：用于签发新报文，参与验签
 KEY_GRACE = "grace"        # 已被轮换掉：宽限期内仍参与验签（等役设备更新完）
@@ -386,9 +417,17 @@ class Device:
     def sign(self, alg, preimage):
         return sign_preimage(alg, preimage, self)
 
-    def report(self, level=0, ts=None, nonce=None, seen_routers=None,
-               battery_mv=None, firmware=None, extra=None):
-        """按降级级别构建完整已签报文（§5.4 格式）。"""
+    def report(self, level=None, ts=None, nonce=None, seen_routers=None,
+               battery_mv=None, firmware=None, extra=None,
+               se_ok=True, sign_ok=True, hmac_ok=True):
+        """构建完整已签报文（§5.4 格式）。
+
+        `level=None`（默认）→ 按 §8.2 用 `pick_level(se_ok, sign_ok, hmac_ok)` **自动选级**
+        （全部正常→L0，与老行为一致，故旧调用 `report()` 不受影响）；
+        显式传 `level=0..3` 则按传的级别组包（演示/测试用）。
+        """
+        if level is None:
+            level = pick_level(se_ok, sign_ok, hmac_ok)[0]
         alg = LEVEL_TO_ALG[level]
         hdr = {"typ": "orpah-id-report", "ver": 1, "alg": alg, "level": level}
         payload = {
@@ -723,7 +762,7 @@ def verify_report(report, ks, now=None, used_nonces=None, window=300):
         if level != 3:
             return _reject("none_requires_level3", level, alg)
         return {"accepted": True, "trust": "none", "level": 3, "alg": alg,
-                "coverage_only": True}
+                "coverage_only": True, "degraded": False}
 
     # 2. 时间窗口（ts=0 表示未知：跳过窗口，仅靠 nonce 防重放，§5.5）
     ts = payload.get("ts")
@@ -784,7 +823,10 @@ def verify_report(report, ks, now=None, used_nonces=None, window=300):
                        else "signature_invalid", level, alg)
 
     return {"accepted": True, "trust": TRUST_BY_LEVEL.get(level, "low"),
-            "level": level, "alg": alg, "kid": hit["kid"], "gen": hit["gen"]}
+            "level": level, "alg": alg, "kid": hit["kid"], "gen": hit["gen"],
+            # §8.3：L2（SE 完全不可用、用 CH32 对称密钥）→ 标记 degraded（仍更新定位）；
+            # L3 走上面提前返回（coverage_only）。两个字段给下游（存在性/告警/指标）判定用。
+            "coverage_only": False, "degraded": level == 2}
 
 
 # ---------------------------------------------------------------------------

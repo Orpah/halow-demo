@@ -101,15 +101,26 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 | 字段 | 说明 |
 |---|---|
-| `id_demo` | 最近一条上报的验签结果：`sn/alg/level/trust/accepted/error/kid/gen/nonce/sig` |
+| `id_demo` | 最近一条上报的验签结果：`sn/alg/level/trust/accepted/error/kid/gen/nonce/sig` + `degraded`（L2）/`coverage_only`（L3）（§8.3，2026-09-12 新增） |
 | `id_reports` | 合成上报流（环形 20 条，最新在前），表格直接渲染 |
 | `id_report_total` | 累计条数 |
+| `id_level` / `id_level_modes` | 当前**降级演示模式**（§8.2）及其可选值（选项单一源，页面下拉据此生成） |
 | `id_revoked` | 当前设备是否已吊销（按钮文案随之切换） |
 | **`spoof_kinds`** | **防 spoof 演示的攻击清单** `[{kind, zh, en, expect}]`（来自 `spoof.UI_KINDS`，脚本/页面同一份）。页面按当前语言取 `zh`/`en` 生成下拉，`expect` 用于「期望 vs 实际」对比——**后端不返回本地化文案，只给两种语言让页面挑**，避免中英混排 |
 
 ### `POST /api/ctl`（链路控制，body 带 `action`）
 
 已有：`pause`/`resume`/`set_sn`/`every`/`mark`/`untrack`/`revoke`/`unrevoke`/`replay`/`stale`。
+
+**新增 `id_level`（§8.2 降级策略演示，2026-09-12）**：`{action:"id_level", level:"<模式>"}`
+
+- 模式取值（`ui_server.ID_LEVEL_MODES` 单一源，`/api/status.id_level_modes` 同时给页面）：
+  `auto`（全正常→L0）/ `sign_fail`（Slot0 签名失败→L1）/ `se_fail`（SE 不可用→L2）/ `no_key`（无可用密钥→L3）。
+- **传的是“哪个环节坏了”，不是写死的 level** —— 下一条 ID 上报由 `orpah_id.pick_level()` 按 §8.2 算出级别，
+  走的才是规格里那条路径（而不是直接塞一个 level 值）。
+- 返回 `{ok:true, id_level:"<实际生效值>"}`；非法值**不改**当前模式（返回实际值，页面据此回弹）。
+- 效果：选 `se_fail` → 卡片显 `L2 · SE 不可用（仍更新定位）` + `id_degraded` warn 告警；
+  选 `no_key` → `L3 · 仅覆盖发现` + `id_degraded` crit 告警，且**不刷新 `last_seen`**（不当人员出现）。
 
 **新增 `spoof`（防 spoof 演示，2026-09-12）**：`{action:"spoof", kind:"<攻击类型>"}`
 
@@ -403,6 +414,7 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 | `case_overtime` | `crit`（不分级） | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
 | `case_handled_overtime` | `warn` → `crit` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` / 升级 `172800` | `ORPAH_ALERT_CASE_HANDLED_SEC` / `ORPAH_ALERT_CASE_HANDLED_CRIT_SEC` |
 | `sig_fail_rate` | `crit`（不分级） | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
+| `id_degraded` | L2 `warn` / L3 `crit` | 最近 N 秒内出现过**降级上报**（§8.3）：L2 = SE 不可用（仍更新定位）、L3 = 无可用密钥（裸上报） | `300` | `ORPAH_ALERT_ID_DEGRADED_SEC` |
 
 ⚠ **默认值分两类，别看混**：
 - **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s（升级 300s）、
@@ -418,7 +430,21 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   未设 / 空串 / 非法值 → 回退上表默认值。
 - 也可以在进程内覆盖：`alerts.evaluate(..., no_report_sec=…, no_report_crit_sec=…,
   case_overtime_sec=…, case_handled_sec=…, case_handled_crit_sec=…,
-  sig_window=…, sig_fail_ratio=…)`（单测用的就是这个入口）。
+  sig_window=…, sig_fail_ratio=…, id_degraded_sec=…)`（单测用的就是这个入口）。
+
+**降级告警 `id_degraded`（§8.3，2026-09-12）**：
+- 数据源 = `/api/status.id_reports` 的环形快照（最新 20 条）；判定用 `accepted && level∈{2,3}`。
+- 按「**窗口内出现过**」而不是按条数：设备降级是**状态**（SE 坏了不会自己好），报一次就该有人看；
+  窗口只用来把“很久没再降级”自动消掉。
+- **同一台设备只出一条**（取最高级：3 > 2）—— 否则一台 SE 坏掉的设备每次上报都刷一条，红点满了看不出别的。
+- 文案：L2 → `alert_id_degraded`（数据字段 `sn` / `lv`）；L3 → `alert_id_no_key`。
+- **被拒的上报不算降级**（那是 `sig_fail_rate` 的事）；L0/L1 也不告警（§8.3：L0/L1 正常处理）。
+
+**§8.3 存在性语义（同日修）**：`registry.last_seen` 只由 `orpah_id.counts_as_presence(rec)`
+（= `accepted` 且非 `coverage_only`）的结果刷新 —— 即 **L0/L1/L2 算人员出现，被拒的（含伪造）与 L3 不算**。
+修前 `ui_server._on_id_report` 无条件 `registry.touch()`，后果实测：一条**验签失败**的伪造上报把
+`last_seen` 从 `1789199499` 推到 `1789199504` → **伪造报文能“报平安”，把「长未上报」告警永远抑住**。
+注：业务报文 `ORPAH-REPORT`（L2）走另一条路，它照样刷新 `last_seen`（那是设备自己的上报，与 ID 层无关）。
 - 例（想避免「刚立案 3 分钟就亮红点」的观感）：
   PowerShell `$env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901`；
   cmd `set ORPAH_ALERT_CASE_OVERTIME_SEC=600 && python ui_server.py --port 8901`。

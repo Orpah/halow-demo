@@ -31,6 +31,14 @@ alerts.py — 告警规则引擎（供页面红点消费）
     case_overtime           案件立案超过 case_overtime_sec 仍未发现**且无人接手**（只算 open；已 found 不算）
     case_handled_overtime   已接手的案件，距**接手时刻**超过 case_handled_sec 仍未发现（B 方案）
     sig_fail_rate           最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
+    id_degraded             最近 id_degraded_sec 内出现过降级上报（§8.3）：L2 warn / L3 crit
+
+**降级告警（§8.3，2026-09-12）**：L2（SE 不可用、改用 CH32 对称密钥）→ 记录告警（SE 异常）；
+L3（无可用密钥、裸上报）→ 触发“设备异常”通知运维。
+- 按“**窗口内出现过**”而不是按条数：设备降级是**状态**（SE 坏了不会自己好），报一次就该有人看；
+  窗口只用来自动消警（窗口内没再报 = 最近没降级）。
+- 同一台设备只出一条（取最高级）：否则一台 SE 坏掉的设备每次上报都刷一条，红点满了看不出别的。
+- 阈值 `ORPAH_ALERT_ID_DEGRADED_SEC`（默认 300s，与 no_report 同一个演示时间尺度）。
 
 **按持续时长分级（2026-09-12 用户定 C 方案）**：从“有时间阈值”的两条规则开始，时长越长等级越高：
 
@@ -93,6 +101,7 @@ CASE_HANDLED_SEC = _env_int("ORPAH_ALERT_CASE_HANDLED_SEC", 86400)  # 接手后�
 CASE_HANDLED_CRIT_SEC = _env_int("ORPAH_ALERT_CASE_HANDLED_CRIT_SEC", 172800)  # 再久 → crit（C）
 SIG_WINDOW = _env_int("ORPAH_ALERT_SIG_WINDOW", 5)              # 签名失败率统计窗口（条）
 SIG_FAIL_RATIO = _env_float("ORPAH_ALERT_SIG_FAIL_RATIO", 0.5)  # 窗口内被拒比例超过它 → 告警
+ID_DEGRADED_SEC = _env_int("ORPAH_ALERT_ID_DEGRADED_SEC", 300)  # 降级上报（L2/L3）消警窗口（秒）
 
 
 def _alert(kind, level, key_obj, msg, since, **data):
@@ -124,6 +133,7 @@ def evaluate(registry, cases, id_reports, now=None, **th):
     case_handled_crit = th.get("case_handled_crit_sec", CASE_HANDLED_CRIT_SEC)
     win = th.get("sig_window", SIG_WINDOW)
     fail_ratio = th.get("sig_fail_ratio", SIG_FAIL_RATIO)
+    deg_sec = th.get("id_degraded_sec", ID_DEGRADED_SEC)
     out = []
 
     # 1) 长未上报：只看「**工作态**且曾经上报过」的设备 ——
@@ -176,9 +186,37 @@ def evaluate(registry, cases, id_reports, now=None, **th):
     if len(recent) >= win:
         bad = [r for r in recent if not r.get("accepted")]
         if len(bad) / len(recent) > fail_ratio:
+            # since 必须是 **epoch 秒**：前端算“持续多久”（`Date.now()/1000 - since`），
+            # 且本函数末尾按 since 排序（与其它规则的 int 混排）。
+            # 2026-09-12 修 bug：这里原来传 `rec["t"]`（"15:46:21" 这种展示用字符串）
+            # → `_alert` 里 `int(since)` 抛 ValueError → 只要签名失败率告警一触发，
+            # `/api/alerts` 整个 500（红点也拿不到其它告警）；且就算不抛也会算出 NaN。
+            # 取 `ts_eff`（effective_ts 填的实际记录时刻），缺则回退 now。
             out.append(_alert("sig_fail_rate", LEVEL_CRIT, "recent",
-                              "alert_sig_fail", recent[0].get("t") or now,
+                              "alert_sig_fail",
+                              int(recent[0].get("ts_eff") or now),
                               n=len(bad), total=len(recent)))
+
+    # 4) 降级上报（§8.3）：L2 = SE 不可用（仍更新定位）→ warn；L3 = 无可用密钥 → crit。
+    #    deque 上限 20 条，本身就是“最近”的证据；窗口只用于把“很久没再降级”自动消掉。
+    worst = {}
+    for r in list(id_reports):
+        if not r.get("accepted"):
+            continue
+        lv = r.get("level")
+        if lv not in (2, 3):
+            continue
+        ts = int(r.get("ts_eff") or 0)
+        if ts and now - ts > deg_sec:            # 超出窗口 → 不再视为当前问题
+            continue
+        sn = r.get("sn") or "-"
+        if sn not in worst or lv > worst[sn][0]:  # 同一台设备取最高级（3 > 2）
+            worst[sn] = (lv, ts or now)
+    for sn, (lv, ts) in worst.items():
+        out.append(_alert("id_degraded",
+                          LEVEL_CRIT if lv == 3 else LEVEL_WARN, sn,
+                          "alert_id_no_key" if lv == 3 else "alert_id_degraded",
+                          ts, sn=sn, lv=lv))   # 数据字段叫 lv：第二个形参已是 level
 
     out.sort(key=lambda a: (0 if a["level"] == LEVEL_CRIT else 1, a["since"]))
     return out
