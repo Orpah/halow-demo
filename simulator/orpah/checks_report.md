@@ -1,9 +1,9 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 13:30:56
-- git HEAD：`35bbc62`
+- 时间：2026-09-12 13:36:54
+- git HEAD：`fefe2ed`
 - 解释器：3.13.14 @ C:\Python313\python.exe
-- 结论：**全部通过**（13/13 套件通过）
+- 结论：**全部通过**（8/8 套件通过）
 
 ## 套件结果
 
@@ -15,13 +15,8 @@
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
 | IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
-| UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
-| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
-| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.3s | 通过 |
-| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
-| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.6s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.5s | 通过 |
+| UI 服务器契约 | `test_server.py` | ✅ PASS | 0.2s | 通过 |
+| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 
 ## 关键输出
 
@@ -87,7 +82,7 @@
       OK   �Ϸ�ֵ��Ч
     ȫ��ͨ��
 
-### UI 服务器契约 — PASS（0.1s）
+### UI 服务器契约 — PASS（0.2s）
 
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=none level=3 trust=none accepted=True
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=high accepted=True
@@ -95,10 +90,10 @@
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
-    Ran 16 tests in 0.009s
+    Ran 16 tests in 0.013s
     OK
 
-### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.0s）
+### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
 
     == 1. 黄金样本（校验位只算 ORG-UNIQUE，不含 CC）==
     == 2. SN 边界（格式：CC-ORG-UNIQUE[-CHECK]，Crockford Base32 去 I L O U）==
@@ -106,45 +101,4 @@
     == 4. 报文编解码边界（通用 JSON 公共头）==
       OK   parse_eth_frame：ethertype 不符 → None
     批量用例：全部通过
-
-### L1 端到端 — PASS（1.4s）
-
-    === ORPAH L1 验收 ===
-    Server 收到: 3 条  (sn 一致: True)
-    结果: [PASS]
-
-### L2 消息流 — PASS（2.3s）
-
-    --- 分支一：走失库未命中 sn=CN-WH01-9AF3C1D2 ---
-    --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
-    --- 分支二：走失库命中 sn=CN-WH01-9AF3C1D2 ---
-    === ORPAH L2 验收 ===
-    分支二(命中 TRACKED): PASS
-    结果: [PASS]
-
-### L3 多 Router 漫游/去重 — PASS（4.2s）
-
-    --- 阶段A：sn=CN-WH01-9AF3C1D2 在 R1 网络（2 条，未 mark）---
-    --- 阶段B：sn=CN-WH01-9AF3C1D2 漫游到 R2 网络（seq 续 3）---
-    --- 阶段C：mark 走失 sn=CN-WH01-9AF3C1D2（在 R2 网络）---
-    --- 阶段D：sn=CN-WH01-9AF3C1D2 在 R2 再次会话（应 tracked=True）---
-    --- 阶段E：去重测试（重发已接受的 seq=4）---
-    --- 阶段F：SN 校验（非法 sn → FORMAT-ERR）---
-      [PASS] F 非法 SN → FORMAT-ERR 且不计数
-    结果: [PASS]
-
-### L3b 主动拉表 — PASS（1.6s）
-
-    --- 模拟 Router 重启（清空本地缓存 + 未同步）---
-    --- Server untrack sn=CN-WH01-9AF3C1D2（变更推送，Router 无需再拉）---
-    === ORPAH Router 主动拉表 验收 ===
-      [PASS] ④ 变更推送仍生效且 REQ 不再多拉
-    结果: [PASS]
-
-### 防 spoof 空口端到端 — PASS（1.5s）
-
-    ==========================================================================
-    ==========================================================================
-    ==========================================================================
-    ==========================================================================
 

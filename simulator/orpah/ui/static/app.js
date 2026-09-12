@@ -351,8 +351,13 @@ async function refresh() {
       T("lbl_pub").replace("{n}", `<b class="cnt">${s.publish_total || 0}</b>`);
     $("rowServerFound").innerHTML =
       T("lbl_found_recv").replace("{n}", `<b class="cnt">${s.found_recv || 0}</b>`);
-    // 链路段帧数（方向箭头旁）：空口段 = 客户端发出的空口帧(tx_sta)；
-    // UDP 段 = 路由器上行转发帧(router_up)。单向上行 → 数值与上报一致。
+    // 链路段帧数（方向箭头旁），两个口径不同、**不该相等**：
+    //   空口帧 = 客户端 STA 在空口发出的**数据帧**总数(tx_sta)，含每周期
+    //     REQ-CONNECT + REPORT + Orpah ID 签名上报（后者只走空口、不转发服务器，
+    //     见 client.send_id_report(notify=False)）；不含信标/关联帧与下行帧。
+    //   UDP 帧 = 路由器**转发给服务器**的条数(router_up)，只有 REPORT
+    //     （REQ-CONNECT 由路由器查本地走失缓存就地应答）；所以它 == 服务器收到数。
+    //   左侧「上行注入」是 client_sent = REQ-CONNECT + REPORT 两类注入，故恒为 router_up 的 2 倍。
     $("airFrames").textContent = s.tx_sta;
     $("udpFrames").textContent = s.router_up;
     // 连接 / 徽标（展示层按字典中文化）
