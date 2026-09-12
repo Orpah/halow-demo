@@ -70,6 +70,13 @@ const eEq = linBad ? Math.hypot(linBad.x - 5, linBad.y - 5) : NaN;
 const eW = (w && w.ok) ? Math.hypot(w.x - 5, w.y - 5) : NaN;
 ck("WLS：远端差站（+40m）比等权线性解明显更接近真值（误差比 < 0.5）",
    eW < eEq * 0.5, `等权=${eEq.toFixed(2)}m 加权=${eW.toFixed(2)}m`);
+/* 入参形状就是 `{s:{x,y}, dist}`（页面 obsAt 返回的形状）—— 用精确距离证明它被正确读取：
+   若真读成 `o.x`（undefined）会得到 NaN/垃圾，而非 1e-9 级复原。 */
+const exact = anchors.map(a => ({ s: a, dist: Math.hypot(5 - a.x, 5 - a.y) }));
+const we = P.wlsLocate(exact, { x: 0, y: 0 });
+ck("WLS：标准入参（{s,dist}）在精确距离下复原 (5,5)（证明读的是 o.s.x/o.s.y）",
+   we && we.ok && Math.hypot(we.x - 5, we.y - 5) < 1e-6,
+   JSON.stringify(we && { x: we.x, y: we.y }));
 
 /* ---- 95% 椭圆（注意入参是 {a,b,c}，不是矩阵） ---- */
 const ell = P.ellipseOf({ a: 4, b: 0, c: 1 });

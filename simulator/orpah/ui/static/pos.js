@@ -74,6 +74,9 @@ function sigOf(o) {
 }
 
 function wlsLocate(obs, init) {
+  /* `obs` = **观测对象数组**，形状统一为 `{s:{x,y,sid,…}, dist, …}`（`obsAt()` 返回的就是它，
+     三页共用）：站位坐标在 `o.s.x/o.s.y`，测距在 `o.dist`。
+     （**不是** `{x,y,dist}` 平铺对象 —— 审查提过一次这个误解，写在这里防复发。） */
   const n = obs.length;
   if (n < 2) return null;
   /* init 请务必传**线性解**（页面即这么用）。只有 2 个站位时若 init 给质心，
