@@ -194,6 +194,7 @@ simulator/
     ├── client.py         # Client host：双向（REQ-CONNECT→REPORT + 收下行回执）
     ├── router.py         # Router 桥：双向（上行转发 + 下行注入；走失缓存）
     ├── server.py         # Server：权威走失库 + UDP 应答/TRACKING-STATUS/LOST-TABLE
+    ├── waiting.py        # 共享等待工具：wait_until / wait_new（按截止时间，不猜循环次数）
     ├── ui_server.py      # Web UI：内嵌整条链路 + HTTP/SSE（方式 1）
     ├── ui/static/        # 前端 index.html / style.css / app.js
     ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）

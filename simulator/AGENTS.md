@@ -49,6 +49,18 @@
     已记 ROADMAP 开放问题，动手补前先与用户对齐。
   - ⚠ `spoof.CASES` 里 `revoked` **会改密钥库状态，必须放最后**；且 `unrevoke` 会把各代转成
     retired（之后验签就 `unknown_device`）—— 页面因此把 `revoked` 排除在 `UI_KINDS` 之外。
+- **等待一律用 `orpah/waiting.py`（2026-09-12，review 反馈起）**：
+  - **禁止** `for _ in range(N): time.sleep(0.05)` 这种「猜次数」等待 —— 机器快慢/负载一变
+    就误判（等太短=假失败，等太久=白等），且循环次数与语义无关，读者无法判断够不够。
+  - 统一入口：`wait_until(cond, timeout=10.0, interval=0.05)`（按**截止时间**轮询，先判一次，
+    返回 bool，**不抛异常**）、`wait_new(lst, pred, timeout=5.0, interval=0.1)`（只看**新增**元素，
+    避免拿到上一轮的旧记录而假 PASS）。
+  - **等「网络/回调答复」不要轮询列表**：用回调 + `queue.Queue`（或 `threading.Event`）——
+    见 `test_clock.py` 的 `send_id`：`OrpahServer(on_id_report=ID_EVENTS.put)` + 按 nonce 匹配、
+    先抽掉陈旧条目。
+  - **超时必须可见、失败要响**：`wait_until` 返回 False 时打印 `[!!] …未…` 并让用例失败
+    （`return 1/2`），**绝不静默继续**（旧代码就是静默 `continue`，链路没通也报 PASS）。
+  - 判据：任何等待都该能回答「等的是什么条件、超时多少、超时后怎么办」；答不上来就是猜次数。
 - **IoTDB 查询：时间可进 `WHERE`，值不行（2026-09-12，回放要按窗取数）**：
   - **时间过滤写进 SQL**（`WHERE time >= <ms> AND time <= <ms>` + `ORDER BY time ASC`）——
     时间戳是 IoTDB 的原生索引，准确且快。`tsdb.query_report_range` / `query_events_range`

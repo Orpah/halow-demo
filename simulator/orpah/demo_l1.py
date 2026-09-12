@@ -41,6 +41,7 @@ import sim                                  # noqa: E402  (host/sim.py)
 from server import OrpahServer, LOG as _SLOG    # noqa: E402
 from router import RouterBridge, LOG as _RLOG   # noqa: E402
 from client import ClientHost, LOG as _CLOG      # noqa: E402
+from waiting import wait_until                   # noqa: E402  按截止时间等待（只这一份实现）
 
 # 端口分配（避免与常用端口冲突）
 CONSOLE_A, LINK_A, HOST_A = 9401, 9411, 9421   # AP（Router）
@@ -84,10 +85,15 @@ def main():
 
     # 5) 等 STA 关联上 AP（空口自动连接）
     print("\n等待 STA 关联 AP…")
-    for _ in range(100):
-        if coreB.wifi.conn == sim.CONN_CONNECTED:
-            break
-        time.sleep(0.1)
+    if not wait_until(lambda: coreB.wifi.conn == sim.CONN_CONNECTED,
+                      timeout=15, interval=0.1):
+        # 等不到就**别往下跑**：关联前注入会被模块丢弃，最后只能看到“收到 0 条”这类现象
+        print(f"[!!] 15s 内 STA 未关联上 AP（当前 conn={coreB.wifi.conn_str()}）；"
+              "空口没起来，注入会被丢弃 —— 验收失败")
+        client.close()
+        router.stop()
+        srv.stop()
+        return 1
     print(f"STA conn = {coreB.wifi.conn_str()}")
 
     # 6) 注入 N 条上报（每条间隔 0.2s，让链路走完）
@@ -99,12 +105,7 @@ def main():
         time.sleep(0.2)
 
     # 7) 等 Server 收到
-    ok = False
-    for _ in range(50):
-        if srv.count >= sent:
-            ok = True
-            break
-        time.sleep(0.1)
+    ok = wait_until(lambda: srv.count >= sent, timeout=10, interval=0.1)
 
     print(f"\n=== ORPAH L1 验收 ===")
     print(f"Client 注入: {sent} 条")

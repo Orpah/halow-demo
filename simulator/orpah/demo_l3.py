@@ -51,6 +51,7 @@ import sim                                  # noqa: E402
 from server import OrpahServer              # noqa: E402
 from router import RouterBridge             # noqa: E402
 from client import ClientHost               # noqa: E402
+from waiting import wait_until              # noqa: E402  按截止时间等待（只这一份实现）
 from orpah_proto import (MSG_ACCESS_INFO, MSG_TRACKING_STATUS, MSG_ERROR,
                          ST_TRACKED, ST_NOT_TRACKED, ERR_FORMAT,
                          build_report)      # noqa: E402
@@ -95,13 +96,7 @@ class Downs:
             self.err_c2.append(msg)
 
 
-def wait(pred, secs=6.0, step=0.1):
-    end = time.time() + secs
-    while time.time() < end:
-        if pred():
-            return True
-        time.sleep(step)
-    return False
+from waiting import wait_until             # noqa: E402  按截止时间等待（只这一份实现）
 
 
 def count_tracking(downs):
@@ -150,15 +145,18 @@ def main():
 
     # 5) 等两台 STA 各自关联到自己的 AP
     print("\n等待 STA1/STA2 关联…")
-    wait(lambda: core_b1.wifi.conn == sim.CONN_CONNECTED, secs=8)
-    wait(lambda: core_b2.wifi.conn == sim.CONN_CONNECTED, secs=8)
+    ok_link1 = wait_until(lambda: core_b1.wifi.conn == sim.CONN_CONNECTED, timeout=10, interval=0.1)
+    ok_link2 = wait_until(lambda: core_b2.wifi.conn == sim.CONN_CONNECTED, timeout=10, interval=0.1)
+    if not (ok_link1 and ok_link2):
+        print(f"  [!!] 10s 内 STA 未全部关联（b1={core_b1.wifi.conn_str()} "
+              f"b2={core_b2.wifi.conn_str()}）—— 后面的漫游检查会失败")
     print(f"STA1 conn={core_b1.wifi.conn_str()} · STA2 conn={core_b2.wifi.conn_str()}")
 
     # ========== 阶段 A：Client 在 R1 网络（seq 1..2，未 mark）==========
     print(f"\n--- 阶段A：sn={sn} 在 R1 网络（2 条，未 mark）---")
     c1.send_req_connect(); time.sleep(0.3); c1.report_once()     # seq1
     c1.send_req_connect(); time.sleep(0.3); c1.report_once()     # seq2
-    ok_a = wait(lambda: count_tracking(rec.r1) >= 2, secs=5)
+    ok_a = wait_until(lambda: count_tracking(rec.r1) >= 2, timeout=5, interval=0.1)
     r1_len_after_a = len(rec.r1)
     print(f"R1 下行 TRACKING-STATUS={count_tracking(rec.r1)}（期望 2，NOT-TRACKED）")
 
@@ -166,8 +164,8 @@ def main():
     print(f"\n--- 阶段B：sn={sn} 漫游到 R2 网络（seq 续 {c1.seq + 1}）---")
     c2.seq = c1.seq                        # seq 续接（同一设备连续计数）
     c2.send_req_connect(); time.sleep(0.3); c2.report_once()     # seq3 经 R2
-    ok_b = wait(lambda: count_tracking(rec.r2) >= 1 and
-                rec.r2 and rec.r2[-1][2] == ST_NOT_TRACKED, secs=5)
+    ok_b = wait_until(lambda: count_tracking(rec.r2) >= 1 and
+                      rec.r2 and rec.r2[-1][2] == ST_NOT_TRACKED, timeout=5, interval=0.1)
     time.sleep(0.3)                        # 让“错误地也经 R1”的机会窗口过去
     r1_no_new = len(rec.r1) == r1_len_after_a   # 漫游后 R1 不应再收到该 sn 下行
     print(f"seq3 回执经 R2={count_tracking(rec.r2)} 条 · R1 无新增下行={r1_no_new}"
@@ -184,8 +182,8 @@ def main():
     # ========== 阶段 D：R2 第二次会话（缓存已追平 → tracked=True → TRACKED）==========
     print(f"\n--- 阶段D：sn={sn} 在 R2 再次会话（应 tracked=True）---")
     c2.send_req_connect(); time.sleep(0.3); c2.report_once()     # seq4 经 R2
-    ok_d = wait(lambda: count_tracking(rec.r2) >= 2 and
-                rec.r2 and rec.r2[-1][2] == ST_TRACKED, secs=5)
+    ok_d = wait_until(lambda: count_tracking(rec.r2) >= 2 and
+                      rec.r2 and rec.r2[-1][2] == ST_TRACKED, timeout=5, interval=0.1)
     # 检查最近一次 ACCESS-INFO 是否 tracked=True（经 R2 下行）
     acc_r2 = [m for m in rec.r2 if m[0] == MSG_ACCESS_INFO]
     d_tracked = bool(acc_r2 and acc_r2[-1][2] in (True, ST_TRACKED, "TRACKED"))
@@ -218,8 +216,8 @@ def main():
     c2.sn = bad
     before_f = srv.count
     c2.report_once()                       # 会带非法 sn 经 R2 → Server 拒
-    fmt_err = wait(lambda: any(m.get("code") == ERR_FORMAT for m in rec.err_c2),
-                   secs=5)
+    fmt_err = wait_until(lambda: any(m.get("code") == ERR_FORMAT for m in rec.err_c2),
+                         timeout=5, interval=0.1)
     c2.sn = sn                             # 还原
     not_counted = srv.count == before_f
     print(f"Client 收到 ERROR code=FORMAT-ERR={fmt_err} · Server 计数不变={not_counted}"

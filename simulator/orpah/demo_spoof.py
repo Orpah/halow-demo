@@ -43,6 +43,7 @@ import spoof                                 # noqa: E402
 from server import OrpahServer                # noqa: E402
 from router import RouterBridge               # noqa: E402
 from client import ClientHost                 # noqa: E402
+from waiting import wait_until                # noqa: E402  按截止时间等待（只这一份实现）
 
 CONSOLE_A, LINK_A, HOST_A = 9801, 9811, 9821   # AP（Router 侧）
 CONSOLE_B, LINK_B, HOST_B = 9802, 9812, 9822   # STA（Client 侧）
@@ -149,10 +150,14 @@ def main():
     if not client.connect():
         print("  Client 连不上 STA host 口，退出")
         return 2
-    for _ in range(100):                      # 等 STA 关联 AP（关联前注入会被丢）
-        if coreB.wifi.conn == sim.CONN_CONNECTED:
-            break
-        time.sleep(0.1)
+    # 等 STA 关联 AP（关联前注入会被模块丢弃 → 等不到就别跑，否则全是假 FAIL）
+    if not wait_until(lambda: coreB.wifi.conn == sim.CONN_CONNECTED,
+                      timeout=15, interval=0.1):
+        print(f"  [!!] 15s 内 STA 未关联上 AP（conn={coreB.wifi.conn_str()}）—— 退出")
+        client.close()
+        router.stop()
+        srv.stop()
+        return 2
     print(f"  链路就绪：STA conn = {coreB.wifi.conn_str()}\n")
 
     # ---- 逐条注入空口并断言 ----

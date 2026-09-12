@@ -46,6 +46,7 @@ import sim                                  # noqa: E402
 from server import OrpahServer              # noqa: E402
 from router import RouterBridge             # noqa: E402
 from client import ClientHost               # noqa: E402
+from waiting import wait_until, wait_new    # noqa: E402  等待工具（只这一份实现）
 from orpah_proto import MSG_ACCESS_INFO     # noqa: E402
 
 # 端口独立（demo_l1/9401..、demo_l2/95xx、demo_l3/96xx、ui/9401..）
@@ -59,26 +60,6 @@ def _loop(core, stop):
         core.wifi.poll()
         core.link.poll()
         time.sleep(0.005)
-
-
-def wait(pred, secs=6.0, step=0.1):
-    end = time.time() + secs
-    while time.time() < end:
-        if pred():
-            return True
-        time.sleep(step)
-    return False
-
-
-def wait_new(lst, pred, secs=5.0, step=0.1):
-    """等待 lst 新增了元素且新元素满足 pred（避免匹配到旧记录造成假 PASS）。"""
-    n0 = len(lst)
-    end = time.time() + secs
-    while time.time() < end:
-        if len(lst) > n0 and pred(lst[-1]):
-            return True
-        time.sleep(step)
-    return False
 
 
 def last_access(access):
@@ -121,12 +102,15 @@ def main():
                         on_recv=lambda m: access.append(m)
                         if m.get("type") == MSG_ACCESS_INFO else None)
     assert client.connect(), "Client 连不上 STA host 口"
-    wait(lambda: core_b.wifi.conn == sim.CONN_CONNECTED, secs=8)
+    if not wait_until(lambda: core_b.wifi.conn == sim.CONN_CONNECTED,
+                      timeout=10, interval=0.1):
+        print(f"  [!!] 10s 内 STA 未关联上 AP（conn={core_b.wifi.conn_str()}）—— "
+              "后面的拉表检查会失败")
     print(f"STA conn = {core_b.wifi.conn_str()}")
 
     # ---- 4) 首次 REQ-CONNECT（启动拉表已就绪 → 无需再拉，直接答 tracked=True）----
     client.send_req_connect()
-    ok_first = wait_new(access, lambda m: m.get("tracked") is True, secs=5)
+    ok_first = wait_new(access, lambda m: m.get("tracked") is True, timeout=5)
     print(f"② 首次 REQ：ACCESS-INFO.tracked={last_access(access)}"
           f"（启动拉表已让缓存就绪）")
 
@@ -136,7 +120,7 @@ def main():
     router._synced = False             # + 标记未同步（重启后需重新拉取）
     pulls_before = srv.pull_count
     client.send_req_connect()
-    ok_miss = wait_new(access, lambda m: m.get("tracked") is True, secs=5)
+    ok_miss = wait_new(access, lambda m: m.get("tracked") is True, timeout=5)
     pulled_now = srv.pull_count > pulls_before     # 这次 REQ 真的触发了一次拉表
     print(f"③ 重启后 REQ：ACCESS-INFO.tracked={last_access(access)} · "
           f"pull_count {pulls_before}→{srv.pull_count} · 触发拉取={pulled_now}")
@@ -148,7 +132,7 @@ def main():
     pushed = router.lost_cache.get(str(sn), {}).get("tracked") is False
     pulls_before = srv.pull_count
     client.send_req_connect()
-    ok_untrack = wait_new(access, lambda m: m.get("tracked") is False, secs=5)
+    ok_untrack = wait_new(access, lambda m: m.get("tracked") is False, timeout=5)
     no_extra_pull = srv.pull_count == pulls_before  # sn 在缓存 → 不该触发拉表
     print(f"④ untrack 后缓存 tracked={router.lost_cache.get(str(sn))} · "
           f"REQ 应答 tracked={last_access(access)} · 未多拉={no_extra_pull}")

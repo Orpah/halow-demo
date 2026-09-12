@@ -56,6 +56,7 @@ import motion                              # noqa: E402  演示用「移动的�
 import spoof                               # noqa: E402  防 spoof：攻击报文构造（脚本/UI 共用）
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
+from waiting import wait_until            # noqa: E402  按截止时间等待（只这一份实现）
 import damm32 as d32                      # noqa: E402  校验算法单一源
 import luhn32 as l32                      # noqa: E402
 import mod97 as m97                       # noqa: E402
@@ -400,11 +401,14 @@ class OrpahApp:
             return False
 
         # 5) 等 STA 关联 AP（关联前注入会被模块丢弃 → 先等连上再开始上报）
-        for _ in range(100):
-            if coreB.wifi.conn == sim.CONN_CONNECTED:
-                break
-            time.sleep(0.1)
-        print(f"[ui] STA conn = {coreB.wifi.conn_str()}  链路就绪")
+        #    UI 场景与验收脚本不同：**连不上也要把界面起起来**（能看到 conn=OFFLINE、可手动排查），
+        #    所以这里只告警不退出（以前是猜 100×0.1s，超时了也当“就绪”往下走，说不清状态）。
+        if wait_until(lambda: coreB.wifi.conn == sim.CONN_CONNECTED,
+                      timeout=15, interval=0.1):
+            print(f"[ui] STA conn = {coreB.wifi.conn_str()}  链路就绪")
+        else:
+            print(f"[ui] 警告：15s 内 STA 未关联 AP（conn={coreB.wifi.conn_str()}）——"
+                  "界面上报会被丢弃；可先在页面上检查空口/配置")
 
         # 6) 会话线程（L2：REQ-CONNECT → REPORT 自动周期）
         th = threading.Thread(target=self._report_loop, daemon=True)

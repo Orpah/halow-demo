@@ -46,6 +46,7 @@ import sim                                  # noqa: E402
 from server import OrpahServer              # noqa: E402
 from router import RouterBridge             # noqa: E402
 from client import ClientHost               # noqa: E402
+from waiting import wait_until              # noqa: E402  按截止时间等待（只这一份实现）
 from orpah_proto import (MSG_ACCESS_INFO, MSG_TRACKING_STATUS,
                          ST_TRACKED, ST_NOT_TRACKED)   # noqa: E402
 
@@ -79,15 +80,6 @@ class Recorder:
             self.tracking.append(msg)
 
 
-def wait(pred, secs=5.0, step=0.1):
-    end = time.time() + secs
-    while time.time() < end:
-        if pred():
-            return True
-        time.sleep(step)
-    return False
-
-
 def main():
     ap = argparse.ArgumentParser(description="ORPAH L2 全消息流演示+验收（纯 PC）")
     ap.add_argument("--sn", default="CN-WH01-9AF3C1D2")
@@ -118,7 +110,10 @@ def main():
 
     # 5) 等 STA 关联 AP
     print("\n等待 STA 关联 AP…")
-    wait(lambda: coreB.wifi.conn == sim.CONN_CONNECTED, secs=5)
+    if not wait_until(lambda: coreB.wifi.conn == sim.CONN_CONNECTED,
+                      timeout=10, interval=0.1):
+        print(f"  [!!] 10s 内 STA 未关联上 AP（conn={coreB.wifi.conn_str()}）—— "
+              "下行回执会收不到，后面的检查会失败")
     print(f"STA conn = {coreB.wifi.conn_str()}")
 
     # 6) 分支一：未 mark（走失库无该 sn）
@@ -126,8 +121,8 @@ def main():
     client.send_req_connect()
     time.sleep(0.3)
     client.report_once()
-    ok1 = wait(lambda: rec.tracking and rec.tracking[-1].get("status") == ST_NOT_TRACKED,
-               secs=5)
+    ok1 = wait_until(lambda: rec.tracking and rec.tracking[-1].get("status") == ST_NOT_TRACKED,
+                     timeout=5, interval=0.1)
     info1 = rec.access[-1] if rec.access else {}
     print(f"Client 收到 ACCESS-INFO: tracked={info1.get('tracked')} "
           f"server_ok={info1.get('server_ok')}")
@@ -144,7 +139,8 @@ def main():
     client.send_req_connect()
     time.sleep(0.3)
     client.report_once()
-    ok2 = wait(lambda: rec.access and rec.access[-1].get("tracked") is True, secs=5)
+    ok2 = wait_until(lambda: rec.access and rec.access[-1].get("tracked") is True,
+                     timeout=5, interval=0.1)
     time.sleep(0.3)                          # 等 TRACKED 下行
     info2 = rec.access[-1] if rec.access else {}
     status2 = None
