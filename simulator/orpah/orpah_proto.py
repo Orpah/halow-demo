@@ -226,7 +226,7 @@ def build_error(code, sn=None, msg_text=None, ts=None):
 
 
 def new_rid():
-    """生成一个**拉表关联号**（随机 token，6 字节 hex）。
+    """生成一个**拉表关联号**（随机 token，6 字节 = 12 位十六进制小写）。
 
     用途（2026-09-12）：`ORPAH-LOST-TABLE-REQ` 带上它，Server 的应答**原样回显**;
     Router 靠它区分「我拉表的应答」与「Server 主动推送」—— 两者是不同事件

@@ -147,6 +147,26 @@ class TestOtherBranches(unittest.TestCase):
         srv._handle({"type": op.MSG_REQ_CONNECT, "sn": "CN-WH01-9AF3C1D2"}, ADDR)
         self.assertEqual(srv.router_for.get("CN-WH01-9AF3C1D2"), ADDR)
 
+    def test_req_connect_records_router_for_but_does_not_register(self):
+        """REQ-CONNECT 误达 Server 时**只记 router_for，不注册 Router**（2026-09-12 明确语义）。
+
+        REQ-CONNECT 本该由 Router 查本地缓存就地应答；到 Server 属异常路径。
+        正式注册（进 `routers` 集合 → 以后走失表变更会推给它）只认 Router 真正上行的那几种：
+        REPORT / ORPAH-FOUND / LOST-TABLE-REQ。本测试把这个**有意为之**的选择锁住。
+        """
+        srv = make_srv()
+        srv._handle({"type": op.MSG_REQ_CONNECT, "sn": "CN-WH01-9AF3C1D2"}, ADDR)
+        self.assertEqual(srv.router_for.get("CN-WH01-9AF3C1D2"), ADDR)   # 记了
+        self.assertNotIn(ADDR, srv.routers)                              # 没注册
+        self.assertEqual(len(srv.sock.sent), 0)                          # 也没推任何东西
+        # 对照：三种真正的上行都会注册
+        for msg in (op.build_report(sn="CN-WH01-9AF3C1D2", seq=1),
+                    op.build_found("CN-WH01-9AF3C1D2"),
+                    op.build_lost_table_req(rid="RID-1")):
+            s2 = make_srv()
+            s2._handle(msg, ADDR)
+            self.assertIn(ADDR, s2.routers, msg.get("type"))
+
     def test_found_increments(self):
         srv = make_srv()
         srv._handle(op.build_found("CN-WH01-9AF3C1D2"), ADDR)

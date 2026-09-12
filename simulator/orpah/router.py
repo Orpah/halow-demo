@@ -24,6 +24,7 @@ HostBus 一个连接即可双向：recv_frame 收上行、send_frame 注入下�
     python orpah/router.py --ap-port 9101 --server-port 19447
 """
 import argparse
+import collections
 import socket
 import sys
 import threading
@@ -82,11 +83,15 @@ class RouterBridge:
         # 是否已成功同步过走失表（此后依赖 Server 推送即可；重启后复位为未同步）
         self._synced = False
         # 拉表应答 vs 推送区分（2026-09-12 改）：靠 **关联号 rid** 配对，不再用时间窗猜。
-        # 发出 REQ 时记下本次 rid；只有 rid 匹配的 LOST-TABLE 算“本机拉表的应答”，
-        # 其余（无 rid 的主动推送）计“收到走失表下发”。
-        # 原因：旧写法用“REQ 后 ≤1.5s 内到的 LOST-TABLE 算应答”，推送恰好落在窗口内
-        # 会被误算成应答（少计 1 次），反向也会多计 —— 属已知近似，本项把它消掉。
-        self._pull_rid = None
+        # 发出 REQ 时把本次 rid 记进 `_pull_rids`；只有 rid 落在集合里的 LOST-TABLE
+        # 算“本机拉表的应答”，其余（无 rid 的主动推送）计“收到走失表下发”。
+        # 2026-09-12 复核修正：用**集合**而不是单个变量 —— `start()` 里两个循环线程先起、
+        # 再调 `sync()`，而 `_handle_up` 也可能在未同步时再调一次 `sync()` →
+        # **两次拉表可能重叠**；单变量时“读-判-写”非原子，后一次 sync 覆盖前一次的 rid
+        # 会让先到的应答掉配对（多计 1 次）。集合天然支持多个 in-flight 请求。
+        # `_pull_lock` 只保护这个集合（deque 有 maxlen 上限，应答丢失也不会无界增长）。
+        self._pull_lock = threading.Lock()
+        self._pull_rids = collections.deque(maxlen=8)
         # 收到的 Server 主动推送的走失表次数（下发计数，供 UI Router 卡片展示）
         self.lost_push_recv = 0
 
@@ -216,19 +221,28 @@ class RouterBridge:
 
     def _apply_lost_table(self, table):
         entries = table.get("entries") or []
-        self.lost_cache = {}
+        # 先构造新表再**整体替换**：原来是 `self.lost_cache = {}` 再逐条填，中间有一瞬
+        # 缓存为空 —— 若此时 REQ-CONNECT 到来会误答 NOT-TRACKED（极窄窗口，但没必要留）。
+        # 重建后一次性绑定：读方要么看到旧表、要么看到新表，不会看到“半张表”。
+        cache = {}
         for e in entries:
-            self.lost_cache[str(e.get("sn"))] = {
+            cache[str(e.get("sn"))] = {
                 "tracked": bool(e.get("tracked")),
                 "note": e.get("note", ""),
             }
+        self.lost_cache = cache
         log(f"LOST-TABLE 更新（{len(entries)} 项）")
         # 计数：Server 主动推送才算“收到走失表下发”；本机拉表的应答不算。
-        # 判据 = **rid 是否等于本次拉表的 rid**（无 rid ⇒ 主动推送；rid 不匹配 ⇒ 也是推送，
+        # 判据 = **rid 是否在当前在飞集合里**（无 rid ⇒ 主动推送；rid 不在集合里 ⇒ 也是推送，
         # 例：上一次超时的旧应答／别的 Router 的应答被广播给本机）。
         rid = table.get("rid")
-        if rid and rid == self._pull_rid:
-            self._pull_rid = None            # 本次拉表已对上，清掉（避免重复命中）
+        is_reply = False
+        if rid:
+            with self._pull_lock:
+                if rid in self._pull_rids:
+                    self._pull_rids.remove(rid)
+                    is_reply = True
+        if is_reply:
             log("（本机拉表应答：不计“收到走失表下发”）")
         else:
             self.lost_push_recv += 1
@@ -242,20 +256,22 @@ class RouterBridge:
         发送失败/超时返回 False（缓存保持原样，下次 REQ-CONNECT 会再触发）。
 
         注：等待期间若 Server 恰好主动推来一张表（无 rid），**也算拿到权威全量表**
-        （置位 + `_synced`），只是它按“推送”计数；本次 rid 保留着，等应答真到了
-        再按“应答”配对（若始终没到，下一次 sync 会覆盖它 —— 极端并发下最多 1 次计数偏差，
-        已在此写明，不再是隐含的时间窗猜测）。
+        它按“推送”计数；本次 rid 留在集合里，等应答真到了再按“应答”配对
+        （集合支持多个 in-flight 请求 → 两次拉表重叠也不会丢配对）。
         """
         self._lost_event.clear()
         if not self.udp:
             return False
         rid = new_rid()
-        self._pull_rid = rid
+        with self._pull_lock:
+            self._pull_rids.append(rid)
         try:
             self.udp.sendto(encode_msg(build_lost_table_req(rid=rid)),
                             self.server_addr)
         except OSError as e:
-            self._pull_rid = None
+            with self._pull_lock:
+                if rid in self._pull_rids:
+                    self._pull_rids.remove(rid)
             log(f"拉表请求发送失败: {e}")
             return False
         ok = self._lost_event.wait(timeout)

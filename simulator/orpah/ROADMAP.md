@@ -448,10 +448,22 @@
      **应答原样回显**、主动推送不带 → 确定配对（不匹配的旧/别台应答按推送计）。
      两端语义：Router「收到走失表」只计**Server 主动推送**；Server「发布走失表」只在
      mark/untrack 变更时计 → 两边能对上。协议做法已回填 `Protocol/docs/orpah-over-halow/SPEC.md`
-     v0.7.1（§5 字段表 + §7 拉表时机 + §9 L3b）；`demo_l4.py` 加 6 项 rid 检查（共 10 项全 PASS），
+     v0.7.1（§5 字段表 + §7 拉表时机 + §9 L3b）；`demo_l4.py` 加 6 项 rid 检查（共 **11** 项全 PASS），
      含**旧近似回归锁**（直接喂三类表：应答计 0 / 推送计 1 / rid 不匹配计 2）。
-     遗留：并发两次 sync 时，若第一次的旧应答在第二次之后到达，会被按“推送”多计 1 次（已在
-     `router.sync()` 注释写明；单机顺序调用不会发生）。
+     **2026-09-12 复核加固**：① 把单个 `_pull_rid` 改成**在飞 rid 集合**（`deque(maxlen=8)` + 锁）
+     —— `start()` 先起两个循环线程再 `sync()`，且 `_handle_up` 也可能再调一次
+     → **两次拉表可能重叠**，单变量时“读-判-写”非原子会让先到的应答掉配对（多计 1 次）；
+     集合天然支持多 in-flight（新增回归锁：两个 rid 先后回都算应答）；
+     ② `_apply_lost_table` 从“先清空再逐条填”改成**先建新表再整体替换**（去掉“中间一瞬空表”
+     的窗口 → 那瞬间来的 REQ-CONNECT 会误答 NOT-TRACKED）；
+     ③ `demo_l4` 里的 `sleep` 换成 `wait_until`（本仓“不猜次数等待”的规矩）。
+  - **Router 线程模型（复核时明确，供下次别再问）**：`router.py` 有 **3 个线程** ——
+    `_air_loop`（收空口帧 → `_handle_up`，会读 `_synced`/`lost_cache`，可能调 `sync()`）、
+    `_udp_loop`（收 Server 下行 → `_apply_lost_table`，写 `lost_cache`/计 `lost_push_recv`）、
+    调用方线程（`start()`/`REQ-CONNECT` 路径调 `sync()`，写 `_pull_rids`）。
+    现状：`_pull_rids` 有 `_pull_lock`；`lost_cache` 改成**整体替换**（不再逐条写）；
+    `lost_push_recv += 1` 只在 `_udp_loop` 单个写者里 → 不需锁；
+    `_synced` 布尔单写读（最坏多拉一次，无害）。
   ② `status()` 与各回调线程共享内存结构（`reports`/`order`/`flow`/`id_reports`…**无锁**）：
      已修掉唯一会真抛异常的路径（`reports[seq]` → `reports.get(seq)` + 跳过，
      见 `ui_server.status()` 注释；用真实线程复现过 `KeyError: 4`）。

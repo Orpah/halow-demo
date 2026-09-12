@@ -129,8 +129,11 @@ def main():
     # ---- 6) untrack → 变更推送（Router 已在见过集）→ 缓存 tracked=False ----
     print(f"\n--- Server untrack sn={sn}（变更推送，Router 无需再拉）---")
     srv.untrack(sn)
-    time.sleep(0.5)
-    pushed = router.lost_cache.get(str(sn), {}).get("tracked") is False
+    # 不用 sleep 猜时间：等到缓存真的变成 False（本项目“不猜次数等待”的规矩，见 waiting.py）
+    pushed = wait_until(lambda: router.lost_cache.get(str(sn), {}).get("tracked") is False,
+                        timeout=3, interval=0.05)
+    if not pushed:
+        print("  [!!] 3s 内未收到变更推送（缓存仍未见 tracked=False）")
     pulls_before = srv.pull_count
     client.send_req_connect()
     ok_untrack = wait_new(access, lambda m: m.get("tracked") is False, timeout=5)
@@ -156,22 +159,32 @@ def main():
     # 而此前的 untrack 变更推送**已经**计过（>0）—— 一升一不升才说明配对对了。
     push_before = router.lost_push_recv
     sync_ok2 = router.sync(timeout=2.0)
-    time.sleep(0.4)
     rid_checks["此前 Server 主动推送已计入（untrack 那次）"] = push_before >= 1
     rid_checks["sync() 拿到应答且不计入“收到推送”"] = (sync_ok2
                                                   and router.lost_push_recv == push_before)
     # 回归锁：直接喂三类表到计数逻辑（应答计 0 / 推送计 1 / rid 不匹配也算推送 → 2）
-    probe = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV)   # 不 start：只喂 _apply_lost_table
-    probe._pull_rid = "RID-2"
+    probe = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV)   # 完整构造但不 start：只喂 _apply_lost_table
+    probe._pull_rids.append("RID-2")
     probe._apply_lost_table(build_lost_table([], rid="RID-2"))      # 本机拉表应答
     n_reply = probe.lost_push_recv
     probe._apply_lost_table(build_lost_table([]))                    # 主动推送
     n_push = probe.lost_push_recv
-    probe._pull_rid = "RID-2"
+    probe._pull_rids.append("RID-2")
     probe._apply_lost_table(build_lost_table([], rid="RID-3"))      # 别人的/过期的应答
     n_other = probe.lost_push_recv
     rid_checks["计数口径：应答不计 / 推送计 / rid 不匹配计（0→1→2）"] = \
         (n_reply, n_push, n_other) == (0, 1, 2)
+    # 回归锁（并发）：**两次拉表重叠**时，两个应答都必须配对成功
+    # （2026-09-12 复核修正：原来只存一个 `_pull_rid`，后一次 sync 覆盖前一次 →
+    #   先到的应答会掉配对、被当成推送多计 1 次；改成在飞 rid 集合后不再可能）
+    probe2 = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV)
+    probe2._pull_rids.append("RID-A")
+    probe2._pull_rids.append("RID-B")
+    probe2._apply_lost_table(build_lost_table([], rid="RID-B"))     # 后发的先回
+    two_b = probe2.lost_push_recv
+    probe2._apply_lost_table(build_lost_table([], rid="RID-A"))     # 先发的后回
+    two_a = probe2.lost_push_recv
+    rid_checks["重叠拉表：两个应答都算应答（不计推送）"] = (two_b, two_a) == (0, 0)
     for name, passed in rid_checks.items():
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
 

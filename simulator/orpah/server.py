@@ -11,7 +11,8 @@ L2 扩展（SPEC §7/§5）：Server 是**走失表权威**：
     给该 Router（命中=TRACKED+LOG-OK / 未命中=NOT-TRACKED / 校验失败=*ERR）
   - 去重/最新位置（F-04/F-07）：同 (sn,seq) 重复（重传/多 Router 转发同一帧）丢弃
     不重复计数；每次接受新 REPORT 才把该 sn 的「当前 Router」切到上报来源（漫游时
-    下行只回最新 Router）；首次见到的 Router 立即推当前走失表（新 Router 追平）。
+    下行只回最新 Router）；**首次见到某台 Router 上报/拉表**（`_note_router`：REPORT /
+    ORPAH-FOUND / LOST-TABLE-REQ，不以 REQ-CONNECT 为依据）立即推当前走失表（新 Router 追平）。
   - 维护走失库（内存表）：mark_tracked(sn) / untrack(sn) / snapshot()
   - 走失库变更 → 向所有见过（上报过）的 Router 下发 LOST-TABLE（Router 据此在
     REQ-CONNECT 阶段直接告知 ACCESS-INFO 的 tracked 标志）
@@ -168,7 +169,12 @@ class OrpahServer:
         if mtype == MSG_REPORT:
             self._on_report(msg, addr)
         elif mtype == MSG_REQ_CONNECT:
-            # REQ-CONNECT 只应到 Router；若误达 Server，忽略（由 Router 处理）
+            # REQ-CONNECT 只应到 Router（由它查本地走失缓存就地应答 ACCESS-INFO）。
+            # 若**误达** Server：只记下该 sn 的 UDP 来源地址（供 TRACKING-STATUS 等回执找路），
+            # **不把该 addr 记入 `routers`（不注册）** —— 这是一条异常路径，不该让它变成
+            # “Router 已与 Server 建联”的依据；正式注册靠 Router 真正上行的那几种报文
+            # （REPORT / ORPAH-FOUND / LOST-TABLE-REQ，路径见 `_note_router`）。
+            # 语义已由 test_server.test_req_connect_records_router_for_but_does_not_register 锁住。
             if sn:
                 with self._lock:
                     self.router_for[str(sn)] = addr
