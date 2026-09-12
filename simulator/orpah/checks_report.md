@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 14:08:10
-- git HEAD：`8bc13bd`
+- 时间：2026-09-12 14:17:37
+- git HEAD：`b8ecd1f`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（13/13 套件通过）
 
@@ -10,18 +10,18 @@
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
 | 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.0s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
 | IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
-| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.3s | 通过 |
-| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.3s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
+| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
+| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.6s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.2s | 通过 |
+| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
 
 ## 关键输出
 
@@ -36,7 +36,7 @@
       OK   default() 复用同一实例
     全部通过
 
-### 密钥生命周期 — PASS（0.2s）
+### 密钥生命周期 — PASS（0.1s）
 
     == 1. 签发（幂等） ==
     == 2. 验签（第 1 代） ==
@@ -59,12 +59,12 @@
 
 ### 告警规则（含处置态） — PASS（0.1s）
 
-    PASS  长未上报：只报超时的启用设备
+    PASS  长未上报：启用/走失中的都报，停用/报废不报
     PASS  长未上报：带 gap 且等级 warn
+    PASS  长未上报：走失中的追踪器掉线要报（2026-09-12 修正）
+    PASS  长未上报：停用的设备不报
     PASS  长未上报：等于阈值不告警
     PASS  走失超时：只报 open 的案件
-    PASS  走失超时：等级 crit
-    PASS  走失超时：case_key 可去重
     PASS  env：清后恢复默认
     all alert tests passed
 
@@ -95,7 +95,7 @@
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
-    Ran 16 tests in 0.010s
+    Ran 16 tests in 0.009s
     OK
 
 ### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
@@ -107,13 +107,13 @@
       OK   parse_eth_frame：ethertype 不符 → None
     批量用例：全部通过
 
-### L1 端到端 — PASS（1.3s）
+### L1 端到端 — PASS（1.4s）
 
     === ORPAH L1 验收 ===
     Server 收到: 3 条  (sn 一致: True)
     结果: [PASS]
 
-### L2 消息流 — PASS（2.3s）
+### L2 消息流 — PASS（2.2s）
 
     --- 分支一：走失库未命中 sn=CN-WH01-9AF3C1D2 ---
     --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
@@ -122,7 +122,7 @@
     分支二(命中 TRACKED): PASS
     结果: [PASS]
 
-### L3 多 Router 漫游/去重 — PASS（4.3s）
+### L3 多 Router 漫游/去重 — PASS（4.2s）
 
     --- 阶段A：sn=CN-WH01-9AF3C1D2 在 R1 网络（2 条，未 mark）---
     --- 阶段B：sn=CN-WH01-9AF3C1D2 漫游到 R2 网络（seq 续 3）---
@@ -141,7 +141,7 @@
       [PASS] ④ 变更推送仍生效且 REQ 不再多拉
     结果: [PASS]
 
-### 防 spoof 空口端到端 — PASS（1.2s）
+### 防 spoof 空口端到端 — PASS（1.6s）
 
     ==========================================================================
     ==========================================================================

@@ -63,13 +63,27 @@ def check(name, cond):
 
 
 # ---- 规则 1：长未上报 ------------------------------------------------------
-r = regis(dev("A", last_seen=NOW - 100),                        # 超时 → 应告警
-          dev("B", last_seen=NOW - 10),                         # 正常 → 不告警
+# 口径（2026-09-12 复核修正）：工作态 = 启用 **或 走失**，且**曾经上报过**。
+# 走失者的追踪器最该盯（掉线往往就是找不到人的原因）；停用/报废不盯。
+r = regis(dev("A", last_seen=NOW - 100),                        # 启用+超时 → 应告警
+          dev("B", last_seen=NOW - 10),                         # 启用+正常 → 不告警
           dev("C", last_seen=None),                             # 从未上报 → 不告警
-          dev("D", status=reg.STATUS_LOST, last_seen=NOW - 100))  # 非启用 → 不告警
+          dev("D", status=reg.STATUS_LOST, last_seen=NOW - 100),   # 走失中+超时 → **应告警**
+          dev("E", status=reg.STATUS_DISABLED, last_seen=NOW - 100),  # 停用 → 不告警
+          dev("F", status=reg.STATUS_SCRAPPED, last_seen=NOW - 100))  # 报废 → 不告警
 a = alr.evaluate(r, case_mgr(), deque(), now=NOW)
-check("长未上报：只报超时的启用设备", [x["sn"] for x in a] == ["A"])
+check("长未上报：启用/走失中的都报，停用/报废不报",
+      [x["sn"] for x in a] == ["A", "D"])
 check("长未上报：带 gap 且等级 warn", a[0]["gap"] == 100 and a[0]["level"] == "warn")
+
+# 走失设备的告警单独确认（避免以后又被“非启用就不报”改回去）
+a_lost = alr.evaluate(regis(dev("D", status=reg.STATUS_LOST, last_seen=NOW - 100)),
+                      case_mgr(), deque(), now=NOW)
+check("长未上报：走失中的追踪器掉线要报（2026-09-12 修正）",
+      [x["sn"] for x in a_lost] == ["D"])
+check("长未上报：停用的设备不报",
+      alr.evaluate(regis(dev("E", status=reg.STATUS_DISABLED, last_seen=NOW - 100)),
+                   case_mgr(), deque(), now=NOW) == [])
 
 # 边界：刚好等于阈值不算超时（用 > 比较）
 a = alr.evaluate(regis(dev("A", last_seen=NOW - alr.NO_REPORT_SEC)), case_mgr(), deque(), now=NOW)

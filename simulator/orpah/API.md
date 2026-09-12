@@ -341,10 +341,20 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 | kind | level | 条件 | 阈值 | 环境变量 |
 |---|---|---|---|---|
-| `no_report` | `warn` | 启用中且**曾上报过**的设备，距上次上报超过 N 秒 | `30` | `ORPAH_ALERT_NO_REPORT_SEC` |
+| `no_report` | `warn` | **工作态**（启用 **或 走失中**）且**曾上报过**的设备，距上次上报超过 N 秒 | `30` | `ORPAH_ALERT_NO_REPORT_SEC` |
 | `case_overtime` | `crit` | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
 | `case_handled_overtime` | `warn` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` | `ORPAH_ALERT_CASE_HANDLED_SEC` |
 | `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
+
+⚠ **默认值分两类，别看混**：
+- **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s、`case_overtime` 180s、
+  `sig_window` 5 条、`sig_fail_ratio` 0.5。
+- **真实时长**：`case_handled_overtime` 的 `86400`（= 24h）—— 真实世界里“接手后一天没找到”才算拖太久，
+  演示里不会自然发生；想现场看效果把它压小（如 `ORPAH_ALERT_CASE_HANDLED_SEC=5`）。
+
+⚠ `no_report` 为什么把**走失中**也算工作态（2026-09-12 修正）：走失者的追踪器正是最该盯的一台，
+它掉线（没电/出范围）往往就是“找不到人”的原因；原来只算“启用”，一旦立案（设备转 `lost`）
+反而不再盯它，方向反了。停用/报废仍不盯（已不是现行设备）。
 
 - 环境变量与事件保留期限（`ORPAH_EVENT_RETENTION_DAYS`，见 §5）同一套机制：
   未设 / 空串 / 非法值 → 回退上表默认值。

@@ -25,7 +25,7 @@ alerts.py — 告警规则引擎（供页面红点消费）
 - 时间戳单位统一为**秒**（与 `registry.touch` / `cases.mark` 一致）。
 
 已实现（第一批 3 条 + B 方案 1 条）：
-    no_report               启用中的设备超过 no_report_sec 无上报
+    no_report               工作态（**启用 或 走失**）的设备超过 no_report_sec 无上报
     case_overtime           案件立案超过 case_overtime_sec 仍未发现**且无人接手**（只算 open；已 found 不算）
     case_handled_overtime   已接手的案件，距**接手时刻**超过 case_handled_sec 仍未发现（B 方案）
     sig_fail_rate           最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
@@ -97,10 +97,14 @@ def evaluate(registry, cases, id_reports, now=None, **th):
     fail_ratio = th.get("sig_fail_ratio", SIG_FAIL_RATIO)
     out = []
 
-    # 1) 长未上报：只看「启用中**且曾经上报过**」的设备 ——
-    #    从未上报的新设备不告警，否则一开机就一片红，反而盖住真问题。
+    # 1) 长未上报：只看「**工作态**且曾经上报过」的设备 ——
+    #    · 工作态 = 启用 **或 走失**（2026-09-12 复核修正）：走失者的追踪器正是最该盯的一台，
+    #      它掉线（没电/出范围）往往就是「找不到人」的原因；原来只算 STATUS_ACTIVE，
+    #      一旦立案（设备转 lost）反而不再盯它，方向反了。
+    #    · 停用/报废不报（已不是现行设备）。
+    #    · 从未上报的新设备不报，否则一开机就一片红，反而盖住真问题。
     for rec in registry.devices.values():
-        if rec.status != reg.STATUS_ACTIVE or not rec.last_seen:
+        if rec.status not in (reg.STATUS_ACTIVE, reg.STATUS_LOST) or not rec.last_seen:
             continue
         gap = now - int(rec.last_seen)
         if gap > no_rep:
