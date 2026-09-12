@@ -1,27 +1,28 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 19:31:40
-- git HEAD：`8594564`
+- 时间：2026-09-12 19:47:08
+- git HEAD：`8f8fc40`
 - 解释器：3.13.14 @ C:\Python313\python.exe
-- 结论：**全部通过**（16/16 套件通过）
+- 结论：**全部通过**（17/17 套件通过）
 
 ## 套件结果
 
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
 | 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
-| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
+| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.5s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 | 降级策略（§8.2 选级 / §8.3 服务端） | `test_levels.py` | ✅ PASS | 0.1s | 通过 |
 | 抓包解析 / 双源对照 | `test_capture.py` | ✅ PASS | 0.1s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
-| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
+| 设备时钟漂移（长基线） | `demo_clock.py` | ✅ PASS | 0.1s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
+| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.3s | 通过 |
 | L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.3s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.1s | 通过 |
 | 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
@@ -39,7 +40,7 @@
       OK   replay.html ��ҳȡ /api/config��HTML ���ֻ�Ƕ��ף�
     ȫ��ͨ��
 
-### 密钥生命周期 — PASS（0.1s）
+### 密钥生命周期 — PASS（0.2s）
 
     == 1. ǩ�����ݵȣ� ==
     == 2. ��ǩ���� 1 ���� ==
@@ -78,16 +79,16 @@
     PASS  ǩ����ȡ���� alg �� unknown�����£�
     PASS  ǩ���������� �� fail_ratio=None������ 0��
 
-### 时钟可信（ts=0 无 RTC） — PASS（0.4s）
+### 时钟可信（ts=0 无 RTC） — PASS（0.5s）
 
     == 1. effective_ts 归一化规则（唯一入口，各层共用）==
     == 2. 验签的时间窗（ts=0 跳过窗口，仅靠 nonce 防重放）==
     == 3. 端到端（进程内 UDP）：ts=0 的报告落库时刻 + 审计留痕 ==
     == 4. 设备时钟偏移/漂移估计 ==
-      OK   Tracker：没见过的 SN → None
+      OK   并发：4 写 × 50 条 + 2 读线程 → 无异常且一条不丢
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.5s）
+### IoTDB 审计/时间窗 — PASS（0.6s）
 
     == 1. actor �ֶ� ==
     == 2. query_events �ض� actor ==
@@ -106,7 +107,7 @@
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
-    Ran 18 tests in 0.010s
+    Ran 18 tests in 0.012s
     OK
 
 ### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
@@ -140,12 +141,21 @@
       OK   --json �ṹ�� summary+rows �� rows ȫ��  {'frames': 8, 'orpah': 5, 'by_type': {'ORPAH-REQ-CONNECT': 1, 'ORPAH-REPORT': 2, 'ORPAH-ACCESS-INFO': 1, 'ORPAH-ID-REPORT': 1}, 'errors': {'not-orpah': 1, 'bad-json': 1, 'bad-frame': 1}, 'linktype': 1, 'linktype_name': 'Ethernet'}
     ȫ��ͨ��
 
-### L1 端到端 — PASS（1.3s）
+### 设备时钟漂移（长基线） — PASS（0.1s）
+
+    --- A 时钟准（跑 1h）---
+      [PASS] A：offset ≈ -0.5s（整数秒截断的固有偏置，不是设备真的慢 0.5s）
+      [PASS] A：漂移不给数 —— 原因=noise（噪声里看不出趋势，不编 0 也不编别的）
+    --- B 晶振偏快 +200ppm（跑 1h）---
+      [PASS] B：offset ≈ +0.2s（当前时刻的偏差：漂移 1h 累计 +0.72s − 截断 0.5s）
+      [PASS] B：漂移估出 +200ppm（晶振级，短窗做不到）
+
+### L1 端到端 — PASS（1.4s）
 
     === ORPAH L1 验收 ===
     结果: [PASS]
 
-### L2 消息流 — PASS（2.2s）
+### L2 消息流 — PASS（2.3s）
 
     --- 分支一：走失库未命中 sn=CN-WH01-9AF3C1D2 ---
     --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
@@ -176,7 +186,7 @@
 
       无认证空口防 spoof 端到端演示
       被冒充设备 SN : CN-WH01-9AF3C1D2
-      攻击者 SN    : CN-WH01-802MRRC3RA-66（未登记 → 服务器不认识）
+      攻击者 SN    : CN-WH01-HTTY90CZT0-66（未登记 → 服务器不认识）
       链路          : Client→STA→空口→AP→Router→UDP:19847→Server
       用例数        : 12（含 1 条合法对照）
     [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…

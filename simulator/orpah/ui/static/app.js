@@ -433,10 +433,13 @@ async function refresh() {
     if (ci) {
       const est = (s.clock || {})[s.sn];
       const off = s.clock_off || 0;
+      const why = (est && est.drift_ppm == null && est.drift_why)
+        ? T("clock_why_" + est.drift_why) : "";
       ci.textContent = (est && est.ok)
         ? T("clock_info")
             .replace("{off}", (est.offset >= 0 ? "+" : "") + est.offset.toFixed(1))
             .replace("{drift}", est.drift_ppm == null ? "—" : (est.drift_ppm >= 0 ? "+" : "") + est.drift_ppm.toFixed(0))
+            .replace("{why}", why)
             .replace("{n}", est.n)
           + (off ? "  ·  " + T("clock_demo_on").replace("{v}", off) : "")
         : T("clock_none");

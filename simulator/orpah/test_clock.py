@@ -144,25 +144,28 @@ ck("样本不足 → ok=False 且 offset=None（宁缺勿编）",
    (lambda e: e["ok"] is False and e["offset"] is None)(clk.estimate([])))
 ck("2 个样本 → 仍不够（MIN_SAMPLES=3）", clk.estimate([(0, 5), (1, 5)])["ok"] is False)
 
-# 固定偏移 +30s，跨 60s，无漂移 → offset=30、drift≈0
-fixed = [(1000 + i * 10, 1000 + i * 10 + 30) for i in range(7)]
+# 固定偏移 +30s，跨 600s（≥ DRIFT_MIN_SPAN），无漂移 → offset=30、drift=0
+fixed = [(1000 + i * 10, 1000 + i * 10 + 30) for i in range(61)]
 est = clk.estimate(fixed)
 ck("固定偏移：中位数 = +30s", abs(est["offset"] - 30) < 1e-9, str(est))
 ck("固定偏移：漂移 ≈ 0 ppm", abs(est["drift_ppm"]) < 1e-6, str(est["drift_ppm"]))
-ck("样本数/跨度如实给出（n=7, span=60s）",
-   est["n"] == 7 and abs(est["span"] - 60) < 1e-9, str(est))
+ck("样本数/跨度如实给出（n=61, span=600s）",
+   est["n"] == 61 and abs(est["span"] - 600) < 1e-9, str(est))
 
-# 线性漂移：设备每秒快 1ms = +1000 ppm；同时带回 5s 固定偏移
-drift = [(1000 + i * 10, 1000 + i * 10 + 5 + i * 10 * 0.001) for i in range(40)]
+# 线性漂移：设备每秒快 1ms = +1000 ppm；同时带回 5s 固定偏移（跨 790s ≥ DRIFT_MIN_SPAN）
+drift = [(1000 + i * 10, 1000 + i * 10 + 5 + i * 10 * 0.001) for i in range(80)]
 est = clk.estimate(drift)
 ck("线性漂移：+1000ppm（1ms/s）估得准", abs(est["drift_ppm"] - 1000) < 1.0,
    str(round(est["drift_ppm"], 3)))
+ck("漂移给出参与拟合的段（drift_n/drift_span）与“没给数的原因”字段",
+   est["drift_why"] is None and est["drift_n"] == 80 and est["drift_span"] >= clk.DRIFT_MIN_SPAN)
 
-# 跨度太短 → 不给漂移（但偏移照给）
+# 基线太短 → 不给漂移（但偏移照给）
 short = [(1000, 1005), (1001, 1006), (1002, 1007)]
 est = clk.estimate(short)
-ck("跨度 <30s → drift_ppm=None（斜率无意义，不编 0）",
-   est["drift_ppm"] is None and abs(est["offset"] - 5) < 1e-9, str(est))
+ck("跨度 < DRIFT_MIN_SPAN → drift=None + why=min_span（不编 0，也不说成噪声）",
+   est["drift_ppm"] is None and est["drift_why"] == "min_span" and abs(est["offset"] - 5) < 1e-9,
+   str(est))
 
 # 单点跳变（设备乱报一次）不影响中位数 offset=0
 noisy = [(1000, 1000), (1010, 1010), (1020, 1020), (1030, 9630), (1040, 1040)]
@@ -192,40 +195,88 @@ ck("offset_window=0 → 退化为整窗（显式关掉短窗，便于对照）",
 ck("偏移窗仍免疫单点跳变（最近 8 条里坏 1 条不动摇）",
    abs(clk.estimate(mixed + [(1021, 1021 + 120 + 9999)])["offset"] - 120) < 1e-9)
 
-# 漂移仍用**整窗长基线**（与偏移的短窗分开）
-drift40 = [(1000 + i, 1000 + i + i * 0.001) for i in range(40)]
-est = clk.estimate(drift40)
-ck("漂移用整窗（n=40 > n_off=8）+ 斜率准（+1000ppm）",
-   est["n"] == 40 and est["n_off"] == 8 and abs(est["drift_ppm"] - 1000) < 1.0,
+# 漂移用**长基线**（与偏移的短窗分开）—— 同一份数据：基线不足时不给数，够了就给
+_d = [(1000 + i, 1000 + i + i * 0.001) for i in range(700)]          # 700s、+1000ppm、无噪声
+est = clk.estimate(_d)
+ck("漂移用长基线（n=700 > n_off=8）+ 斜率准（+1000ppm）",
+   est["n"] == 700 and est["n_off"] == 8 and abs(est["drift_ppm"] - 1000) < 1.0,
    str(round(est["drift_ppm"], 3)))
+ck("同数据取前 300s → min_span 不足 → 不给数（非“噪声”，原因可区分）",
+   clk.estimate(_d[:300])["drift_why"] == "min_span")
 
 # ---- 漂移“只在能信的时候给”（2026-09-13 实测两个坑）--------------------------
 # 坑 1：窗内一次**跳变**（拨表/重启对时）会被 LS 当成巨大漂移。
-# 实测：现场拨偏 +120s → drift_ppm 读成 ~2,000,000。
-step_win = [(1000 + i, 1000 + i + (0 if i < 10 else 120)) for i in range(40)]   # 40s 窗内跳 120s
-est = clk.estimate(step_win, step_spread=30)
-ck("窗内有跳变（spread_win 120 > 阈值 30）→ 不给漂移（跳变不是漂移）",
-   est["drift_ppm"] is None and est["spread_win"] > 100, str(est))
-ck("同一条样本：不设 step_spread 时确实会读成天文数字（说明门是必需的）",
-   (clk.drift_ppm_of(step_win) or 0) > 1e6, str(clk.drift_ppm_of(step_win)))
-ck("spread_win=整窗散布（跳变指标）≠ spread=最近 8 条散布（当前抖动）",
+# 实测：现场拨偏 +120s → drift_ppm 读成 ~2,000,000（1.5×跳变/窗跨度，窗口越短越陉）。
+step_win = [(1000 + i, 1000 + i + (0 if i < 350 else 120)) for i in range(700)]  # 700s 窗里跳 120s
+est = clk.estimate(step_win, jump_sec=30)
+ck("窗内有跳变 → 只用跳变后的段（段还短）=不给数 + why=min_span",
+   est["drift_ppm"] is None and est["drift_why"] == "min_span" and est["spread_win"] > 100, str(est))
+ck("同一条样本：不设 jump_sec 时确实会读成天文数字（说明门是必需的）",
+   abs(clk.drift_ppm_of(step_win) or 0) > 1e5, str(clk.drift_ppm_of(step_win)))
+ck("spread_win=整窗极差（只是指示器）≠ spread=最近 8 条极差（当前抖动）",
    est["spread_win"] > 100 > est["spread"])
 
-# 坑 2：整数秒设备时间的**量化噪声**（±0.5s）在短窗里盖过 ppm 级漂移。
+# 跳变早、后面攒够了干净基线 → 漂移重新可用（且不被跳变前的数据污染）
+step_early = ([(1000 + i, 1000 + i + 0) for i in range(50)]                 # 先有 50s 正常
+              + [(1000 + i, 1000 + i + 120 + (i - 50) * 0.002) for i in range(51, 700)])
+est = clk.estimate(step_early, jump_sec=30)
+ck("拨表后攒够基线 → 漂移重新可用，且只拟合跳变后的段（+2000ppm）",
+   est["drift_why"] is None and abs(est["drift_ppm"] - 2000) < 20 and est["drift_n"] < est["n"],
+   str(est))
+
+# **单点乱报**（重启后的垃圾 ts）不是跳变：两侧中位数不受影响 → 不切段、漂移照给
+junk = list(_d)
+junk[500] = (junk[500][0], junk[500][1] + 6000)
+est = clk.estimate(junk, jump_sec=30)
+ck("单点乱报 +6000s：不误判成跳变 → 漂移照给且不失真",
+   est["drift_why"] is None and abs(est["drift_ppm"] - 1000) < 5, str(est["drift_ppm"]))
+ck("同一份数据 spread_win 很大（指示器会响）但漂移门不再被它误伤",
+   est["spread_win"] > 5000 and est["drift_ppm"] is not None)
+ck("偏移中位数也不受单点乱报影响", abs(est["offset"]) < 1.0, str(est["offset"]))
+
+# 坑 2：整数秒设备时间的**量化噪声**（±0.5s）—— 基线越长分辨力越好，短窗里它盖过 ppm 级漂移。
 import random                                                          # noqa: E402
 rnd = random.Random(7)
 noisy60 = [(1000 + i, 1000 + i + rnd.uniform(-0.5, 0.5)) for i in range(61)]   # 60s、1s 一条、无漂移
 est = clk.estimate(noisy60)
-ck("无漂移 + 量化噪声（60s 窗）→ 看不出趋势 → drift=None（不报假漂移）",
-   est["drift_ppm"] is None and est["span"] >= clk.DRIFT_MIN_SPAN, str(est))
+ck("基线 60s（=DRIFT_MIN_SPAN 之下）→ 不给漂移（原因=min_span）",
+   est["drift_ppm"] is None and est["drift_why"] == "min_span", str(est))
 ck("同噪声下 offset 仍然可信（中位数压住抖动）", abs(est["offset"]) < 0.5, str(est["offset"]))
 
+# 长基线（1h、1s 一条）仍然分不出 200ppm 级的真漂移：量化噪声的斜率噪声就 ~20ppm 量级
+# （门按 σ 自适应 → 不是白给一个数，而是说“还看不出来”）。
+rnd1h = random.Random(11)
+noisy1h = [(1000 + i, 1000 + i + rnd1h.uniform(-0.5, 0.5)) for i in range(3601)]
+est = clk.estimate(noisy1h)
+ck("无漂移 + 1h 量化噪声 → drift=None（原因=noise：噪声里看不出趋势）",
+   est["drift_ppm"] is None and est["drift_why"] == "noise", str(est))
+
+# 真的在漂就能认出来（同一套噪声量级）：+200ppm 在 1h 基线上可分辨
+rnd200 = random.Random(11)
+true200 = [(1000 + i, 1000 + i + 200e-6 * i + rnd200.uniform(-0.5, 0.5)) for i in range(3601)]
+est = clk.estimate(true200)
+ck("+200ppm（晶振级）在 1h 基线上能估出来（±60ppm 内）",
+   est["drift_ppm"] is not None and abs(est["drift_ppm"] - 200) < 60,
+   str(None if est["drift_ppm"] is None else round(est["drift_ppm"])))
+
 rnd2 = random.Random(7)
-gross = [(1000 + i, 1000 + i + 0.02 * i + rnd2.uniform(-0.5, 0.5)) for i in range(61)]  # +20000ppm
+gross = [(1000 + i, 1000 + i + 0.02 * i + rnd2.uniform(-0.5, 0.5)) for i in range(700)]  # +20000ppm
 est = clk.estimate(gross)
 ck("真的在漂（+20000ppm：坏晶振级）→ 门不会把真漂移也挡掉",
-   est["drift_ppm"] is not None and abs(est["drift_ppm"] - 20000) < 9000,
+   est["drift_ppm"] is not None and abs(est["drift_ppm"] - 20000) < 300,
    str(None if est["drift_ppm"] is None else round(est["drift_ppm"])))
+
+# 分箱中位数（鲁棒拟合）：单点乱报不能拖偏斜率（普通 LS 会被一条垃圾拉走）
+_pts = [(1000.0 + i, 0.0) for i in range(640)]
+_pts[8] = (1008.0, 5000.0)                       # 一条乱报，且在靠边（给 LS 最大杆杆）
+_bins = clk._bin_medians(_pts)
+_raw_slope_ppm = (clk._fit(_pts)[0] or 0) * 1e6
+ck("分箱：乱报落在某箱里被中位数挡在外头（箱中位数仍为 0）",
+   all(abs(o) < 1e-9 for _t, o in _bins), str(_bins[:2]))
+ck("对照：不分箱的普通 LS 被这一条拉到 -7万 ppm 级（分箱不是为了好看）",
+   _raw_slope_ppm < -50000, str(round(_raw_slope_ppm)))
+ck("分箱：点数不够分组时原样返回（不当数据“部分可用”）",
+   clk._bin_medians(_pts[:10]) == _pts[:10])
 
 # 两个点连一条线不叫趋势（σ 没有意义）
 two = [(1000, 1000), (1060, 1063.6)]                                    # 跨 60s、差 3.6s = 60000ppm
