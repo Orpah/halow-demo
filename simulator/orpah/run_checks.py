@@ -40,6 +40,7 @@ SUITES = [
     ("密钥生命周期", "test_keys.py", []),
     ("防 spoof（离线逐条）", "test_spoof.py", []),
     ("告警规则（含处置态）", "test_alerts.py", []),
+    ("指标面板纯计算", "test_metrics.py", []),
     ("时钟可信（ts=0 无 RTC）", "test_clock.py", []),
     ("IoTDB 审计/时间窗", "test_tsdb_audit.py", []),
     ("UI 服务器契约", "test_server.py", []),

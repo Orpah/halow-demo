@@ -55,6 +55,7 @@ import stations as sta                     # noqa: E402  定位站位（无人�
 import motion                              # noqa: E402  演示用「移动的人」运动模型 + RSSI 换算
 import spoof                               # noqa: E402  防 spoof：攻击报文构造（脚本/UI 共用）
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
+import metrics                            # noqa: E402  指标面板纯计算（/api/metrics）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 from waiting import wait_until            # noqa: E402  按截止时间等待（只这一份实现）
 import damm32 as d32                      # noqa: E402  校验算法单一源
@@ -760,6 +761,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/api/ts/events"):
             self._api_ts_events()
             return
+        if self.path.startswith("/api/metrics"):
+            self._api_metrics()
+            return
         if self.path.startswith("/api/replay"):
             self._api_replay()
             return
@@ -1350,6 +1354,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                     "retention_days": APP.tsdb.event_retention_days,
                                     "purged_upto": APP.tsdb.purged_upto,
                                     "rows": rows or []}).encode())
+
+    def _api_metrics(self):
+        """GET /api/metrics?minutes=N[&sn=] → 指标面板数据（ROADMAP §五）。
+
+        窗口：最近 N 分钟（默认 60，上限 1440）。取数：
+        - 事件流 `root.orpah.events`（**时间窗**，原生索引）→ 签名失败率 / 算法分布
+        - 上报流 `root.orpah.devices.<sn>`（时间窗）→ 平均 RSSI
+        - 案件表（SQLite）→ 走失处置时长：**不按窗口切**（一个案子跨小时，
+          窗口化会把案子切两半、时长算成错的；口径说明见 metrics.py 头注释）
+        计算全在 `metrics.py`（纯函数，`test_metrics.py` 覆盖）；这里只取数与组装。
+        """
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        try:
+            minutes = int((qs.get("minutes") or ["60"])[0])
+        except ValueError:
+            minutes = 60
+        minutes = min(max(minutes, 1), 1440)
+        sn = (qs.get("sn") or [""])[0].strip() or (APP.client.sn if APP.client
+                                                  else "")
+        now_s = int(time.time())
+        t1 = now_s * 1000
+        t0 = t1 - minutes * 60 * 1000
+        events = APP.tsdb.query_events_range(t0, t1, limit=5000)
+        reports = APP.tsdb.query_report_range(sn, t0, t1) if sn else []
+        tsdb_ok = events is not None and reports is not None
+        out = metrics.summarize(events or [], reports or [],
+                                list(APP.cases.cases.values()), now=now_s,
+                                window={"minutes": minutes, "sn": sn,
+                                        "t0": t0, "t1": t1},
+                                tsdb=tsdb_ok)
+        self._send(200, json.dumps(out).encode())
 
     def _api_sig(self):
         """数字签名工具：newkey 生成临时密钥对；sign 算预像+签名；verify 验签。"""

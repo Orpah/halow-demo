@@ -149,6 +149,35 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   单测点只能得「距离环」；配上「定位站位表」（已知坐标，见 §7）即可多点三边定位到点。
 - **`query_report` 按时间倒序返回**，前端消费前需自行翻正；`query_router_recent` 内部已翻成升序。
 
+### `/api/metrics`（指标面板）
+
+`GET /api/metrics?minutes=N[&sn=<SN>]` → 四项指标的汇总（页面 `metrics.html`，计算在 `metrics.py`）：
+
+```json
+{"ok": true, "tsdb": true,
+ "window": {"minutes": 60, "sn": "CN-WH01-9AF3C1D2", "t0": 1789193000000, "t1": 1789196600000},
+ "verify": {"total": 30, "reports": 29, "rejected": 1, "fail_ratio": 0.0333,
+            "by_alg": {"ES256": 29, "none": 1}},
+ "rssi": {"n": 30, "avg": -67.4, "min": -80, "max": -55},
+ "cases": {"total": 3, "open": 1, "ended": 2,
+           "to_found": {"n": 1, "avg": 400.0, "min": 400, "max": 400},
+           "to_close": {"n": 1, "avg": 900.0, "min": 900, "max": 900},
+           "rows": [{"case_id": "C001", "person_id": "P002", "status": "closed",
+                     "created": 1789104728, "to_found_sec": 400,
+                     "to_close_sec": 900, "elapsed_sec": null}]}}
+```
+
+- **窗口** `minutes`（默认 60，1~1440）只作用于**事件流**（`root.orpah.events` 时间窗）与
+  **上报流**（`root.orpah.devices.<sn>`）；`sn` 缺省 = 当前演示终端。
+- **案件不走窗口**：一个案子跨小时，按窗口切会把「立案→发现/结案」算错 —— 处置时长是全量口径。
+- **无样本 → `null`，不是 0**：`fail_ratio` / `rssi.avg` 在没有样本时为 `null`
+  （0% 失败率与 0 dBm 都是真实值，拿来冒充"没有样本"会误导）。
+- **未结案的案件不进 `to_found` / `to_close` 的均值**（否则均值随等待时间漂移）；
+  未结案在 `cases.open` 里单列，逐案 `elapsed_sec` 只在未结案时给（读者自己判断"已经等了多久"）。
+- `verify.by_alg` 是从审计 `detail` 里的 `alg=` **解析**出来的（审计没有结构化列），
+  解析不到归 `unknown`，不猜。
+- `tsdb=false` 表示 IoTDB 未连：事件流/上报流为空，只有案件指标有意义（`metrics.html` 会提示）。
+
 ### `/api/ts/events`（业务事件历史）
 
 `GET /api/ts/events?limit=N[&etype=<类型>][&sn=<SN>]` → 事件倒序：
