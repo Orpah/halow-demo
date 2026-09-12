@@ -51,6 +51,11 @@ ALG_UNKNOWN = "unknown"
 #      要在**派生层（本模块）与展示层（页面 esc()）**收口。
 _ALG_RE = re.compile(r"(?:^|\s)alg=([A-Za-z0-9_.\-]{1,24})(?:\s|$)")
 
+# 降级级别同理：`level=` 来自审计 detail（值本身同样是报文头来的外部输入）→ 只认单个数字 0..3。
+# 其它（`level=<b>`、`level=9`、缺字段）→ None（**不是 0**：没级别 ≠ 级别 0，
+# 把它当 L0 会抬高分母、拉低降级占比 → 假乐观）。
+_LEVEL_RE = re.compile(r"(?:^|\s)level=([0-3])(?:\s|$)")
+
 
 def _num(x):
     """转 float；None/非法 → None（不要 0 兜底）。"""
@@ -75,26 +80,56 @@ def alg_of(detail):
     return m.group(1) if m else ALG_UNKNOWN
 
 
+def level_of(detail):
+    """从审计 detail 里取 `level=`（0..3）；取不到/越界/非数字 → **None**。
+
+    None 与 0 必须分清：`level` 缺字段 ≠ L0（与 §8.3 “无法判定就别当成正常”一致）。
+    """
+    m = _LEVEL_RE.search(detail or "")
+    return int(m.group(1)) if m else None
+
+
 def verify_stats(events):
-    """签名校验：失败率 + 算法分布（只统计 id_report / id_reject 两类事件）。"""
+    """签名校验：失败率 + 算法分布 + **降级级别分布/占比**（只统计 id_report / id_reject 两类事件）。
+
+    级别口径（ 2026-09-12 加，§8.1/§8.3）——`by_level` 只数**通过**的上报：
+    - 被拒的报文里也有 `level=`，但那是**攻击者“宣称”的级别**（伪造一条 level=0 不代表设备工作在 L0）
+      → 混进来会把“降级占比”算错，故不计入。
+    - `degraded` = 通过的里面 level≥2 的条数（L2 = SE 不可用、L3 = 无可用密钥）。
+    - `degraded_ratio` 分母 = **通过总数**（含无法解析级别的老审计行）→ 它是**下界**；
+      `level_unknown` 把那些行数摆出来，避免读者自己猜。无样本 → None（不是 0）。
+    """
     reports = rejects = 0
     by_alg = {}
+    by_level = {}
+    level_unknown = 0
     for e in events or []:
         et = e.get("etype")
         if et not in ("id_report", "id_reject"):
             continue
         if et == "id_report":
             reports += 1
+            lv = level_of(e.get("detail"))
+            if lv is None:
+                level_unknown += 1
+            else:
+                by_level[lv] = by_level.get(lv, 0) + 1
         else:
             rejects += 1
         alg = alg_of(e.get("detail"))
         by_alg[alg] = by_alg.get(alg, 0) + 1
     total = reports + rejects
+    l2 = by_level.get(2, 0)
+    l3 = by_level.get(3, 0)
     return {
         "total": total, "reports": reports, "rejected": rejects,
         # 没有样本 → None（不是 0：0% 失败率会让人以为"验过了都没问题"）
         "fail_ratio": (round(rejects / total, 4) if total else None),
         "by_alg": by_alg,
+        "by_level": by_level,
+        "degraded": {"l2": l2, "l3": l3, "total": l2 + l3},
+        "degraded_ratio": (round((l2 + l3) / reports, 4) if reports else None),
+        "level_unknown": level_unknown,
     }
 
 

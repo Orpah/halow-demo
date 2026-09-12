@@ -168,7 +168,10 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 {"ok": true, "tsdb": true,
  "window": {"minutes": 60, "sn": "CN-WH01-9AF3C1D2", "t0": 1789193000000, "t1": 1789196600000},
  "verify": {"total": 30, "reports": 29, "rejected": 1, "fail_ratio": 0.0333,
-            "by_alg": {"ES256": 29, "none": 1}},
+            "by_alg": {"ES256": 29, "none": 1},
+            "by_level": {"0": 27, "1": 1, "2": 1},
+            "degraded": {"l2": 1, "l3": 0, "total": 1},
+            "degraded_ratio": 0.0345, "level_unknown": 0},
  "rssi": {"n": 30, "avg": -67.4, "min": -80, "max": -55},
  "cases": {"total": 3, "open": 1, "ended": 2,
            "to_found": {"n": 1, "avg": 400.0, "min": 400, "max": 400},
@@ -199,6 +202,22 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   连被拒报文也落）→ 属外部输入：服务端**故意**原样保留（取证要留“攻击者当时发了什么”），
   但**派生层（本模块）与展示层（页面 `esc()`）都必须收口**，不要把原值直接拼进 HTML。
 - `tsdb=false` 表示 IoTDB 未连：事件流/上报流为空，只有案件指标有意义（`metrics.html` 会提示）。
+- **降级指标（`by_level` / `degraded` / `degraded_ratio` / `level_unknown`，2026-09-12 加）**：
+  粒度对齐 §8.1/§8.3（L0 正常 / L1 Slot0 签名失败 / L2 SE 不可用 / L3 无可用密钥）。
+  - `by_level` **只统计“通过”的上报**（键是 0..3 的字符串化数字，JSON 对象）。被拒的报文里也有
+    `level=`，但那是**攻击者宣称的级别**（伪造一条 `level=0` 不代表设备工作在 L0）→ 混进来会把
+    降级占比算错，故不计入；被拒的量由 `rejected` / `fail_ratio` 表达。
+  - `degraded` = 通过里 `level≥2` 的条数（`l2`/`l3`/`total`）；`degraded_ratio` = `degraded.total / reports`。
+  - **分母是 `reports`（通过总数）**，含“取不到级别”的老审计行 → 所以 `degraded_ratio` 是**下界**；
+    `level_unknown` 把那些行数摆出来，不让读者自己猜（页面在有值时补一句提示）。
+  - `level` 与 `alg` 同源（都是报文头字段经 `detail` 解析）→ 同样**只认单个数字 0..3**，
+    其余（`level=<b>` / `level=9` / 缺字段）→ `None`、不进 `by_level`。
+    ⚠ **`None` ≠ `0`**：把缺级别当成 L0 会抬高分母、压低降级占比（假乐观），所以单独计数。
+  - ⚠ **`by_alg` 与 `by_level` 口径**不一样**（有意为之）**：`by_alg` 统计**两类事件**（通过+被拒）——
+    攻击者用了什么算法是有价值的情报（页面 `none 10` 里含被拒的免签冒充）；`by_level` **只数通过**，
+    因为被拒报文里的 `level` 是攻击者**宣称**的级别，不代表设备真实工作级别。所以页面上
+    `none` 与 `L3` 的条数**本来就可以不等**（差的就是被拒的那几条），不是 bug。
+  - 无样本 → `degraded_ratio` 为 `null`（与 `fail_ratio` 同一口径）。
 
 ### `/api/ts/events`（业务事件历史）
 

@@ -75,6 +75,7 @@
     <div class="big id" id="vRatio">--</div>
     <div class="kv" id="vCounts"></div>
     <div class="bars" id="vAlg"></div>
+    <div class="kv" id="vDeg"></div>
   </div>
   <div class="mcard">
     <h3 data-i18n="mt_rssi">平均 RSSI</h3>
@@ -138,6 +139,15 @@ function render(d) {
     `<span class="tr"><i style="width:${(n / tot * 100).toFixed(1)}%"></i></span>` +
     `<span class="vv">${n} · ${(n / tot * 100).toFixed(0)}%</span></div>`).join("")
     : `<div class="todo">${T("mt_no_sample")}</div>`;
+  // 降级级别分布（§8.3）：L2 = SE 不可用、L3 = 无可用密钥；分母 = 通过总数（下界）
+  const dg = v.degraded || {};
+  $("vDeg").innerHTML = v.reports
+    ? T("mt_v_deg").replace("{l2}", `<b>${dg.l2 ?? 0}</b>`)
+        .replace("{l3}", `<b>${dg.l3 ?? 0}</b>`)
+        .replace("{p}", `<b>${pct(v.degraded_ratio)}</b>`)
+      + (v.level_unknown ? ` <span class="u">· ${T("mt_v_deg_unknown")
+            .replace("{n}", v.level_unknown)}</span>` : "")
+    : `<span class="todo">${T("mt_no_sample")}</span>`;
 
   // 平均 RSSI
   const r = d.rssi || {};

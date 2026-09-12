@@ -89,6 +89,47 @@ check("XSS：合法令牌仍能解析",
       mt.alg_of("alg=ES256") == "ES256" and mt.alg_of("alg=none") == "none"
       and mt.alg_of("alg=HS256.1") == "HS256.1")
 
+# ---- 1b) 降级级别分布 / 降级占比（§8.3，2026-09-12） -------------------------
+# `level` 与 alg 同源（都来自审计 detail 的报文头字段）→ 同样只认 0..3 单个数字。
+s = mt.verify_stats([ev("id_report", "alg=ES256 level=0 trust=high accepted=True"),
+                     ev("id_report", "alg=ES256 level=0 trust=high accepted=True"),
+                     ev("id_report", "alg=HS256 level=1 trust=medium accepted=True"),
+                     ev("id_report", "alg=HS256 level=2 trust=low accepted=True"),
+                     ev("id_report", "alg=none level=3 trust=none accepted=True"),
+                     ev("id_reject", "alg=none level=0 trust=none accepted=False")])
+check("级别：by_level 只数通过（L0×2 / L1×1 / L2×1 / L3×1）",
+      s["by_level"] == {0: 2, 1: 1, 2: 1, 3: 1})
+check("级别：degraded = L2+L3，不含 L1", s["degraded"] == {"l2": 1, "l3": 1, "total": 2})
+check("级别：占比分母 = 通过总数（5），不是总条数（6）",
+      s["degraded_ratio"] == round(2 / 5, 4))
+check("级别：被拒的那条（level=0）不进 by_level（那是攻击者宣称的级别）",
+      s["by_level"].get(0) == 2 and s["total"] == 6 and s["reports"] == 5)
+check("级别：解析函数——能认 0..3、取不到/越界/非数字 → None",
+      mt.level_of("alg=ES256 level=0 x=1") == 0
+      and mt.level_of("alg=x level=3") == 3
+      and mt.level_of("alg=x level=4") is None
+      and mt.level_of("alg=x level=x") is None
+      and mt.level_of("alg=x") is None
+      and mt.level_of("") is None)
+# 缺级别 ≠ 级别 0：算成 0 会抬高分母、压低降级占比（假乐观）。这里单独数出来。
+s = mt.verify_stats([ev("id_report", "alg=ES256 accepted=True"),
+                     ev("id_report", "alg=HS256 level=2 accepted=True")])
+check("级别：通过但无级别 → level_unknown 计数（不当成 L0）",
+      s["level_unknown"] == 1 and s["by_level"] == {2: 1})
+check("级别：分母含无级别行 → ratio 是下界（1/2）", s["degraded_ratio"] == 0.5)
+s = mt.verify_stats([ev("id_report", "alg=ES256 level=0 accepted=True")])
+check("级别：全正常 → 占比 0.0（有样本就不编 None）",
+      s["degraded_ratio"] == 0.0 and s["degraded"]["total"] == 0)
+s = mt.verify_stats([])
+check("级别：无样本 → 占比 None（不是 0）",
+      s["degraded_ratio"] is None and s["by_level"] == {} and s["level_unknown"] == 0)
+# 不变量：级别是整数键，永远不可能是字符串（下游直接当数字用/排序）
+_keys_lv = set()
+for probe in ("level=<b>", 'level="3"', "level=3 ", "level=3x", "level=03", "level=-1"):
+    _keys_lv |= set(mt.verify_stats([ev("id_report", probe)])["by_level"])
+check("级别：by_level 的键都是 int 且在 0..3（恶意/脏值被挡）",
+      _keys_lv <= {0, 1, 2, 3} and all(isinstance(k, int) for k in _keys_lv))
+
 # ---- 2) 平均 RSSI ----------------------------------------------------------
 r = mt.rssi_stats([rep(-60), rep(-70), rep(-65)])
 check("RSSI：均值/最小/最大/样本数",
