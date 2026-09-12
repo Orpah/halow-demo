@@ -278,6 +278,31 @@ class TestIdReport(unittest.TestCase):
         self.assertEqual(rec["error"], "signature_invalid")
 
 
+    def test_id_report_energy_fields(self):
+        """能量轴（2026-09-13）：电量入记录 + **成因推导**（能量 vs 密钥故障）。
+
+        成因不新增报文字段：设备同时签了两个事实（级别 + 电量），服务端据此区分——
+        低电量 + HS256 → `energy`；电量正常 + 降级 → `key`。
+        """
+        now = int(time.time())
+        rec = self._send(self.dev.report(level=0, ts=now, battery_mv=3700))
+        self.assertEqual(rec["battery_mv"], 3700)
+        self.assertIsNone(rec["degraded_reason"])          # L0 不降级 → 无成因
+        rec = self._send(self.dev.report(level=1, ts=now, battery_mv=3200))   # 低电 + HS256
+        self.assertEqual(rec["degraded_reason"], "energy")
+        rec = self._send(self.dev.report(level=1, ts=now, battery_mv=3700))   # 电量正常 + HS256
+        self.assertEqual(rec["degraded_reason"], "key")
+        rec = self._send(self.dev.report(level=3, ts=now))                    # L3 + 没报电量
+        self.assertEqual(rec["degraded_reason"], "key")
+        self.assertIsNone(rec["battery_mv"])
+        # 恶意/异常设备：直接塞进签名预像（`report()` 的 int() 会挡程序错误，
+        # 所以用 extra 绕过设备侧强制转型，专门考验**服务端对不可信输入**的容忍）
+        rec = self._send(self.dev.report(level=0, ts=now, extra={"battery_mv": "x"}))
+        self.assertIsNone(rec["battery_mv"])               # 非整数 → 当没报（不猜）
+        rec = self._send(self.dev.report(level=0, ts=now, extra={"battery_mv": True}))
+        self.assertIsNone(rec["battery_mv"])               # bool 是 int 子类 → 也得当没报
+
+
 class TestUiQueryArgs(unittest.TestCase):
     """ui_server 的**查询参数解析**（HTTP 层最外层输入）。
 

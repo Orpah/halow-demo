@@ -20,6 +20,8 @@ alerts.py — 告警规则引擎（供页面红点消费）
       ORPAH_ALERT_CLOCK_OFFSET_SEC    设备时钟偏移阈值（秒，默认 30）
       ORPAH_ALERT_CLOCK_DRIFT_PPM     设备时钟漂移阈值（ppm，默认 200）
       ORPAH_ALERT_CAP_MISMATCH_SEC    能力声明不一致的消警窗口（秒，默认 300）
+      ORPAH_ALERT_ENERGY_LOW_MV       电量低阈值（mV，默认 3300）→ id_energy warn
+      ORPAH_ALERT_ENERGY_OUT_MV       电量耗尽阈值（mV，默认 3100）→ id_energy crit
 
   例（立案后 10 分钟才算超时，避免演示时刚立案就亮红点）：
       PowerShell:  $env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901
@@ -37,6 +39,13 @@ alerts.py — 告警规则引擎（供页面红点消费）
     id_degraded             最近 id_degraded_sec 内出现过降级上报（§8.3）：L2 warn / L3 crit
     id_clock                设备时钟偏移/漂移超出阈值（估计值，§5.5 深化）
     id_cap_mismatch         设备**已签**声明「有 RTC」却送出不可用的 ts（故障/被动手脚的信号）
+    id_energy               设备自报电量低（warn）/ 耗尽（crit）——免电池终端的预期状态，提醒运维
+    no_report_energy        设备沉默**且最后自报电量低** → 疑似没电（warn，不升级 crit）
+
+**能量轴归因分流（2026-09-13）**：沉默有两种相反成因，「没电了」该等它取能、「被藏/被干扰」该立刻搜
+—— 不能报同一条。判据用设备**最后自签上报里的**电量（在签名预像内，不可抵赖）加“还能撑多久”：
+低电/耗尽 → 拆到 `no_report_energy`（warn）；电量充足却突然沉默 → 仍是原 `no_report`
+（按 C 方案 30s warn → 300s crit 升级）—— 后者才是最该出警的那一类。
 
 **能力声明不一致（`id_cap_mismatch`，2026-09-13）**：声明 `cap.rtc=true` 的设备**本应**
 有时钟，但某条上报的 `ts` 不可用（ts=0/荒谬/非整数）→ 报 warn。反之「声明无 RTC + ts=0」
@@ -122,6 +131,10 @@ ID_DEGRADED_SEC = _env_int("ORPAH_ALERT_ID_DEGRADED_SEC", 300)  # 降级上报�
 CLOCK_OFFSET_SEC = _env_int("ORPAH_ALERT_CLOCK_OFFSET_SEC", 30)  # 设备时钟偏移超此值 → 告警（秒）
 CLOCK_DRIFT_PPM = _env_int("ORPAH_ALERT_CLOCK_DRIFT_PPM", 200)   # 设备时钟漂移超此值 → 告警（ppm）
 CAP_MISMATCH_SEC = _env_int("ORPAH_ALERT_CAP_MISMATCH_SEC", 300)  # 能力声明不一致的消警窗口（秒）
+# 能量轴（2026-09-13）：低电/耗尽两档电压（mV，演示参数）——
+# `energy.mv_of()` 把电量映射成电压；服务端只用电压做两档判断（不从电压反推电量）。
+ENERGY_LOW_MV = _env_int("ORPAH_ALERT_ENERGY_LOW_MV", 3300)
+ENERGY_OUT_MV = _env_int("ORPAH_ALERT_ENERGY_OUT_MV", 3100)
 
 
 def _alert(kind, level, key_obj, msg, since, **data):
@@ -140,12 +153,15 @@ def level_by_gap(gap, warn_after, crit_after):
     return LEVEL_CRIT if crit_after <= warn_after or gap > crit_after else LEVEL_WARN
 
 
-def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
+def evaluate(registry, cases, id_reports, now=None, clock=None, energy=None, **th):
     """返回活跃告警列表（crit 在前，同级按触发时间）。
 
     参数与阈值都可注入，便于单测（见 test_alerts.py）。
     `clock` = `{sn: {"offset":…, "drift_ppm":…, "n":…, "ok":…, "breach_since":…}}`
     （来自 `clock.ClockTracker.snapshot()`；不传则不评估时钟规则）。
+    `energy` = `{sn: {"mv": int|None, "interval_s": …|None, "silence_in_s": …|None,
+    "level": "ES256"|"HS256", "degraded_reason": …|None}}`（**能量轴**，2026-09-13；
+    不传则不评估能量规则、也不做沉默归因分流）。
     """
     now = int(now if now is not None else time.time())
     no_rep = th.get("no_report_sec", NO_REPORT_SEC)
@@ -159,6 +175,9 @@ def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
     cap_sec = th.get("cap_mismatch_sec", CAP_MISMATCH_SEC)
     off_max = th.get("clock_offset_sec", CLOCK_OFFSET_SEC)
     drift_max = th.get("clock_drift_ppm", CLOCK_DRIFT_PPM)
+    en_low = th.get("energy_low_mv", ENERGY_LOW_MV)
+    en_out = th.get("energy_out_mv", ENERGY_OUT_MV)
+    energy = energy or {}
     out = []
 
     # 1) 长未上报：只看「**工作态**且曾经上报过」的设备 ——
@@ -167,15 +186,30 @@ def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
     #      一旦立案（设备转 lost）反而不再盯它，方向反了。
     #    · 停用/报废不报（已不是现行设备）。
     #    · 从未上报的新设备不报，否则一开机就一片红，反而盖住真问题。
+    #    **能量轴（2026-09-13）归因分流**：没电导致的沉默与“被藏/被干扰”导致的沉默，
+    #    处置相反（前者等它取能、后者立刻搜）—— 不能报同一条。判据用**设备最后自报的**
+    #    电量（在签名预像内，不可抵赖）加上“还能撑多久”：
+    #      · 低电（≤ en_low）/ 已经没电 → 拆到 `no_report_energy`（warn，不升级 crit）；
+    #      · 电量充足却突然沉默 → 仍是原 `no_report`（按 C 方案 30s warn → 300s crit 升级），
+    #        这才是最该出警的那一类。
     for rec in registry.devices.values():
         if rec.status not in (reg.STATUS_ACTIVE, reg.STATUS_LOST) or not rec.last_seen:
             continue
         gap = now - int(rec.last_seen)
         if gap > no_rep:
-            # C 方案：沉默越久越严重（>30s warn → >300s crit）
-            out.append(_alert("no_report", level_by_gap(gap, no_rep, no_rep_crit),
-                              rec.sn, "alert_no_report", rec.last_seen,
-                              sn=rec.sn, gap=gap))
+            en = energy.get(rec.sn) or {}
+            mv = en.get("mv")
+            starving = (mv is not None and mv <= en_low)
+            if starving:
+                out.append(_alert("no_report_energy", LEVEL_WARN, rec.sn,
+                                  "alert_no_report_energy", rec.last_seen,
+                                  sn=rec.sn, gap=gap, mv=mv,
+                                  silence_in_s=en.get("silence_in_s")))
+            else:
+                # C 方案：沉默越久越严重（>30s warn → >300s crit）
+                out.append(_alert("no_report", level_by_gap(gap, no_rep, no_rep_crit),
+                                  rec.sn, "alert_no_report", rec.last_seen,
+                                  sn=rec.sn, gap=gap))
 
     # 2) 走失案件：只看 open（已 found 的不算），分两支 ——
     #    ① 无人接手（A 方案）：「刚超时没人管」最严重 → 恒 crit（**不参与 C 分级**：定性的“没人管”）
@@ -280,6 +314,25 @@ def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
     for sn, (ts, src, ts_raw) in bad_cap.items():
         out.append(_alert("id_cap_mismatch", LEVEL_WARN, sn, "alert_id_cap_mismatch",
                           ts, sn=sn, ts_src=src, ts_raw=ts_raw))
+
+    # 7) 能量轴（2026-09-13）：设备自报电量低/耗尽 → 提醒运维。
+    #    免电池终端**必然**会有低电的时候，所以这不是“故障”，而是**预期内的状态**：
+    #    · 低电（≤ en_low）→ warn：「快没电了，预计还能报 X 秒」；
+    #    · 耗尽（≤ en_out）→ crit：它已经/即将沉默，此时只能等它取能或去现场。
+    #    数据源 = ui_server 的能量快照（最后一条已签上报里的 `battery_mv` + 模型推算）；
+    #    不传 energy（老调用方/单测）→ 本条不评估（与 clock 同一约定）。
+    for sn, en in energy.items():
+        mv = en.get("mv")
+        if mv is None:
+            continue                             # 没报过电量 → 不猜（无值就是无值）
+        if mv <= en_out:
+            out.append(_alert("id_energy", LEVEL_CRIT, sn, "alert_id_energy_out",
+                              en.get("since") or now, sn=sn, mv=mv,
+                              silence_in_s=en.get("silence_in_s")))
+        elif mv <= en_low:
+            out.append(_alert("id_energy", LEVEL_WARN, sn, "alert_id_energy_low",
+                              en.get("since") or now, sn=sn, mv=mv,
+                              silence_in_s=en.get("silence_in_s")))
 
     out.sort(key=lambda a: (0 if a["level"] == LEVEL_CRIT else 1, a["since"]))
     return out

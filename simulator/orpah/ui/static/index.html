@@ -233,7 +233,39 @@
   </div>
 </section>
 
+<!-- ============ 能量轴（免电池客户端） ============ -->
+<!-- 演示的三参数储能模型：采集 P（mW）/ 储能 C（mJ）/ 每次上报代价 cost（mJ）。
+     横轴 = 采集功率，纵轴 = 可持续的上报间隔 → 「能量轴」。 -->
+<section class="card" id="ensec">
+  <h3><span data-i18n="en_title">能量轴（免电池客户端）</span>
+    <span class="hint" data-i18n="en_hint">采集功率 → 能撑多久报一次；撑不住就降级（HS256），再撑不住就沉默</span></h3>
+  <div class="config-row">
+    <label><input id="enOn" type="checkbox"> <span data-i18n="en_on">启用能量模型</span></label>
+    <label><span data-i18n="en_harvest">采集</span> <input id="enHarvest" type="number" value="0.5" step="0.01" min="0" style="width:80px"> mW</label>
+    <label><span data-i18n="en_charge">储能</span> <input id="enCharge" type="number" value="1500" step="100" min="0" style="width:90px"> mJ</label>
+    <label><span data-i18n="en_store">满储</span> <input id="enStore" type="number" value="2000" step="100" min="0" style="width:90px"> mJ</label>
+    <label><input id="enPush" type="checkbox"> <span data-i18n="en_push">按能量放慢上报（关=按固定间隔“硬撑”）</span></label>
+    <label><span data-i18n="en_speedup">演示加速</span> <input id="enSpeedup" type="number" value="10" step="1" min="1" max="600" style="width:70px"> x</label>
+    <button class="btn primary" id="btnEnApply" data-i18n="btn_apply">应用</button>
+    <button class="btn" id="btnEnReset" data-i18n="en_reset">充满电</button>
+  </div>
+  <div id="enState" class="id-grid"></div>
+  <div class="id-stream">
+    <div class="pub-head"><span data-i18n="en_axis_title">能量轴扫描（采集功率 → 上报间隔）</span>
+      <span class="hint" id="enAxisMsg"></span></div>
+    <table>
+      <thead><tr>
+        <th data-i18n="en_th_harvest">采集 mW</th><th data-i18n="en_th_net">净余 mW</th>
+        <th data-i18n="en_th_level">级别</th><th data-i18n="en_th_interval">间隔 s</th>
+        <th data-i18n="en_th_silence">还能撑 s</th><th data-i18n="en_th_why">原因</th>
+      </tr></thead>
+      <tbody id="enAxisList"></tbody>
+    </table>
+  </div>
+  <p class="hint" data-i18n="en_foot">参数是**演示标定值，不是实测**（真机标定属阶段二）。横轴 0.1 mW 是「恰好够每 300s 用 ES256 报一次」的门槛。</p>
+</section>
+
 <script src="ui_i18n.js"></script>
-<script src="app.js?v=20260913c"></script>
+<script src="app.js?v=20260913d"></script>
 </body>
 </html>

@@ -46,6 +46,7 @@ SUITES = [
     ("UI 服务器契约", "test_server.py", []),
     ("批量合规用例（黄金样本/SN 边界/报文）", "checks_batch.py", []),
     ("降级策略（§8.2 选级 / §8.3 服务端）", "test_levels.py", []),
+    ("能量轴（免电池客户端）", "test_energy.py", []),
     ("抓包解析 / 双源对照", "test_capture.py", []),
     ("设备时钟漂移（长基线）", "demo_clock.py", []),
     ("定位内核（pos.js，node 跑原文）", "test_posjs.py", []),

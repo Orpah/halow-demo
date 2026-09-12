@@ -42,6 +42,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
                          ERR_FORMAT, ERR_LOG, sn_err, effective_ts,
                          TS_SRC_DEVICE, rtc_of)
+from alerts import ENERGY_LOW_MV     # 能量轴：低电量阈值（只在“成因推导”里用，避免两处阈值）
 import orpah_id as oid                     # Orpah ID 验签（§9.3）
 
 LOG = True
@@ -285,6 +286,10 @@ class OrpahServer:
         # 而且 `alerts.id_cap_mismatch` 的 `cap_rtc is True` 也永远对不上（告警永远不出）。
         rtc = rtc_of(payload)
         ts_eff, ts_src = effective_ts(payload.get("ts"), None, rtc=rtc)
+        lv = hdr.get("level")
+        mv = payload.get("battery_mv")          # 能量轴：电量（签名内，不可抵赖）
+        if not isinstance(mv, int) or isinstance(mv, bool):
+            mv = None                           # 非整数（含 bool）一律当“没报”（不猜）
         rec = {
             "t": time.strftime("%H:%M:%S"),
             "sn": sn or "-",
@@ -305,6 +310,14 @@ class OrpahServer:
             "ts_eff": ts_eff,          # 实际用于记录的时刻（秒）
             "cap_rtc": rtc,            # 设备声明的「有无 RTC」（None = 未声明）；见 orpah_proto.rtc_of
             "ts_ok": ts_src == TS_SRC_DEVICE,   # 本条的 ts 是否可当设备时间用（告警判定用）
+            # 能量轴（2026-09-13）：电量随报文上报（Orpah ID §5 `payload.battery_mv`，
+            # 在签名预像内 → 不可抵赖），免电池设备报的是**储能电压**。
+            "battery_mv": mv,
+            # **成因推导**（不新增报文字段）：降级既可能是密钥故障（§8.1 条件）也可能是
+            # 省电（能量轴）；设备**同时**签了两个事实（级别 + 电量），服务端据此区分：
+            #   低电量 + HS256 → 成因=energy；电量正常 + 降级 → 成因=key。
+            "degraded_reason": ("energy" if (lv in (1, 2) and mv is not None and mv <= ENERGY_LOW_MV)
+                                else ("key" if lv in (1, 2, 3) else None)),
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)

@@ -457,6 +457,7 @@ async function refresh() {
           + tsTxt
         : T("clock_none") + tsTxt;
     }
+    renderEnergy(s.energy, s.energy_axis);
   } catch (e) { /* 服务器未就绪 */ }
 }
 
@@ -505,6 +506,139 @@ $("btnIdReplay").onclick = async () => {
 $("btnIdStale").onclick = async () => {
   await postCtl({ action: "stale" });
 };
+
+/* ---------- 能量轴（免电池客户端）----------
+
+   模型在 energy.py（三参数：采集 P / 储能 C / 每次上报代价 cost），这里只做呈现：
+   · 状态格：电量 mV、级别、间隔、还能撑多久、净余、原因（`why` 是机器值，字典翻译）；
+   · 扫描表：横轴 = 采集功率 → 纵轴 = 可持续的上报间隔（这就是「能量轴」的名字由来）；
+   · 头条：`min_harvest_mw` = 少于此功率就跟不住人（要≥0.1mW 才每 300s 报一次）。
+
+   页面操作**不改模型**：参数只是喂给 `energy.plan()` 的输入，判定恒由后端算（单一源）。 */
+
+let enBusy = false;
+
+const EN_WHY = w => {
+  const s = T("en_why_" + w);
+  return s === "en_why_" + w ? (w || "-") : s;
+};
+
+function enNum(v, digits) {
+  return (v == null || !isFinite(v)) ? "—" : Number(v).toFixed(digits == null ? 2 : digits);
+}
+
+function fmtInterval(v) {
+  return v == null ? T("en_silent") : enNum(v, 1) + " s";
+}
+
+function fmtSilence(v) {
+  if (v == null) return "—";
+  if (v >= 86400) return enNum(v / 86400, 1) + " " + T("en_day");
+  if (v >= 3600) return enNum(v / 3600, 1) + " " + T("en_hour");
+  return enNum(v, 0) + " s";
+}
+
+function renderEnergy(e, ax) {
+  const box = $("enState");
+  if (!box) return;
+  const on = !!(e && e.on);
+  const st = (e && e.state) || {};
+  const mv = st.mv;
+  const cell = (k, v, cls) =>
+    `<div class="id-row"><span>${esc(T(k))}</span><b class="${cls || ""}">${v}</b></div>`;
+  if (!on) {
+    box.innerHTML = cell("en_st_state", esc(T("en_state_off"))) +
+      cell("en_st_mv", "—") + cell("en_st_level", "—") +
+      cell("en_st_interval", "—") + cell("en_st_silence", "—");
+  } else {
+    // 电站「还有多少」= 储能 × 电压映射；沉默倒计时是**演示加速后**的直观秒数
+    const lv = mv == null ? "—" : mv + " mV";
+    const lvCls = (st.mv != null && st.why === "empty") ? "lost-yes" : "";
+    let sTxt = "—";
+    if (st.silent) sTxt = T("en_silent_now");
+    else if (st.hard) sTxt = T("en_hard_now") + " (" + fmtSilence(st.silence_eta_s) + ")";
+    else if (st.silence_in_s != null) sTxt = fmtSilence(st.silence_eta_s);
+    box.innerHTML =
+      cell("en_st_state", esc(T("en_state_on"))) +
+      cell("en_st_mv", lv, lvCls) +
+      cell("en_st_level", esc(st.level || "—") +
+           (st.degraded ? ` <span class="hint">${esc(T("en_degraded"))}</span>` : "")) +
+      cell("en_st_interval", esc(fmtInterval(st.interval_s))) +
+      cell("en_st_silence", esc(sTxt)) +
+      cell("en_st_net", enNum(st.net_mw, 3) + " mW") +
+      cell("en_st_why", esc(EN_WHY(st.why)));
+  }
+  // 输入框回显（不动正在编辑的那个）
+  const ae = document.activeElement && document.activeElement.id;
+  const p = (e && e.params) || {};
+  if (ae !== "enHarvest" && p.harvest_mw != null) $("enHarvest").value = p.harvest_mw;
+  if (ae !== "enCharge" && p.charge_mj != null) $("enCharge").value = p.charge_mj;
+  if (ae !== "enStore" && p.store_mj != null) $("enStore").value = p.store_mj;
+  if (ae !== "enSpeedup" && p.speedup != null) $("enSpeedup").value = p.speedup;
+  const cbOn = $("enOn");
+  if (cbOn && document.activeElement !== cbOn) cbOn.checked = on;
+  const cbPush = $("enPush");
+  if (cbPush && document.activeElement !== cbPush) cbPush.checked = !!p.push;
+
+  // 扫描表 + 头条
+  const msg = $("enAxisMsg");
+  const tb = $("enAxisList");
+  if (!tb) return;
+  const rows = (ax && ax.rows) || [];
+  tb.innerHTML = "";
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    const cur = (e && e.params && Math.abs(r.harvest_mw - e.params.harvest_mw) < 1e-9);
+    if (cur) tr.className = "en-cur";
+    const usable = !!r.usable;
+    tr.innerHTML =
+      `<td>${enNum(r.harvest_mw, 3)}${cur ? " ◀" : ""}</td>` +
+      `<td>${enNum(r.net_mw, 3)}</td>` +
+      `<td class="${usable ? "yes" : "no"}">${esc(r.level || "—")}` +
+      `${r.degraded ? ` <span class="hint">${esc(T("en_degraded"))}</span>` : ""}</td>` +
+      `<td>${esc(fmtInterval(r.interval_s))}` +
+      `${r.every_s != null ? ` <span class="hint">(${enNum(r.every_s, 1)}s)</span>` : ""}</td>` +
+      `<td>${esc(fmtSilence(r.silence_in_s))}</td>` +
+      `<td>${esc(EN_WHY(r.why))}</td>`;
+    tb.appendChild(tr);
+  });
+  if (msg) {
+    msg.textContent = (ax && ax.min_harvest_mw != null)
+      ? T("en_axis_head").replace("{n}", enNum(ax.min_harvest_mw, 2))
+          .replace("{n2}", enNum(ax.n, 0))
+      : T("en_axis_none");
+  }
+}
+
+async function postEnergy(body) {
+  if (enBusy) return;                     // 防重入：连点不堆请求
+  enBusy = true;
+  try {
+    const r = await fetch("/api/energy", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(x => x.json());
+    if (r && r.axis) renderEnergy(r, r.axis);   // 立刻回显，不等下一次轮询
+  } catch (err) {
+    console.error("postEnergy 失败:", err);
+  } finally {
+    enBusy = false;
+  }
+}
+
+if ($("btnEnApply")) {
+  $("btnEnApply").onclick = () => postEnergy({
+    action: "set",
+    on: !!$("enOn").checked,
+    harvest_mw: parseFloat($("enHarvest").value) || 0,
+    charge_mj: parseFloat($("enCharge").value) || 0,
+    store_mj: parseFloat($("enStore").value) || 0,
+    push: !!$("enPush").checked,
+    speedup: parseFloat($("enSpeedup").value) || 1,
+  });
+  $("btnEnReset").onclick = () => postEnergy({ action: "reset" });
+  $("enOn").onchange = () => postEnergy({ action: $("enOn").checked ? "on" : "off" });
+}
 
 /* ---------- §8.2 降级演示：切换「哪个环节坏了」---------- */
 function fillIdLevelModes(list) {

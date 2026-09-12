@@ -142,7 +142,7 @@
     `CREATE TABLE IF NOT EXISTS` **不给老表补列** → `_init_db` 里用 `PRAGMA table_info` + `ALTER TABLE`
     兜迁移（否则老 `orpah.db` 写库报 `no such column`）。`test_alerts.py` 里的假 `Case` 必须带 `handler`
     （缺属性→测试直接崩；多给属性→掩盖真 AttributeError，两种都踩过）。
-  - **一键回归 = `orpah/run_checks.py`**（2026-09-12）：跑 `test_*.py` 七个离线套件 +
+  - **一键回归 = `orpah/run_checks.py`**（2026-09-12）：跑 `test_*.py` 全部离线套件（现 14 个）+
     批量合规用例（`checks_batch.py`，表驱动：黄金样本/SN 边界/parse_sn/报文编解码），
     报告写到 `orpah/checks_report.md`（**入库**，同 `host/test_results.txt` 惯例）。
     **改完任何 orpah 代码先跑它**。两条硬规则：① 判定 = 退出码 0 **且** 输出无 `FAIL`/`Traceback`
@@ -156,6 +156,19 @@
     `src=server` 必须**留痕**（审计 detail 写 `ts_src=server`，页面可标）。
     **绝不改报文里的 `ts`** —— 它在签名预像里，改了验签就过不了；归一化只用于我们的记录。
     测试：`test_clock.py`（已并入 `run_checks.py`）。
+  - **能量轴（免电池客户端，2026-09-13）**：模型 = `orpah/energy.py`（三参数：采集 `harvest_mw` /
+    储能 `charge_mj` / 每次上报代价 `cost_mj`；**参数是演示标定值，不是实测**）。四条不能碰的约定：
+    ① 能量降级的**下限是 L1（HS256）**，**永不降到 L3** —— §8.3 里 L3 是 coverage-only、
+    **不能确认人在场**，宁可**如实沉默**（`interval_s=None` → 不发报）也不发无法确认在场的报；
+    ② 成因**不新增报文字段**：服务端从两个**在签名覆盖内**的事实（`hdr.level` + `payload.battery_mv`）
+    推导 `degraded_reason = "energy" | "key"`（`≤ ORPAH_ALERT_ENERGY_LOW_MV` 且降级 → energy）；
+    ③ 沉默必须**归因分叉**：最后一条已签电量低 → `no_report_energy`（warn，等它取能）；
+    电量充足 → `no_report`（30s warn → 300s crit，该出警）。**两者不得合并**（处置相反）；
+    ④ `/api/status.energy` 与 GET `/api/energy` 的 `on/params/state` **形状必须一致**（页面同一份渲染代码），
+    但 `status` 里**不放扫描表**（13 行不该每秒重算/重传）—— **鼎过一回**：曾经 `status.energy`
+    就是扁平 `state`，页面按 `{on,params,state}` 读 → 状态格全「—」、输入框不回显、扫描表标不出当前点。
+    POST `/api/energy` 里调 `_energy_step(drain=False)`（只重算策略不推电量）以便立即回显。
+    测试：`test_energy.py`（51 条，含“各级别间隔单调不增 + 恰好一处有意跳变”的回归锁）+ `test_alerts.py`/`test_server.py`。
   - **查审计事件别读错字段**：`GET /api/ts/events` 返回的键是 **`rows`**（不是 `events`）；
     另注意它按 `etype`/`sn` 在**本地**过滤（值过滤不进 WHERE，见 §0 IoTDB 条），
     所以“某类事件为空”先确认字段名，再确认是不是真没写进去。

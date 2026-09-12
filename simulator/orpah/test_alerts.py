@@ -314,7 +314,67 @@ check("能力：窗口边界含（age=100 且 cap_mismatch_sec=100 → 仍报，
       kinds(alr.evaluate(regis(), case_mgr(), deque([crep(True, False, t=NOW - 100, sn="A")]),
                          now=NOW, cap_mismatch_sec=100)) == ["id_cap_mismatch"])
 
+# ---- 规则 7：能量（低电 warn / 耗尽 crit）+ 沉默归因分流（2026-09-13）----
+def en(mv, sil=None):
+    return {"mv": mv, "silence_in_s": sil, "level": "HS256", "degraded_reason": "energy"}
+
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, energy={"A": en(3600)})
+check("能量：电量正常 → 不告警", a == [])
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, energy={"A": en(alr.ENERGY_LOW_MV)})
+check("能量：低电边界（=3300mV）→ id_energy warn",
+      kinds(a) == ["id_energy"] and a[0]["level"] == "warn")
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, energy={"A": en(alr.ENERGY_OUT_MV)})
+check("能量：耗尽边界（=3100mV）→ id_energy crit",
+      kinds(a) == ["id_energy"] and a[0]["level"] == "crit")
+check("能量：告警带 mv 与 silence_in_s（页面可直接显示“还能报 X 秒”）",
+      a[0]["mv"] == alr.ENERGY_OUT_MV and a[0]["silence_in_s"] is None)
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, energy={"A": en(None)})
+check("能量：没报过电量（mv=None）→ 不猜、不告警", a == [])
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, energy={"A": en(3200, sil=120.0)})
+check("能量：低电区间 → warn 且带上倒计时",
+      kinds(a) == ["id_energy"] and a[0]["silence_in_s"] == 120.0)
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW)
+check("能量：不传 energy → 不评估（与 clock 同约定）", a == [])
+check("能量：阈值可配（3400mV 默认不报；energy_low_mv=3500 时报）",
+      kinds(alr.evaluate(regis(), case_mgr(), deque(), now=NOW,
+                         energy={"A": en(3400)})) == []
+      and kinds(alr.evaluate(regis(), case_mgr(), deque(), now=NOW,
+                             energy={"A": en(3400)}, energy_low_mv=3500)) == ["id_energy"])
+
+# 分流：沉默 + 低电 → no_report_energy（warn，**不**升 crit）；电量充足突然沉默 → no_report（crit）
+# 注意：低电/耗尽时规则 7 总会另出一条 `id_energy`（设备自报电量低是独立事实），
+#       所以这里断言的是「**不再出 `no_report`**」——那才是分流要防的误判（把没电当被藏）。
+r_sil = regis(dev("A", last_seen=NOW - 1000))
+a = alr.evaluate(r_sil, case_mgr(), deque(), now=NOW, energy={"A": en(3200, sil=60.0)})
+check("分流：沉默 + 低电（未耗尽）→ 出 no_report_energy、**不**出 no_report",
+      "no_report_energy" in kinds(a) and "no_report" not in kinds(a))
+check("分流：该条是 warn（不升级 crit，等它取能）",
+      [x for x in a if x["kind"] == "no_report_energy"][0]["level"] == "warn")
+check("分流：该条带 gap/mv/silence_in_s（页面能解释“疑似没电”）",
+      [(x["gap"], x["mv"], x["silence_in_s"]) for x in a
+       if x["kind"] == "no_report_energy"] == [(1000, 3200, 60.0)])
+a = alr.evaluate(r_sil, case_mgr(), deque(), now=NOW, energy={"A": en(4000)})
+check("分流：沉默 + 电量充足 → 仍是 no_report（且超 crit 阈值 → crit，这才是最该出警的）",
+      kinds(a) == ["no_report"] and a[0]["level"] == "crit")
+a = alr.evaluate(r_sil, case_mgr(), deque(), now=NOW)
+check("分流：不传 energy → 行为与以前完全一致（no_report）", kinds(a) == ["no_report"])
+# 分流只看“最后一签上报的电量”，不看设备自称的降级级别（避免“没电”被用在无能量信息的设备上）
+a = alr.evaluate(r_sil, case_mgr(), deque(), now=NOW, energy={"B": en(4000)})
+check("分流：能量快照里没有该设备 → 不当作没电（不报 no_report_energy）",
+      kinds(a) == ["no_report"])
+# 沉默且已耗尽时，两条同时出（描述两件事，数据不同，不合并）：
+# 一条是「它自己说没电了」（设备视角），一条是「它不再吭声且最后信息是低电」（运维视角）。
+a = alr.evaluate(r_sil, case_mgr(), deque(), now=NOW, energy={"A": en(3000, sil=60.0)})
+check("分流：沉默 + 已经耗尽（低于 3100mV）→ no_report_energy + id_energy 两条",
+      sorted(kinds(a)) == ["id_energy", "no_report_energy"])
+check("分流：两条的严重度不同（沉默那条反而更轻）",
+      {x["kind"]: x["level"] for x in a} == {"no_report_energy": "warn", "id_energy": "crit"})
+
+
 # ---- 排序 / 计数 / 空态 ----------------------------------------------------
+
+
 a = alr.evaluate(regis(dev("A", last_seen=NOW - 100)),
                  case_mgr(case("C001", created=NOW - 300)),
                  deque([rep(False)] * 5), now=NOW)

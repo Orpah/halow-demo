@@ -58,6 +58,7 @@ import spoof                               # noqa: E402  防 spoof：攻击报�
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import clock as clk                       # noqa: E402  设备时钟偏移/漂移估计（纯计算）
 import metrics                            # noqa: E402  指标面板纯计算（/api/metrics）
+import energy as en                       # noqa: E402  能量轴（免电池客户端模型，纯计算）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 from waiting import wait_until            # noqa: E402  按截止时间等待（只这一份实现）
 import damm32 as d32                      # noqa: E402  校验算法单一源
@@ -168,6 +169,16 @@ class OrpahApp:
         self.id_level = "auto"             # 演示降级模式（§8.2，见 ID_LEVEL_MODES）
         self.id_cap_rtc = None             # 设备声明的「有无 RTC」（None=未声明 / True / False）
         self.id_ts_broken = False          # 演示：ID 上报的 ts 置 0（无时钟，2026-09-13）
+        # ---- 能量轴（2026-09-13）：免电池客户端能量模型驱动间隔与级别 ----
+        self.en_on = False                 # 是否让能量接管间隔/级别（默认关：间隔仍手工填）
+        self.en_harvest = 0.5              # 平均采集功率（mW，演示参数）
+        self.en_charge = en.CHARGE0_MJ     # 当前电量（mJ）
+        self.en_store = en.STORE_MJ        # 储能容量（mJ）
+        self.en_push = False               # 采不敷出时是否“硬撑”（吃储能也要被听见）
+        self.en_speedup = 10.0             # 演示加速倍数：真实间隔 ÷ 它 = 页面看到的周期
+        self.en_state = {}                 # 最近一次能量状态（/api/status 用）
+        self.id_battery_mv = en.mv_of(en.CHARGE0_MJ)   # 下一份已签报告里的电量电压
+        self.id_level_energy = None        # 能量决定的级别覆盖（None = 不覆盖）
         self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
@@ -480,12 +491,61 @@ class OrpahApp:
     def _report_loop(self):
         while not self.stop.is_set():
             if not self.paused:
+                self._energy_step()          # 能量轴：先算「这次该不该报/多久报一次/什么级别」
+                if self.en_state.get("silent"):
+                    # 采不敷出且选择了“不如实沉默”（或没开硬撑）→ 本轮不发报，只推进电量
+                    time.sleep(self.every)
+                    continue
                 self._aim_link_rssi()
                 self.client.send_req_connect()
                 time.sleep(0.25)
                 self.client.report_once()
                 self._id_tick()
             time.sleep(self.every)
+
+    def _energy_step(self, drain=True):
+        """能量轴推进一拍（2026-09-13）：
+
+        1. 用当前采集/电量算策略（`energy.plan`）—— 级别与间隔**都由能量决定**；
+        2. 间隔写回 `self.every`（客户端据此周期上报）；级别写回 `id_level_energy`；
+        3. 电量按 `energy.drain()` 推进，并把 `energy.mv_of()` 的电压写进下一份**已签**报告
+           （`payload.battery_mv`，在签名预像内 → 服务端不能抵赖我“快没电了”）；
+        4. `interval_s is None`（采不敷出）：默认就**如实沉默**（不发报），
+           只有演示开关 `en_push` 打开时才“硬撑”（用 `EMERGENCY_INTERVAL_S` 继续发，
+           并让服务端能看见 `silence_in_s` 倒计时）。
+        未开启能量模式时什么也不做（`every` 仍由页面手填控制）。
+        `drain=False`：只重算策略、**不动电量**（页面改参数时用，见 POST /api/energy）。
+        """
+        if not self.en_on:
+            self.en_state = {}
+            return
+        p = en.plan(self.en_harvest, self.en_charge, self.en_store)
+        no_interval = p["interval_s"] is None
+        if not no_interval:
+            interval = float(p["interval_s"])
+        else:
+            interval = en.EMERGENCY_INTERVAL_S if self.en_push else None
+        hard = bool(no_interval and self.en_push)
+        if interval is not None:
+            # 演示加速：真实 300s 的间隔按 `en_speedup` 倍压缩，否则现场看不到变化
+            self.every = max(0.5, interval / self.en_speedup)
+        self.id_battery_mv = en.mv_of(self.en_charge, self.en_store)
+        self.id_level_energy = 1 if p["degraded"] else None   # 1 = HS256（§8.2 的 L1 算法）
+        self.en_state = {
+            "on": True, "harvest_mw": self.en_harvest, "charge_mj": round(self.en_charge, 2),
+            "store_mj": self.en_store, "mv": self.id_battery_mv, "level": p["level"],
+            "degraded": p["degraded"], "degraded_reason": p["degraded_reason"],
+            "interval_s": p["interval_s"], "every_s": round(self.every, 2),
+            "net_mw": p["net_mw"], "budget_ok": p["budget_ok"],
+            "silence_in_s": p["silence_in_s"], "usable": p["usable"], "why": p["why"],
+            "silent": bool(no_interval and not hard), "hard": hard,
+            "silence_eta_s": (round(p["silence_in_s"] / self.en_speedup, 1)
+                              if p["silence_in_s"] is not None else None),
+        }
+        if not drain:
+            return
+        self.en_charge = en.drain(self.en_charge, self.en_harvest, interval, p["level"],
+                                  float(self.every) * self.en_speedup, store_mj=self.en_store)
 
     def _aim_link_rssi(self):
         """设备自身的 REPORT 里的 rssi = **当前与之关联的那台路由器**测到的强度。
@@ -530,12 +590,16 @@ class OrpahApp:
         """
         self._ensure_id_device()
         cap = None if self.id_cap_rtc is None else {"rtc": bool(self.id_cap_rtc)}
+        kw = dict(ID_LEVEL_MODES.get(self.id_level, ID_LEVEL_MODES["auto"]))
+        if self.id_level_energy is not None:
+            # 能量轴：能量决定的级别（HS256）。**不用 pick_level 的故障路径**（那是“哪个环节坏了”），
+            # 否则会把“因为没电而省电”谎报成“Slot0 签名失败”。
+            kw = {"level": self.id_level_energy}
         return self.id_dev.report(
             ts=0 if self.id_ts_broken else ts,
             seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
                            "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
-            battery_mv=3700, firmware="1.0.3", cap=cap,
-            **ID_LEVEL_MODES.get(self.id_level, ID_LEVEL_MODES["auto"]))
+            battery_mv=self.id_battery_mv, firmware="1.0.3", cap=cap, **kw)
 
     def _send_id_report(self, ts=None):
         """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
@@ -656,6 +720,64 @@ class OrpahApp:
                 "items": items}
 
     # ---------------- 控制（前端按钮） ----------------
+    def _energy_params(self):
+        """能量模型当前参数（GET /api/energy 与 /api/status 共用一份形状）。"""
+        return {"harvest_mw": self.en_harvest, "charge_mj": round(self.en_charge, 2),
+                "store_mj": self.en_store, "push": self.en_push,
+                "speedup": self.en_speedup}
+
+    def energy_axis(self):
+        """能量轴：扫采集功率 → 每点策略 + 头条数字（「要多少 mW 才持续跟得住人」）。
+
+        横轴上限取 `max(2×当前采集, 0.5 mW)`（保证当前工作点一定在图上），13 个点。
+        **扫的是模型**（与演示加速倍数无关）：页面另外乘 `en_speedup` 显示“页面周期”。
+        """
+        h_max = max(self.en_harvest * 2.0, 0.5)
+        ax = en.axis(n=13, h_max=h_max, charge_mj=self.en_charge, store_mj=self.en_store)
+        for r in ax["rows"]:                       # 附带“页面周期”（演示加速后）
+            r["every_s"] = (None if r["interval_s"] is None
+                            else round(max(0.5, r["interval_s"] / self.en_speedup), 2))
+        ax["speedup"] = self.en_speedup
+        ax["h_max"] = round(h_max, 3)
+        return ax
+
+    def energy_view(self):
+        """能量轴的完整视图（GET /api/energy）：参数 + 当前状态 + 扫描表。"""
+        return {
+            "ok": True,
+            "on": self.en_on,
+            "params": self._energy_params(),
+            "defaults": {"cost_mj": en.COST_MJ, "sleep_mw": en.SLEEP_MW,
+                         "min_interval_s": en.MIN_INTERVAL_S,
+                         "max_useful_interval_s": en.MAX_USEFUL_INTERVAL_S,
+                         "charge0_mj": en.CHARGE0_MJ, "store_mj": en.STORE_MJ,
+                         "emergency_interval_s": en.EMERGENCY_INTERVAL_S,
+                         "cell_empty_mv": en.CELL_EMPTY_MV, "cell_full_mv": en.CELL_FULL_MV},
+            "state": self.en_state,
+            "axis": self.energy_axis(),
+            "note": "parameters are DEMO values, not measured",   # 页面据此标注“演示参数”
+        }
+
+    def energy_snapshot(self):
+        """告警用的能量快照 `{sn: {...}}`（最后一条**已签**上报里的电量 + 模型推算）。
+
+        只吃已签上报里的 `battery_mv`（在签名预像内 → 设备不能抵赖"我快没电了"），
+        逐设备取最新一条；`silence_in_s` 只有演示设备（当前能量模型）才有，其它设备为 None。
+        """
+        out = {}
+        for rec in list(self.id_reports):          # 最新在前
+            sn = rec.get("sn")
+            if not sn or sn in out:
+                continue
+            st = self.en_state or {}
+            out[sn] = {"mv": rec.get("battery_mv"),
+                       "silence_in_s": st.get("silence_in_s") if self.en_on else None,
+                       "level": rec.get("alg"), "degraded_reason": rec.get("degraded_reason"),
+                       "since": rec.get("ts_eff")}
+            if len(out) >= 20:
+                break
+        return out
+
     def status(self):
         conn_a = self.cores[0].wifi.conn_str() if self.cores else "-"
         conn_b = self.cores[1].wifi.conn_str() if len(self.cores) > 1 else "-"
@@ -719,6 +841,12 @@ class OrpahApp:
             # 设备能力声明（2026-09-13）：None=未声明 / True / False；ts_broken = 自报 ts 置 0
             "id_cap_rtc": self.id_cap_rtc,
             "id_ts_broken": self.id_ts_broken,
+            # 能量轴（2026-09-13）：开启后由能量模型驱动间隔/级别（见 _energy_step）
+            # 形状与 GET /api/energy 的 `on/params/state` 一致（页面同一份渲染代码吃两种来源）；
+            # 但**不含**扫描表 —— 那个只在 /api/energy 与这里的 `energy_axis` 出，别塞进 1s 轮询。
+            "energy": {"on": self.en_on, "params": self._energy_params(),
+                       "state": self.en_state},
+            "energy_axis": self.energy_axis(),
             # 防 spoof 演示的攻击清单（脚本/UI 同一份，见 spoof.py；页面按语言取 zh/en）
             "spoof_kinds": [{"kind": k, "zh": spoof.case_info(k)[0],
                              "en": spoof.case_info(k)[1],
@@ -856,9 +984,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/alerts":
             # 无状态评估：每次用当前快照重算活跃告警（规则见 alerts.py）
             al = alr.evaluate(APP.registry, APP.cases, APP.id_reports,
-                              clock=APP.clock.snapshot())
+                              clock=APP.clock.snapshot(), energy=APP.energy_snapshot())
             self._send(200, json.dumps({"ok": True, "counts": alr.summary(al),
                                         "alerts": al}).encode())
+            return
+        if self.path.startswith("/api/energy"):
+            self._send(200, json.dumps(APP.energy_view()).encode())
             return
         if self.path.startswith("/api/ts/query"):
             self._api_ts_query()
@@ -1639,6 +1770,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/sig":
             self._api_sig()
+            return
+        if self.path.startswith("/api/energy"):
+            # 能量轴参数（2026-09-13）：on/off/set/reset。**每步都回全量视图**，
+            # 页面直接重渲染（与 /api/stations 同一习惯，避免状态漂移）。
+            try:
+                n = int(self.headers.get("Content-Length", 0))
+                req = json.loads(self.rfile.read(n) or b"{}")
+            except Exception as e:
+                self._send(400, json.dumps({"ok": False, "err": str(e)}).encode())
+                return
+            a = req.get("action")
+            if a == "on":
+                APP.en_on = True
+                APP.en_charge = APP.en_store      # 开启时充满：演示从“能撑”开始看
+            elif a == "off":
+                APP.en_on = False
+                APP.en_state = {}
+                APP.id_level_energy = None
+            elif a == "reset":
+                APP.en_charge = req.get("charge_mj", APP.en_store)
+            elif a == "set":
+                # `on` 也接受（页面一次提交里同时“启用 + 改参数”）：
+                # 明确写进来的参数优先级更高 → 先处理“首次开启充满”，再套参数。
+                if "on" in req:
+                    if req["on"]:
+                        if not APP.en_on:
+                            APP.en_on = True
+                            APP.en_charge = APP.en_store      # 首次开启：充满
+                    else:
+                        APP.en_on = False
+                        APP.en_state = {}
+                        APP.id_level_energy = None
+                if "harvest_mw" in req:
+                    APP.en_harvest = max(0.0, float(req["harvest_mw"]))
+                if "charge_mj" in req:
+                    APP.en_charge = max(0.0, min(float(req["charge_mj"]), APP.en_store))
+                if "store_mj" in req:
+                    APP.en_store = max(1.0, float(req["store_mj"]))
+                if "push" in req:
+                    APP.en_push = bool(req["push"])
+                if "speedup" in req and float(req["speedup"]) > 0:
+                    APP.en_speedup = float(req["speedup"])
+            elif a is not None:
+                self._send(200, json.dumps(
+                    {"ok": False, "err": "bad_action"}).encode())
+                return
+            # `drain=False`：这一拍只**重算策略**（级别/间隔/状态格立刻反映新参数），
+            # 不推进电量 —— 否则页面上改一次参数就白白丢掉一拍储能（且与真实计时不符）。
+            APP._energy_step(drain=False)
+            self._send(200, json.dumps(APP.energy_view()).encode())
             return
         if self.path.startswith("/api/truth"):
             try:

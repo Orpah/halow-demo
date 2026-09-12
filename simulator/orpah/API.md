@@ -109,6 +109,8 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 | `id_cap_rtc` | 当前设备**声明的有无 RTC**：`true`=有 / `false`=无 / `null`=未声明（三态，页面下拉回显） |
 | `id_ts_broken` | 演示开关：设备自报 `ts` 一律置 0（“没有可用时钟”，页面复选框回显） |
 | **`spoof_kinds`** | **防 spoof 演示的攻击清单** `[{kind, zh, en, expect}]`（来自 `spoof.UI_KINDS`，脚本/页面同一份）。页面按当前语言取 `zh`/`en` 生成下拉，`expect` 用于「期望 vs 实际」对比——**后端不返回本地化文案，只给两种语言让页面挑**，避免中英混排 |
+| **`energy`** | 能量轴（免电池客户端，2026-09-13）：`{on, params, state}` —— 形状与 GET `/api/energy` 的三项**一致**（页面同一份渲染代码吃两种来源）。**不含扫描表**（那个在 `energy_axis`，见 §13） |
+| **`energy_axis`** | 能量轴扫描表 `{rows[13], min_harvest_mw, n, speedup, h_max}`（页面画「采集功率 → 上报间隔」表 + 标出当前工作点） |
 
 **设备时钟字段**（index 的「上报控制」卡片用；`clock.py`，2026-09-13 新增）：
 
@@ -502,12 +504,14 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 | kind | level | 条件 | 阈值 | 环境变量 |
 |---|---|---|---|---|
-| `no_report` | `warn` → `crit` | **工作态**（启用 **或 走失中**）且**曾上报过**的设备，距上次上报超过 N 秒 | `30` / 升级 `300` | `ORPAH_ALERT_NO_REPORT_SEC` / `ORPAH_ALERT_NO_REPORT_CRIT_SEC` |
+| `no_report` | `warn` → `crit` | **工作态**（启用 **或 走失中**）且**曾上报过**的设备，距上次上报超过 N 秒；**最后一条已签电量低于 `energy_low_mv` 的拆到 `no_report_energy`**（例外），其余才是本条 | `30` / 升级 `300` | `ORPAH_ALERT_NO_REPORT_SEC` / `ORPAH_ALERT_NO_REPORT_CRIT_SEC` |
 | `case_overtime` | `crit`（不分级） | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
 | `case_handled_overtime` | `warn` → `crit` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` / 升级 `172800` | `ORPAH_ALERT_CASE_HANDLED_SEC` / `ORPAH_ALERT_CASE_HANDLED_CRIT_SEC` |
 | `sig_fail_rate` | `crit`（不分级） | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
 | `id_degraded` | L2 `warn` / L3 `crit` | 最近 N 秒内出现过**降级上报**（§8.3）：L2 = SE 不可用（仍更新定位）、L3 = 无可用密钥（裸上报） | `300` | `ORPAH_ALERT_ID_DEGRADED_SEC` |
 | `id_cap_mismatch` | `warn`（不分级） | 设备**已签**声明「有 RTC」（`cap_rtc is True`），却送出不可用的 `ts`（`ts_ok=false`） | `300` | `ORPAH_ALERT_CAP_MISMATCH_SEC` |
+| `id_energy` | `warn` / `crit` | 设备最后一条**已签**上报的电量低（`mv ≤ low` → warn）/ 已耗尽（`mv ≤ out` → crit）；数据带 `mv`/`silence_in_s`（还能撑多久） | `3300` / `3100` | `ORPAH_ALERT_ENERGY_LOW_MV` / `ORPAH_ALERT_ENERGY_OUT_MV` |
+| `no_report_energy` | `warn`（**不升级 crit**） | 设备沉默**且**最后一条已签电量低 → **疑似没电**（等它取能），与 `no_report` **分流**（处置相反，不得合并） | 同 `no_report`（`30`） | `ORPAH_ALERT_NO_REPORT_SEC` |
 
 ⚠ **默认值分两类，别看混**：
 - **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s（升级 300s）、
@@ -821,5 +825,98 @@ POST /api/truth   body {"times":[t1,t2,…]}                    → 指定时刻
   1200 条测量中 438 条越界，声明与数据不符）。噪声是**测量**误差，不会把收不到的信号变出来，
   所以钳位只能在加噪之后（`motion.clamp_rssi()` 是唯一的钳位实现）。
 - 站位（路由器）坐标不在本接口：见 §7 `/api/stations`（可增删改/导入，页面表格里直接编辑）。
+
+---
+
+## 13. `/api/energy`（能量轴：免电池客户端，2026-09-13）
+
+免电池终端（采集 → 储能 → 定期上报）**能报多快、该不该降级、什么时候只能沉默**，
+都由「能量」决定。模型在 `energy.py`（三参数：采集 `harvest_mw` / 储能 `charge_mj` /
+每次上报代价 `cost_mj` —— ES256 15mJ、HS256 5mJ），**参数是演示标定值、不是实测**。
+
+### GET `/api/energy` → 全量视图
+
+```json
+{"ok":true, "on":true,
+ "params":{"harvest_mw":0.5,"charge_mj":1500.0,"store_mj":2000.0,"push":false,"speedup":10.0},
+ "defaults":{"cost_mj":{"ES256":15.0,"HS256":5.0},"sleep_mw":0.05,"min_interval_s":2.0,
+             "max_useful_interval_s":300.0,"charge0_mj":1500.0,"store_mj":2000.0,
+             "emergency_interval_s":60.0,"cell_empty_mv":3000,"cell_full_mv":4200},
+ "state":{ ...见下表... },
+ "axis":{"rows":[{...}×13],"min_harvest_mw":0.083,"n":13,"speedup":10.0,"h_max":1.0},
+ "note":"parameters are DEMO values, not measured"}
+```
+
+### POST `/api/energy`（body 带 `action`，**每步都回全量视图**）
+
+| action | 字段 | 语义 |
+|---|---|---|
+| `on` | — | 开启能量模型；**同时充满电**（演示从“能撑”开始看）。此后间隔/级别由模型接管 |
+| `off` | — | 关闭；清空状态（间隔回到「上报控制」卡片的手填值） |
+| `set` | `on?` `harvest_mw?` `charge_mj?` `store_mj?` `push?` `speedup?` | 改参数；`on:true` 等价于 `on`（首次开启充满），**显式传的参数优先**。`charge_mj` 会被钳到 `store_mj`；`harvest_mw ≥ 0`；`store_mj ≥ 1`；`speedup > 0` |
+| `reset` | `charge_mj?` | 充满（缺省 = `store_mj`） |
+| 其它 | — | `{ok:false, err:"bad_action"}` |
+
+- **`drain=False` 的即时回显**：POST 后服务端**只重算策略、不推进电量**（`_energy_step(drain=False)`），
+  所以返回的 `state` 立刻反映新参数 —— 否则页面改一次参数要等下一个上报周期才看到变化，
+  而且白白丢掉一拍储能。
+- **`state` 字段**：`on/harvest_mw/charge_mj/store_mj/mv/level/degraded/degraded_reason/
+  interval_s/every_s/net_mw/budget_ok/silence_in_s/usable/why/silent/hard/silence_eta_s`。
+  其中 `every_s` 是**页面周期**（= 真实间隔 ÷ `speedup`，演示加速用）、`silence_eta_s` 同理。
+- **`why` 取值**（机器值，页面按 `en_why_*` 翻译）：`ok`（够用 ES256）/ `degraded_saves`
+  （只够 HS256 省电）/ `too_slow`（只够很慢地报）/ `deficit`（采不敷出，净亏）/
+  `no_energy`（完全没采集）/ `empty`（电量不足一次上报）。恒不存在 `interval_s` 时：
+  `silent=true`（**如实沉默，不发报**）或 `hard=true`（`push` 打开时“硬撑”，用
+  `emergency_interval_s` 继续发，页面能看到倒计时）。
+- **能量降级的下限是 L1（HS256）**，**永不降到 L3** —— §8.3 里 L3 是 coverage-only、
+  不能确认人是否在场，而 ORPAH 的目标正是确认人还在不在。宁可如实沉默（服务端按沉默处置），
+  也不发一条无法确认在场的报。见 SPEC §5.2 规则 E2。
+
+### `axis`（扫描表：这就是「能量轴」这个名字）
+
+`rows[]` 每行 = 一个采集功率点上的策略：`harvest_mw / level / degraded / degraded_reason /
+interval_s / interval_es256_s / interval_hs256_s / net_mw / budget_ok / silence_in_s / usable /
+why`（+ 页面用的 `every_s`）。横轴上限取 `max(2×当前采集, 0.5mW)` 共 13 点，
+`min_harvest_mw` = **第一个“够用”的点** → 页面头条「要多少 mW 才跟得住人」
+（默认参数 ≈ `0.083 mW`；`0.1 mW` = 恰好够每 300s 用 ES256 报一次）。
+
+### `/api/status` 上的两个字段（1s 轮询用，**不含**扫描表）
+
+| 字段 | 内容 |
+|---|---|
+| `energy` | `{on, params:{...}, state:{...}}` —— 形状与 GET `/api/energy` 的这三项一致（页面同一份渲染代码吃两种来源）。**刻意不放 `axis`**：13 行扫描表不该每秒重算/重传 |
+| `energy_axis` | 同 `axis`（页面画扫描表 + 标出当前工作点用） |
+
+> ⚠ 踩过的坑：`/api/status.energy` 一度直接就是 `state` 本体（扁平），而页面按
+> `{on, params, state}` 读 → 状态格全「—」、输入框不回显、扫描表标不出当前点。
+> 现在两处形状统一，并由本节锁定。
+
+### 告警（`alerts.py` 规则 1 分流 + 规则 7）
+
+| kind | 级别 | 触发 | 阈值 |
+|---|---|---|---|
+| `id_energy` | `warn` / `crit` | 设备最后一条**已签**上报的电量 `mv ≤ low` → warn；`mv ≤ out` → crit。数据 `sn/mv/silence_in_s` | `3300` / `3100`（`ORPAH_ALERT_ENERGY_LOW_MV` / `ORPAH_ALERT_ENERGY_OUT_MV`） |
+| `no_report_energy` | `warn`（**不升级 crit**） | 设备沉默 **且最后一条已签电量低** → 疑似没电：**等它取能** | 同 `no_report` 的 `no_report_sec`（30s） |
+| `no_report` | `warn` → `crit`（30s → 300s） | 设备沉默**但电量充足** → 异常失联：**该出警** | `ORPAH_ALERT_NO_REPORT_SEC` / `_CRIT_SEC` |
+
+- **两者不合并**：处置相反（等它取能 vs 立刻搜），合并会让人做错事。
+- 沉默且**已耗尽**时两条同时出：`id_energy`（设备视角“它说没电了”）+
+  `no_report_energy`（运维视角“它不吭声且最后是低电”）—— 数据不同，不合并。
+- 判据只看**已签**电量（`energy_snapshot()` 取 `payload.battery_mv`），不看设备自称的降级级别；
+  没报过电量的设备**不猜**（`mv=None` → 不告警、不分流）。
+- **诚实边界**：设备若**从未报过低电量**就直接断电，服务端无从知道 → 仍按 `no_report`（该出警）处理。
+  这是履约代价，所以 SPEC §5.2 要求设备 SHOULD 在还能报的时候如实报低电量。
+
+### 服务端成因推导（`degraded_reason`，不新增报文字段）
+
+`/api/status.id_reports[]` 每条记录带 `battery_mv` 与 `degraded_reason`：
+
+- `degraded_reason = "energy"`：`level ∈ {1,2}` **且** `battery_mv ≤ 3300` → 因为没电而省电；
+- `degraded_reason = "key"`：`level ∈ {1,2,3}` 但电量不低（或没报电量）→ 签名/密钥环节的问题；
+- `null`：`level = 0`（没降级）。
+
+两个事实（级别 + 电量）**都在签名预像内** → 攻击者既不能把“密钥坏了”伪装成“没电了”，
+也不能反过来。`test_server.TestIdReport.test_id_report_energy_fields` 锁住这条推导。
+
 
 
