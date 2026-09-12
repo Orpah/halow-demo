@@ -146,10 +146,13 @@ python demo_l1.py --n 3        # 进程内建 AP+STA 模拟器 + Server/Router/C
 
 ```bash
 cd simulator/orpah
-python run_checks.py            # 7 个离线套件（各模块自检 + 批量合规用例），约 1 秒
+python run_checks.py            # 9 个离线套件（各模块自检 + 批量合规用例），约 2 秒
 python run_checks.py --e2e      # 再加 5 个端到端 demo（L1/L2/L3/L3b/防 spoof），1-3 分钟
 ```
 - 报告写到 `checks_report.md`（含 git HEAD、每套件结果/耗时/关键输出、失败详情）。
+- ⚠ **报告是全量口径的**：不带 `--e2e` 跑会把 `checks_report.md` **整个覆盖**成只含离线套件的结果
+  （14/14 → 9/9，e2e 那几行直接消失）。要提交这份报告就先跑 `--e2e`；若已跑过 `--e2e`
+  又随手跑了离线版，**重跑一次 `--e2e` 恢复**（否则入库的报告会骗人）。
 - **`--e2e` 前请先停 orpah-ui**：demo 与它（:8901 那一套）端口串扰会跑出假失败；
   脚本会自己检查并**拒绝执行**（退出码 2），不会给你一份误导的报告。
 - 判定 = 退出码 0 **且** 输出无 `FAIL`/`Traceback`（有些脚本自己吞异常还会往下跑）。
@@ -249,8 +252,9 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
 6. 真机（阶段二，**需硬件**）：按 `docs/real-hw-stage2.md` 的五组清单上机；`demo_hw1.py`
    负责能自动判的部分（固件代次/族、关联状态、跨空口 UDP、raw `0x88B5` 透传）。
    **两者均未经真机验证**，烧录/上机由用户执行。
-7. **一键回归**：`python run_checks.py`（7 个离线套件，~1s）→ `checks_report.md`；
+7. **一键回归**：`python run_checks.py`（9 个离线套件，~2s）→ `checks_report.md`；
    加 `--e2e` 跑 5 个端到端 demo（**需先停 orpah-ui**，否则端口串扰；脚本会自己拒绝）。
+   ⚠ 报告口径是全量的：离线单跑会把它覆盖成 9/9（e2e 行消失），详见「方式 3」。
 
 ## 下一步（L2.5/L4+）
 
