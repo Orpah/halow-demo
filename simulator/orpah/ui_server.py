@@ -605,8 +605,16 @@ class OrpahApp:
         tx_sta = self.cores[1].wifi.tx_pkts if len(self.cores) > 1 else 0
         rx_sta = self.cores[1].wifi.rx_pkts if len(self.cores) > 1 else 0
         rows = []
-        for seq in self.order:
-            r = self.reports[seq]
+        # 只读快照：本函数被 HTTP 线程调用，而 `_remember`（上报线程）会 append 到
+        # `order` 并在超过 50 条时 `pop(0)` + `reports.pop()`。若正好卡在这两条语句之间，
+        # 我们手上的 seq 已从 reports 里消失 → 直接索引会抛 KeyError（HTTP 500，
+        # 下一轮轮询自愈，但没必要让它发生）。用 .get() 跳过即可，**不必加锁**：
+        # 每个结构只有一个写者（order/reports 同属 _remember），列表读迭代最多跳一条，
+        # 下轮就补齐；其余环形缓冲在返回前都已 list() 拷贝。
+        for seq in list(self.order):
+            r = self.reports.get(seq)
+            if r is None:
+                continue
             m = r["msg"]
             rows.append({
                 "seq": seq, "sn": m.get("sn"), "ts": m.get("ts"),
