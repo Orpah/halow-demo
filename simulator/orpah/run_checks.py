@@ -77,11 +77,25 @@ def git_head():
 
 
 def key_lines(out, limit=6):
-    """从输出里挑「有信息量」的行（== 小节标题 / PASS / OK / 结尾总计），给报告用。"""
+    """从输出里挑「有信息量」的行（小节标题 / PASS / FAIL / 结尾总计），给报告用。
+
+    ⚠ **别把纯分隔线当"小节标题"**（2026-09-12 review 发现）：`demo_spoof.py` 的分节横幅
+    恰好是四条纯 `=====`，旧逻辑只看 `startswith("==")` 就收 → 整个「关键输出」区块被分隔线
+    填满，真正的结论反而看不到。现在要求该行**含实际文字**，并把 PASS/FAIL 行一并收进来。
+    """
     lines = [l.rstrip() for l in out.splitlines() if l.strip()]
-    picked = [l for l in lines if l.startswith("==") or l.startswith("--- ")]
+
+    def informative(line):
+        s = line.strip()
+        return bool(s) and not set(s) <= set("=-*•—·")     # 纯装饰行无信息
+
+    picked = [l for l in lines
+              if informative(l) and (l.strip().startswith("==")
+                                     or l.strip().startswith("---")
+                                     or "PASS" in l or "FAIL" in l
+                                     or "Traceback" in l)]
     if not picked:
-        picked = lines[:limit]
+        picked = [l for l in lines if informative(l)][:limit]
     tail = lines[-2:] if len(lines) > 2 else lines
     return picked[:limit] + ([] if not picked or picked[-1] in tail else tail)
 

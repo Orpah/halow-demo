@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 14:55:17
-- git HEAD：`4098c48`
+- 时间：2026-09-12 15:11:20
+- git HEAD：`dbfac69`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（14/14 套件通过）
 
@@ -9,24 +9,24 @@
 
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
-| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.0s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
-| 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
+| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
+| 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.2s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
-| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.5s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
+| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
 | L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
 | L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
 | L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.5s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.5s | 通过 |
+| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
 
 ## 关键输出
 
-### 运动/定位数据源 — PASS（0.0s）
+### 运动/定位数据源 — PASS（0.1s）
 
     == 1. 构造与几何 ==
     == 2. pos 确定性与周期性 ==
@@ -37,7 +37,7 @@
       OK   default() 复用同一实例
     全部通过
 
-### 密钥生命周期 — PASS（0.2s）
+### 密钥生命周期 — PASS（0.1s）
 
     == 1. 签发（幂等） ==
     == 2. 验签（第 1 代） ==
@@ -48,7 +48,7 @@
       OK   旧格式导入后能验签
     all key lifecycle tests passed
 
-### 防 spoof（离线逐条） — PASS（0.1s）
+### 防 spoof（离线逐条） — PASS（0.2s）
 
     == 1. 清单自洽 ==
     == 2. 逐条裁决（离线） ==
@@ -62,12 +62,10 @@
 
     PASS  长未上报：启用/走失中的都报，停用/报废不报
     PASS  长未上报：带 gap 且等级 warn
-    PASS  C：默认 no_report 升级阈值 300s
-    PASS  C：默认 case_handled 升级阈值 48h
+    PASS  C：默认 no_report 升级阈值 300s（ORPAH_ALERT_NO_REPORT_CRIT_SEC）
+    PASS  C：默认 case_handled 升级阈值 48h（ORPAH_ALERT_CASE_HANDLED_CRIT_SEC；注意与起步阈值 CASE_HANDLED_SEC=24h 是两个不同的量）
     PASS  C：刚过起步但未到升级点 → warn
     PASS  C：超过升级点 → crit
-    PASS  env：清后恢复默认
-    all alert tests passed
 
 ### 指标面板纯计算 — PASS（0.1s）
 
@@ -77,10 +75,8 @@
     PASS  签名：其它类型事件不进统计
     PASS  签名：取不到 alg → unknown（不猜）
     PASS  签名：无样本 → fail_ratio=None（不编 0）
-    PASS  单位锁：默认 ts 算出的“立案→发现”是 0s（应为 0~5s，不是 1000 倍）
-    全部通过
 
-### 时钟可信（ts=0 无 RTC） — PASS（0.5s）
+### 时钟可信（ts=0 无 RTC） — PASS（0.4s）
 
     == 1. effective_ts 归一化规则（唯一入口，各层共用）==
     == 2. 验签的时间窗（ts=0 跳过窗口，仅靠 nonce 防重放）==
@@ -88,7 +84,7 @@
       OK   留痕：ts_src=device（时间来自设备）
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.5s）
+### IoTDB 审计/时间窗 — PASS（0.6s）
 
     == 1. actor 字段 ==
     == 2. query_events 回读 actor ==
@@ -122,7 +118,6 @@
 ### L1 端到端 — PASS（1.3s）
 
     === ORPAH L1 验收 ===
-    Server 收到: 3 条  (sn 一致: True)
     结果: [PASS]
 
 ### L2 消息流 — PASS（2.2s）
@@ -131,8 +126,8 @@
     --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
     --- 分支二：走失库命中 sn=CN-WH01-9AF3C1D2 ---
     === ORPAH L2 验收 ===
+    分支一(未命中 NOT-TRACKED): PASS
     分支二(命中 TRACKED): PASS
-    结果: [PASS]
 
 ### L3 多 Router 漫游/去重 — PASS（4.2s）
 
@@ -142,21 +137,24 @@
     --- 阶段D：sn=CN-WH01-9AF3C1D2 在 R2 再次会话（应 tracked=True）---
     --- 阶段E：去重测试（重发已接受的 seq=4）---
     --- 阶段F：SN 校验（非法 sn → FORMAT-ERR）---
-      [PASS] F 非法 SN → FORMAT-ERR 且不计数
-    结果: [PASS]
 
 ### L3b 主动拉表 — PASS（1.5s）
 
     --- 模拟 Router 重启（清空本地缓存 + 未同步）---
     --- Server untrack sn=CN-WH01-9AF3C1D2（变更推送，Router 无需再拉）---
     === ORPAH Router 主动拉表 验收 ===
-      [PASS] ④ 变更推送仍生效且 REQ 不再多拉
-    结果: [PASS]
+      [PASS] ① mark 后启动 Router 即主动拉表追平（不依赖推送）
+      [PASS] ② 首次 REQ 答 tracked=True（启动拉表就绪）
+      [PASS] ③ 重启后 REQ 同步拉表、首问即权威
 
-### 防 spoof 空口端到端 — PASS（1.5s）
+### 防 spoof 空口端到端 — PASS（1.6s）
 
-    ==========================================================================
-    ==========================================================================
-    ==========================================================================
+      无认证空口防 spoof 端到端演示
+      被冒充设备 SN : CN-WH01-9AF3C1D2
+      攻击者 SN    : CN-WH01-2QZ3AYD6VZ-13（未登记 → 服务器不认识）
+      链路          : Client→STA→空口→AP→Router→UDP:19847→Server
+      用例数        : 12（含 1 条合法对照）
+    [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…
+      🎉 防 spoof 端到端验收全部通过
     ==========================================================================
 

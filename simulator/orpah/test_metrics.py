@@ -68,6 +68,27 @@ check("签名：alg 解析（前后有别的字段也认）",
       mt.alg_of("level=0 trust=ok accepted=True alg=ES256 gen=1") == "ES256"
       and mt.alg_of("") == "unknown")
 
+# ---- XSS 防护（2026-09-12）：alg 是**外部输入**（空口报文头 hdr.alg 直接落审计）----
+# 旧正则 `\S+` 会把 < > " ' 一起吃进去，前端再拼 innerHTML 就是存储型 XSS。
+# 现在只放行令牌字符，其余归 unknown。
+for bad in ('alg=<img src=x onerror=alert(1)>', 'alg=<svg/onload=1>',
+            'alg="quoted"', "alg=a'b", 'alg=<script>'):
+    got = mt.alg_of(bad)
+    check(f"XSS：恶意 alg 归 unknown（{bad[:24]}…）", got == "unknown")
+
+# 不变量：无论输入什么，by_alg 的键都不含能构成 HTML 的字符
+import string as _str      # noqa: E402
+_forbidden = set('<>"\'&')
+_keys = set()
+for probe in ('alg=ES256', 'alg=none', 'alg=<b>', 'alg="x"', 'alg=x&y',
+              'alg=', 'alg= a b', 'alg=HS256,ES256', 'alg=<', 'alg="'):
+    _keys |= set(mt.verify_stats([ev("id_report", probe)])["by_alg"])
+check("XSS：by_alg 的键集不含 HTML 元字符（不变量）",
+      not (_keys & _forbidden))
+check("XSS：合法令牌仍能解析",
+      mt.alg_of("alg=ES256") == "ES256" and mt.alg_of("alg=none") == "none"
+      and mt.alg_of("alg=HS256.1") == "HS256.1")
+
 # ---- 2) 平均 RSSI ----------------------------------------------------------
 r = mt.rssi_stats([rep(-60), rep(-70), rep(-65)])
 check("RSSI：均值/最小/最大/样本数",
@@ -120,6 +141,22 @@ st = mt.case_stats([c4], now=NOW)
 check("案件：乱序事件里取“时间最早的发现”（而非列表第一个）",
       st["to_found"]["avg"] == 100.0 and st["rows"][0]["to_found_sec"] == 100)
 check("案件：乱序不影响结案时长", st["to_close"]["avg"] == 900.0)
+
+# 时间回拨（导入历史数据 / 手工回填 ts）：发现或结案早于立案 → 时长不可用，
+# 置 None 并计入 invalid；**绝不报负数**（负的“处置时长”会被当成真实值）。
+c5 = case("C005", created=NOW - 100, closed_at=NOW - 50, status="closed",
+          events=[{"t": NOW - 600, "type": "found"},      # 比立案早 500s → 回拨
+                  {"t": NOW - 100, "type": "mark"}])
+st = mt.case_stats([c5], now=NOW)
+check("回拨：发现早于立案 → to_found_sec=None 且 invalid=1",
+      st["rows"][0]["to_found_sec"] is None and st["invalid"] == 1)
+check("回拨：不把负数算进均值（n 不计该样本）", st["to_found"]["n"] == 0
+      and st["to_found"]["avg"] is None)
+check("回拨：结案时长正常的那部分不受影响", st["to_close"]["avg"] == 50.0)
+st = mt.case_stats([case("C006", created=NOW - 100, closed_at=NOW - 500,
+                         events=[{"t": NOW - 100, "type": "mark"}])], now=NOW)
+check("回拨：结案早于立案 → to_close_sec=None 且 invalid=1",
+      st["rows"][0]["to_close_sec"] is None and st["invalid"] == 1)
 
 # 脏数据（缺 created）→ 跳过、不编时长，但报出条数（不静默）
 st = mt.case_stats([case("C001", created=NOW - 10),

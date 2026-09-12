@@ -101,8 +101,17 @@ const T = (k) => OrpahI18n.t(k);
 const $ = (id) => document.getElementById(id);
 let timer = null;
 
+/* 转义：本页只把**数字与时长**直接插进模板，唯一的外部字符串是算法名
+   （来自空口报文头的 alg，经 metrics.alg_of 白名单过滤）。metrics.py 已经只放行令牌字符，
+   这里再转一道 —— 展示层永远不信任上游（与 app.js 的 esc() 同一纪律）。*/
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function fmtDur(sec) {
   if (sec === null || sec === undefined) return "—";
+  if (sec < 0) return "—";          // 兜底：负时长没意义（后端已置 None，这里不信任上游）
   sec = Math.max(0, Math.round(sec));
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600),
         m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -125,7 +134,7 @@ function render(d) {
   const algs = Object.entries(v.by_alg || {}).sort((a, b) => b[1] - a[1]);
   const tot = algs.reduce((s, [, n]) => s + n, 0) || 1;
   $("vAlg").innerHTML = algs.length ? algs.map(([k, n]) =>
-    `<div class="bar"><span class="nm">${k}</span>` +
+    `<div class="bar"><span class="nm">${esc(k)}</span>` +
     `<span class="tr"><i style="width:${(n / tot * 100).toFixed(1)}%"></i></span>` +
     `<span class="vv">${n} · ${(n / tot * 100).toFixed(0)}%</span></div>`).join("")
     : `<div class="todo">${T("mt_no_sample")}</div>`;
@@ -194,7 +203,7 @@ if (OrpahI18n.bootLangBtn) OrpahI18n.bootLangBtn();
 fetch("/api/status").then(r => r.json()).then(s => {
   if (!$("sn").value) $("sn").value = s.sn || "";
   load();
-  timer = setInterval(load, 15000);
+  timer = setInterval(() => { if (!document.hidden) load(); }, 15000);
 }).catch(() => load());
 </script>
 </body>

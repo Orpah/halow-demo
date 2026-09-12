@@ -79,8 +79,10 @@ check("长未上报：带 gap 且等级 warn", a[0]["gap"] == 100 and a[0]["leve
 # ---- C 方案：按持续时长分级（2026-09-12）----------------------------------
 # 起步 > 30s 是 warn；沉默超过 NO_REPORT_CRIT_SEC（默认 300s）升 crit。
 NRC = alr.NO_REPORT_CRIT_SEC
-check("C：默认 no_report 升级阈值 300s", NRC == 300)
-check("C：默认 case_handled 升级阈值 48h", alr.CASE_HANDLED_CRIT_SEC == 172800)
+check("C：默认 no_report 升级阈值 300s（ORPAH_ALERT_NO_REPORT_CRIT_SEC）", NRC == 300)
+check("C：默认 case_handled 升级阈值 48h（ORPAH_ALERT_CASE_HANDLED_CRIT_SEC；"
+      "注意与起步阈值 CASE_HANDLED_SEC=24h 是两个不同的量）",
+      alr.CASE_HANDLED_CRIT_SEC == 172800 and alr.CASE_HANDLED_SEC == 86400)
 
 
 def lv(alerts, sn):

@@ -177,11 +177,16 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   "还没数据"与"0% 失败（好事）"当成同一件事（`metrics.html` 用的是 `null` 判断，显示「—」）。
 - **未结案的案件不进 `to_found` / `to_close` 的均值**（否则均值随等待时间漂移）；
   未结案在 `cases.open` 里单列，逐案 `elapsed_sec` 只在未结案时给（读者自己判断"已经等了多久"）。
-- `cases.invalid` = 因缺 `created` 被跳过的条数（脏数据不猜时长，但不静默：页面会在有值时提示）。
+- `cases.invalid` = **时长不可用的案件条数**：① 缺 `created`（整行跳过）；
+  ② 时间回拨（发现/结案时刻早于立案）—— 此时该字段置 `null` 而不是负数
+  （负的“处置时长”没意义，报出来会被当成真实值），页面在有值时红字提示。
 - **时间单位**：案件相关的 `created` / `closed_at` / `events.t` / 各项时长都是**秒**
   （与 `cases.py` / `registry` / `alerts.py` 同一约定）；`window.t0/t1` 与 `reports.t` 是**毫秒**。
 - `verify.by_alg` 是从审计 `detail` 里的 `alg=` **解析**出来的（审计没有结构化列），
-  解析不到归 `unknown`，不猜。
+  **只收令牌字符** `[A-Za-z0-9_.-]`（长度 ≤24），其余归 `unknown`，不猜。
+  ⚠ 这个 `alg` 值**来自空口报文的头**（`server.py:_on_id_report` 直接取 `hdr.alg` 落审计，
+  连被拒报文也落）→ 属外部输入：服务端**故意**原样保留（取证要留“攻击者当时发了什么”），
+  但**派生层（本模块）与展示层（页面 `esc()`）都必须收口**，不要把原值直接拼进 HTML。
 - `tsdb=false` 表示 IoTDB 未连：事件流/上报流为空，只有案件指标有意义（`metrics.html` 会提示）。
 
 ### `/api/ts/events`（业务事件历史）

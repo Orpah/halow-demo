@@ -41,7 +41,15 @@ ROADMAP §五「指标面板」的四个指标，输入一律是**已经取好�
 import re
 
 ALG_UNKNOWN = "unknown"
-_ALG_RE = re.compile(r"(?:^|\s)alg=(\S+)")
+# 算法名是**令牌**（ES256 / HS256 / none 这种），不是任意文本 —— 只收 [A-Za-z0-9_.-]，
+# 其余一律归 unknown。两个理由（2026-09-12 review 发现存储型 XSS 风险）：
+#   ① **这个值是外部输入**：`server.py:_on_id_report` 直接取 `hdr.get("alg")` 落审计
+#      （连被拒的报文也落）→ `alg=<img onerror=…>` 会一路进到事件 detail；
+#      旧正则 `\S+` 会把 `<`/`>`/引号一起吃进去，再被前端拼进 innerHTML 就是 XSS。
+#   ② 语义上更对：不是合法令牌就不是“算法名”，归 unknown 比原样透传更诚实。
+# 注：**不去改服务端落库**——审计保留“攻击者当时发的是什么”有取证价值，
+#      要在**派生层（本模块）与展示层（页面 esc()）**收口。
+_ALG_RE = re.compile(r"(?:^|\s)alg=([A-Za-z0-9_.\-]{1,24})(?:\s|$)")
 
 
 def _num(x):
@@ -62,7 +70,7 @@ def _stats(vals):
 
 
 def alg_of(detail):
-    """从审计 detail 里取 `alg=` 值；取不到 → 'unknown'。"""
+    """从审计 detail 里取 `alg=` 值；**只收令牌字符**，取不到或不像令牌 → 'unknown'。"""
     m = _ALG_RE.search(detail or "")
     return m.group(1) if m else ALG_UNKNOWN
 
@@ -111,10 +119,25 @@ def case_stats(cases, now=None):
     """走失处置时长：立案→首次发现 / 立案→结案（**单位秒**，见模块头的时间单位说明）。
 
     只把**已结束**的案件计入 avg/min/max；未结案的给 elapsed（若给了 now）。
-    逐案明细按立案时间升序；`invalid` = 因缺 `created` 而跳过的条数（脏数据不猜、但也不静默）。
+    逐案明细按立案时间升序。
+
+    `invalid` = **时长不可用的条数**，两种情形都算（不猜、不静默、也不报负数）：
+      ① 缺 `created`（脏数据，整行跳过）；
+      ② 时间回拨 —— 发现/结案时刻早于立案（导入历史数据、手工回填 ts 都可能）
+         此时该字段置 `None` 而非负数：负的“处置时长”没意义，报出来只会被当成真实值。
     """
     rows, to_found, to_close = [], [], []
     open_n = invalid = 0
+
+    def _dur(a, b):
+        """b - a（秒）；回拨（负数）→ None + 计入 invalid。"""
+        nonlocal invalid
+        d = b - a
+        if d < 0:
+            invalid += 1
+            return None
+        return d
+
     for c in cases or []:
         created = getattr(c, "created", None)
         if created is None:            # 脏数据：不能编一个时长，但要报个数出来
@@ -122,8 +145,8 @@ def case_stats(cases, now=None):
             continue
         found_at = _first_ts(c, "found")
         closed_at = getattr(c, "closed_at", None)
-        f_sec = (found_at - created) if found_at else None
-        c_sec = (closed_at - created) if closed_at else None
+        f_sec = _dur(created, found_at) if found_at else None
+        c_sec = _dur(created, closed_at) if closed_at else None
         if f_sec is not None:
             to_found.append(f_sec)
         if c_sec is not None:
