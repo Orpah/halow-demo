@@ -228,6 +228,45 @@ check("签名失败率：样本不足窗口 → 不告警", "sig_fail_rate" not 
 a = alr.evaluate(regis(), case_mgr(), deque([rep(False)] * 2 + [rep(True)] * 3), now=NOW)
 check("签名失败率：2/5 未超阈 → 不告警", "sig_fail_rate" not in kinds(a))
 
+# ---- 规则 4：设备时钟偏移/漂移（§5.5 深化）--------------------------------
+def clock_est(off=None, drift=None, n=10, ok=True, since=None):
+    return {"offset": off, "spread": 0.0, "drift_ppm": drift, "n": n, "span": 60.0,
+            "ok": ok, "breach_since": since}
+
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=90)})
+check("时钟：偏移 90s > 30s → id_clock 告警", kinds(a) == ["id_clock"])
+check("时钟：级别 warn（时间可信度问题，不是走失）", a and a[0]["level"] == "warn")
+check("时钟：带 offset_sec / n 供页面显示",
+      a and a[0]["offset_sec"] == 90.0 and a[0]["n"] == 10)
+check("时钟：无越界起点 → since=now（不报 1970）", a and a[0]["since"] == NOW)
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=90, since=NOW - 500)})
+check("时钟：有 breach_since → since 用它（页面“持续 X”）", a and a[0]["since"] == NOW - 500)
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=29.9)})
+check("时钟：偏移未超阈 → 不告警", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=0, drift=500)})
+check("时钟：仅漂移超阈（500ppm > 200）也告警，且 offset_sec 如实给 0",
+      kinds(a) == ["id_clock"] and a[0]["drift_ppm"] == 500.0 and a[0]["offset_sec"] == 0.0)
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=0, drift=None)})
+check("时钟：样本跨度不够（drift=None）+ 偏移正常 → 不告警（宁可不报）", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=999, ok=False, n=2)})
+check("时钟：样本不足（ok=False）→ 即使 offset 很大也不告警", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW)
+check("时钟：不传 clock → 完全不出时钟告警", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque(), now=NOW,
+                 clock={"A": clock_est(off=90), "B": clock_est(off=-120, since=NOW - 9)})
+check("时钟：多设备各自成条（分别挂在各自 SN 上）",
+      sorted(x["sn"] for x in a) == ["A", "B"] and all(x["kind"] == "id_clock" for x in a))
+check("时钟：负偏移取绝对值（-120s 也超阈，offset_sec 保留符号）",
+      any(x["sn"] == "B" and x["offset_sec"] == -120.0 for x in a))
+
 # ---- 排序 / 计数 / 空态 ----------------------------------------------------
 a = alr.evaluate(regis(dev("A", last_seen=NOW - 100)),
                  case_mgr(case("C001", created=NOW - 300)),
@@ -336,6 +375,23 @@ a = reload_with(ORPAH_ALERT_CASE_OVERTIME_SEC=None, ORPAH_ALERT_SIG_FAIL_RATIO=N
 check("env：清后恢复默认",
       (a.CASE_OVERTIME_SEC, a.SIG_FAIL_RATIO, a.CASE_HANDLED_SEC,
        a.NO_REPORT_CRIT_SEC, a.CASE_HANDLED_CRIT_SEC) == (180, 0.5, 86400, 300, 172800))
+
+# 时钟阈值（§5.5 深化）也要能用环境变量改
+a = reload_with(ORPAH_ALERT_CLOCK_OFFSET_SEC="300")
+check("env：时钟偏移阈值可覆盖", a.CLOCK_OFFSET_SEC == 300)
+check("env：偏移 90s 在新阈值下不告警",
+      a.evaluate(regis(), case_mgr(), deque(), now=NOW, clock={"A": clock_est(off=90)}) == [])
+check("env：偏移 301s 在新阈值下告警",
+      kinds(a.evaluate(regis(), case_mgr(), deque(), now=NOW,
+                       clock={"A": clock_est(off=301)})) == ["id_clock"])
+b = reload_with(ORPAH_ALERT_CLOCK_DRIFT_PPM="2000")
+check("env：时钟漂移阈值可覆盖", b.CLOCK_DRIFT_PPM == 2000)
+check("env：500ppm 在新阈值下不告警",
+      b.evaluate(regis(), case_mgr(), deque(), now=NOW,
+                 clock={"A": clock_est(off=0, drift=500)}) == [])
+a = reload_with(ORPAH_ALERT_CLOCK_OFFSET_SEC="abc", ORPAH_ALERT_CLOCK_DRIFT_PPM="")
+check("env：时钟阈值非法值/空串回退默认", (a.CLOCK_OFFSET_SEC, a.CLOCK_DRIFT_PPM) == (30, 200))
+a = reload_with(ORPAH_ALERT_CLOCK_OFFSET_SEC=None, ORPAH_ALERT_CLOCK_DRIFT_PPM=None)
 
 print()
 if FAILS:

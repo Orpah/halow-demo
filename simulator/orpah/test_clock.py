@@ -135,6 +135,130 @@ ck("留痕：ts_src=device（时间来自设备）", bool(r1 and r1.get("ts_src"
 sock.close()
 srv.stop()
 
+# ---- 4) 设备时钟偏移/漂移估计（clock.py，2026-09-12 深化） -------------------
+# 只**估计**不改数据：给「设备自报 ts vs 服务器接收时刻」样本，看偏移（中位数）与漂移（ppm）。
+import clock as clk                                                   # noqa: E402
+
+print("== 4. 设备时钟偏移/漂移估计 ==")
+ck("样本不足 → ok=False 且 offset=None（宁缺勿编）",
+   (lambda e: e["ok"] is False and e["offset"] is None)(clk.estimate([])))
+ck("2 个样本 → 仍不够（MIN_SAMPLES=3）", clk.estimate([(0, 5), (1, 5)])["ok"] is False)
+
+# 固定偏移 +30s，跨 60s，无漂移 → offset=30、drift≈0
+fixed = [(1000 + i * 10, 1000 + i * 10 + 30) for i in range(7)]
+est = clk.estimate(fixed)
+ck("固定偏移：中位数 = +30s", abs(est["offset"] - 30) < 1e-9, str(est))
+ck("固定偏移：漂移 ≈ 0 ppm", abs(est["drift_ppm"]) < 1e-6, str(est["drift_ppm"]))
+ck("样本数/跨度如实给出（n=7, span=60s）",
+   est["n"] == 7 and abs(est["span"] - 60) < 1e-9, str(est))
+
+# 线性漂移：设备每秒快 1ms = +1000 ppm；同时带回 5s 固定偏移
+drift = [(1000 + i * 10, 1000 + i * 10 + 5 + i * 10 * 0.001) for i in range(40)]
+est = clk.estimate(drift)
+ck("线性漂移：+1000ppm（1ms/s）估得准", abs(est["drift_ppm"] - 1000) < 1.0,
+   str(round(est["drift_ppm"], 3)))
+
+# 跨度太短 → 不给漂移（但偏移照给）
+short = [(1000, 1005), (1001, 1006), (1002, 1007)]
+est = clk.estimate(short)
+ck("跨度 <30s → drift_ppm=None（斜率无意义，不编 0）",
+   est["drift_ppm"] is None and abs(est["offset"] - 5) < 1e-9, str(est))
+
+# 单点跳变（设备乱报一次）不影响中位数 offset=0
+noisy = [(1000, 1000), (1010, 1010), (1020, 1020), (1030, 9630), (1040, 1040)]
+est = clk.estimate(noisy)
+ck("单点跳变（设备乱报一次）不影响中位数 offset=0",
+   abs(est["offset"]) < 1e-9 and est["spread"] > 8000, str(est))
+ck("批量样本：offset_of 与 estimate 一致",
+   clk.offset_of(noisy)[0] == est["offset"])
+
+# 偏移**只看最近 OFFSET_WINDOW 条**（2026-09-13 实测后改）：换钟/拨表要能很快反映。
+# 实测教训：偏移也用整窗中位数时，现场拨偏 +120s 后一分钟内读数仍≈0（旧样本压着中位数）。
+mixed = [(1000 + i, 1000 + i + (0 if i < 12 else 120)) for i in range(21)]   # 前 12 条正常、后 9 条 +120s
+est = clk.estimate(mixed)
+ck("偏移反应快：拨偏后 9 条即读回 +120s（不被旧样本压住）",
+   abs(est["offset"] - 120) < 1e-9, str(est))
+ck("偏移只用最近 8 条（n_off=8 / 整窗 n=21）",
+   est["n_off"] == clk.OFFSET_WINDOW == 8 and est["n"] == 21, str(est))
+ck("对照：若强行用整窗中位数，读数会被拉到 0（证明就是窗口的锅）",
+   clk.offset_of(mixed)[0] == 0.0 and clk.estimate(mixed, offset_window=64)["offset"] == 0.0)
+ck("偏移窗仍免疫单点跳变（最近 8 条里坏 1 条不动摇）",
+   abs(clk.estimate(mixed + [(1021, 1021 + 120 + 9999)])["offset"] - 120) < 1e-9)
+
+# 漂移仍用**整窗长基线**（与偏移的短窗分开）
+drift40 = [(1000 + i, 1000 + i + i * 0.001) for i in range(40)]
+est = clk.estimate(drift40)
+ck("漂移用整窗（n=40 > n_off=8）+ 斜率准（+1000ppm）",
+   est["n"] == 40 and est["n_off"] == 8 and abs(est["drift_ppm"] - 1000) < 1.0,
+   str(round(est["drift_ppm"], 3)))
+
+# ---- 漂移“只在能信的时候给”（2026-09-13 实测两个坑）--------------------------
+# 坑 1：窗内一次**跳变**（拨表/重启对时）会被 LS 当成巨大漂移。
+# 实测：现场拨偏 +120s → drift_ppm 读成 ~2,000,000。
+step_win = [(1000 + i, 1000 + i + (0 if i < 10 else 120)) for i in range(40)]   # 40s 窗内跳 120s
+est = clk.estimate(step_win, step_spread=30)
+ck("窗内有跳变（spread_win 120 > 阈值 30）→ 不给漂移（跳变不是漂移）",
+   est["drift_ppm"] is None and est["spread_win"] > 100, str(est))
+ck("同一条样本：不设 step_spread 时确实会读成天文数字（说明门是必需的）",
+   (clk.drift_ppm_of(step_win) or 0) > 1e6, str(clk.drift_ppm_of(step_win)))
+ck("spread_win=整窗散布（跳变指标）≠ spread=最近 8 条散布（当前抖动）",
+   est["spread_win"] > 100 > est["spread"])
+
+# 坑 2：整数秒设备时间的**量化噪声**（±0.5s）在短窗里盖过 ppm 级漂移。
+import random                                                          # noqa: E402
+rnd = random.Random(7)
+noisy60 = [(1000 + i, 1000 + i + rnd.uniform(-0.5, 0.5)) for i in range(61)]   # 60s、1s 一条、无漂移
+est = clk.estimate(noisy60)
+ck("无漂移 + 量化噪声（60s 窗）→ 看不出趋势 → drift=None（不报假漂移）",
+   est["drift_ppm"] is None and est["span"] >= clk.DRIFT_MIN_SPAN, str(est))
+ck("同噪声下 offset 仍然可信（中位数压住抖动）", abs(est["offset"]) < 0.5, str(est["offset"]))
+
+rnd2 = random.Random(7)
+gross = [(1000 + i, 1000 + i + 0.02 * i + rnd2.uniform(-0.5, 0.5)) for i in range(61)]  # +20000ppm
+est = clk.estimate(gross)
+ck("真的在漂（+20000ppm：坏晶振级）→ 门不会把真漂移也挡掉",
+   est["drift_ppm"] is not None and abs(est["drift_ppm"] - 20000) < 9000,
+   str(None if est["drift_ppm"] is None else round(est["drift_ppm"])))
+
+# 两个点连一条线不叫趋势（σ 没有意义）
+two = [(1000, 1000), (1060, 1063.6)]                                    # 跨 60s、差 3.6s = 60000ppm
+ck("只有 2 个样本 → drift=None（两个点必过，标准差没意义）",
+   clk.estimate(two)["drift_ppm"] is None and clk.estimate(two)["ok"] is False)
+
+# ClockTracker：按 SN 分别维护 + 越界起点只记一次 + snapshot 可读
+# 注意 add(sn, device_ts, rx_ts)（offset = device − rx）；且 ok 需 ≥3 样本，
+# 故「首次越界时刻」= 第 3 个样本的 rx（前两个样本不够，不判越界）。
+# window=4：中位数要「窗内多数」才翻面 → 设备拨回来后需再收够样本才解除（≈ window/2 个周期）。
+tr = clk.ClockTracker(window=4, offset_warn=30)
+e_a = None
+for i in range(4):
+    e_a = tr.add("A", 1000 + i + 2, 1000 + i)     # A：设备快 2s（未越界）
+ck("Tracker：未越界 → 无 breach_since",
+   e_a["breach_since"] is None and abs(e_a["offset"] - 2) < 1e-9, str(e_a))
+e_b = None
+for i in range(4, 8):
+    e_b = tr.add("B", 2000 + i + 90, 2000 + i)    # B：设备快 90s（越界）
+ck("Tracker：越界 → 记 breach_since（= 够样本后首次越界那条的 rx=2006）",
+   e_b["breach_since"] == 2006.0, str(e_b["breach_since"]))
+for i in range(8, 12):                            # 继续越界：起点不变
+    tr.add("B", 2000 + i + 90, 2000 + i)
+ck("Tracker：持续越界不重置起点", tr.get("B")["breach_since"] == 2006.0,
+   str(tr.get("B")["breach_since"]))
+for i in range(12, 16):                           # 回到正常：清除越界
+    tr.add("B", 2000 + i + 1, 2000 + i)
+ck("Tracker：回到正常（窗内多数转正）→ 清除 breach_since",
+   tr.get("B")["breach_since"] is None, str(tr.get("B")))
+snap = tr.snapshot()
+ck("Tracker：snapshot 按 SN 分开、互不串台",
+   set(snap) == {"A", "B"} and abs(snap["A"]["offset"] - 2) < 1e-9
+   and abs(snap["B"]["offset"] - 1) < 1e-9, str({k: v["offset"] for k, v in snap.items()}))
+trw = clk.ClockTracker(window=3)
+for i in range(10):
+    trw.add("W", 5000 + i, 5000 + i)
+ck("Tracker：环形窗有上限（window=3 → 只留 3 条样本）",
+   trw.get("W")["n"] == 3, str(trw.get("W")["n"]))
+ck("Tracker：没见过的 SN → None", trw.get("nobody") is None)
+
 print()
 if FAILS:
     print(f"时钟可信：{len(FAILS)} 项失败")

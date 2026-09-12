@@ -426,6 +426,21 @@ async function refresh() {
       $("ctlSn").value = s.sn;
     if (!document.activeElement || document.activeElement.id !== "lostSn")
       $("lostSn").value = s.sn;
+    // 设备时钟偏移/漂移估计（clock.py）：只**估计**，不改记录时间语义（§5.5）
+    if (!document.activeElement || document.activeElement.id !== "ctlClock")
+      $("ctlClock").value = s.clock_off || 0;
+    const ci = $("clockInfo");
+    if (ci) {
+      const est = (s.clock || {})[s.sn];
+      const off = s.clock_off || 0;
+      ci.textContent = (est && est.ok)
+        ? T("clock_info")
+            .replace("{off}", (est.offset >= 0 ? "+" : "") + est.offset.toFixed(1))
+            .replace("{drift}", est.drift_ppm == null ? "—" : (est.drift_ppm >= 0 ? "+" : "") + est.drift_ppm.toFixed(0))
+            .replace("{n}", est.n)
+          + (off ? "  ·  " + T("clock_demo_on").replace("{v}", off) : "")
+        : T("clock_none");
+    }
   } catch (e) { /* 服务器未就绪 */ }
 }
 
@@ -451,6 +466,7 @@ $("btnApply").onclick = async () => {
     action: "every", every: parseFloat($("ctlEvery").value) || 2,
   });
   await postCtl({ action: "set_sn", sn: $("ctlSn").value || "CN-WH01-9AF3C1D2" });
+  await postCtl({ action: "clock_off", sec: parseFloat($("ctlClock").value) || 0 });
 };
 $("btnMark").onclick = async () => {
   const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";

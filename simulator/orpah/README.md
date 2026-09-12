@@ -45,10 +45,10 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | 降级策略（§8）：按环节坏在哪自动选级 L0→L3；L2 告警、L3 只做覆盖发现（不当人员出现） | `orpah_id.pick_level()` / `counts_as_presence()` + `alerts.id_degraded` | `test_levels.py` + 首页「降级演示」下拉 |
 | 无认证空口防 spoof（12 种攻击端到端） | `spoof.py` | `demo_spoof.py`、`test_spoof.py` |
 | 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
-| 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
+| 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / **设备时钟**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
 | 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
 | 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py` |
-| 时钟可信：无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口） | `orpah_proto.effective_ts` | `test_clock.py` |
+| 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据，短窗/跳变/噪声里不给数） | `orpah_proto.effective_ts` / `clock.py`（`ClockTracker`） | `test_clock.py`（49 条）+ 首页「上报控制」拨偏演示 |
 | 抓包解析 / 双源对照（pcap → ORPAH 报文；与 UDP 侧计数对差） | `capture.py`（解析复用 `orpah_proto` 单一源） | `test_capture.py` |
 | 存储：SQLite（元数据）+ IoTDB（时序/事件） | `registry`/`cases`/`keystore`/`stations` + `tsdb.py` | `test_tsdb_audit.py` |
 
@@ -296,6 +296,7 @@ simulator/
     ├── cases.py          # 【业务】案件状态机（立案→发现→找回/撤销→结案；handler 与 status 正交）
     ├── alerts.py         # 【业务】告警规则（无存储、按快照重算；阈值走 ORPAH_ALERT_* 环境变量）
     ├── metrics.py        # 【业务】指标纯计算（验签失败率/算法分布/平均 RSSI/处置时长）
+    ├── clock.py          # 【业务】设备时钟偏移/漂移估计（纯计算；只估计不改数据，短窗/跳变/噪声里给 None）
     ├── stations.py       # 【定位】站位 = 已知坐标观测点（绑定 > 时间窗中位数 > 路由器序列）
     ├── motion.py         # 【定位】演示用「移动的人」+ 路径损耗/噪声（A/n **唯一源** → /api/config）
     ├── tsdb.py           # 【存储】IoTDB 接入（设备流/各路由器观测/事件；未就绪优雅降级）

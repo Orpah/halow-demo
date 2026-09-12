@@ -53,6 +53,9 @@ class ClientHost:
         self.sn = sn
         self.rssi = rssi
         self.seq = 0
+        # 演示：设备时钟偏移（秒）。0 = 设备时钟正常；非 0 = 模拟 RTC 偏/漂。
+        # 服务器侧只**估计**这个偏移（clock.ClockTracker），不改报文与记录（见 §5.5）。
+        self.ts_off = 0
         self.on_sent = on_sent              # callable(msg_dict, eth_len) 注入成功
         self.on_recv = on_recv              # callable(msg_dict) 收到下行
         self.sent = 0
@@ -94,9 +97,15 @@ class ClientHost:
         return n
 
     def report_once(self, extra=None):
-        """发一条 ORPAH-REPORT（握手第二步后）。"""
+        """发一条 ORPAH-REPORT（握手第二步后）。
+
+        `ts_off`：演示用——把设备自报的 `ts` 拨快/拨慢 N 秒（模拟 RTC 偏移/漂移）。
+        服务器侧由 `clock.ClockTracker` 从「设备 ts vs 接收时刻」反推 offset/drift，
+        **只估计不改数据**（§5.5 的时间语义仍由 `effective_ts` 负责）。
+        """
         self.seq += 1
-        msg = build_report(sn=self.sn, rssi=self.rssi, seq=self.seq,
+        ts = int(time.time()) + int(getattr(self, "ts_off", 0) or 0)
+        msg = build_report(sn=self.sn, ts=ts, rssi=self.rssi, seq=self.seq,
                            extra=extra)
         n = self._inject(msg)
         if n > 0:

@@ -32,6 +32,14 @@ alerts.py — 告警规则引擎（供页面红点消费）
     case_handled_overtime   已接手的案件，距**接手时刻**超过 case_handled_sec 仍未发现（B 方案）
     sig_fail_rate           最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
     id_degraded             最近 id_degraded_sec 内出现过降级上报（§8.3）：L2 warn / L3 crit
+    id_clock                设备时钟偏移/漂移超出阈值（估计值，§5.5 深化）
+
+**设备时钟（2026-09-12）**：`clock.ClockTracker` 从「设备自报 ts vs 服务器接收时刻」估计
+每台设备的**偏移**（中位数）与**漂移**（最小二乘斜率，ppm）。本规则在超阈时报 warn：
+- 偏移超 `ORPAH_ALERT_CLOCK_OFFSET_SEC`（默认 30s）→ 设备时钟不对，回放时间轴会整体偏；
+- 漂移超 `ORPAH_ALERT_CLOCK_DRIFT_PPM`（默认 200ppm ≈ 每天 17s）→ 晶振/温漂异常。
+- 只在估计**可信**（样本数 ≥ `clock.MIN_SAMPLES`）时才报，宁可不报也不编；
+  `since` = 首次越界时刻（`ClockTracker` 记的），页面「持续 X」才有意义。
 
 **降级告警（§8.3，2026-09-12）**：L2（SE 不可用、改用 CH32 对称密钥）→ 记录告警（SE 异常）；
 L3（无可用密钥、裸上报）→ 触发“设备异常”通知运维。
@@ -102,6 +110,8 @@ CASE_HANDLED_CRIT_SEC = _env_int("ORPAH_ALERT_CASE_HANDLED_CRIT_SEC", 172800)  #
 SIG_WINDOW = _env_int("ORPAH_ALERT_SIG_WINDOW", 5)              # 签名失败率统计窗口（条）
 SIG_FAIL_RATIO = _env_float("ORPAH_ALERT_SIG_FAIL_RATIO", 0.5)  # 窗口内被拒比例超过它 → 告警
 ID_DEGRADED_SEC = _env_int("ORPAH_ALERT_ID_DEGRADED_SEC", 300)  # 降级上报（L2/L3）消警窗口（秒）
+CLOCK_OFFSET_SEC = _env_int("ORPAH_ALERT_CLOCK_OFFSET_SEC", 30)  # 设备时钟偏移超此值 → 告警（秒）
+CLOCK_DRIFT_PPM = _env_int("ORPAH_ALERT_CLOCK_DRIFT_PPM", 200)   # 设备时钟漂移超此值 → 告警（ppm）
 
 
 def _alert(kind, level, key_obj, msg, since, **data):
@@ -120,10 +130,12 @@ def level_by_gap(gap, warn_after, crit_after):
     return LEVEL_CRIT if crit_after <= warn_after or gap > crit_after else LEVEL_WARN
 
 
-def evaluate(registry, cases, id_reports, now=None, **th):
+def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
     """返回活跃告警列表（crit 在前，同级按触发时间）。
 
     参数与阈值都可注入，便于单测（见 test_alerts.py）。
+    `clock` = `{sn: {"offset":…, "drift_ppm":…, "n":…, "ok":…, "breach_since":…}}`
+    （来自 `clock.ClockTracker.snapshot()`；不传则不评估时钟规则）。
     """
     now = int(now if now is not None else time.time())
     no_rep = th.get("no_report_sec", NO_REPORT_SEC)
@@ -134,6 +146,8 @@ def evaluate(registry, cases, id_reports, now=None, **th):
     win = th.get("sig_window", SIG_WINDOW)
     fail_ratio = th.get("sig_fail_ratio", SIG_FAIL_RATIO)
     deg_sec = th.get("id_degraded_sec", ID_DEGRADED_SEC)
+    off_max = th.get("clock_offset_sec", CLOCK_OFFSET_SEC)
+    drift_max = th.get("clock_drift_ppm", CLOCK_DRIFT_PPM)
     out = []
 
     # 1) 长未上报：只看「**工作态**且曾经上报过」的设备 ——
@@ -217,6 +231,23 @@ def evaluate(registry, cases, id_reports, now=None, **th):
                           LEVEL_CRIT if lv == 3 else LEVEL_WARN, sn,
                           "alert_id_no_key" if lv == 3 else "alert_id_degraded",
                           ts, sn=sn, lv=lv))   # 数据字段叫 lv：第二个形参已是 level
+
+    # 5) 设备时钟（§5.5 深化）：偏移/漂移超阈 → warn。
+    #    只吃**估计可信**的样本（`ok`，即样本数够）；`since` 用越界起点（没有则用 now，
+    #    至少别报一个 1970）。数据字段带 offset/drift/n，页面/审计能看到“偏了多少”。
+    for sn, est in (clock or {}).items():
+        if not est or not est.get("ok"):
+            continue
+        off = est.get("offset")
+        drift = est.get("drift_ppm")
+        bad_off = off is not None and abs(off) > off_max
+        bad_drift = drift is not None and abs(drift) > drift_max
+        if bad_off or bad_drift:
+            out.append(_alert("id_clock", LEVEL_WARN, sn, "alert_id_clock",
+                              est.get("breach_since") or now,
+                              sn=sn, offset_sec=(round(off, 3) if off is not None else None),
+                              drift_ppm=(round(drift, 1) if drift is not None else None),
+                              n=est.get("n")))
 
     out.sort(key=lambda a: (0 if a["level"] == LEVEL_CRIT else 1, a["since"]))
     return out

@@ -56,6 +56,7 @@ import motion                              # noqa: E402  演示用「移动的�
                                            #           （标定 A/n/噪声为唯一源 → /api/config）
 import spoof                               # noqa: E402  防 spoof：攻击报文构造（脚本/UI 共用）
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
+import clock as clk                       # noqa: E402  设备时钟偏移/漂移估计（纯计算）
 import metrics                            # noqa: E402  指标面板纯计算（/api/metrics）
 import tsdb                               # noqa: E402  Apache IoTDB 时序库
 from waiting import wait_until            # noqa: E402  按截止时间等待（只这一份实现）
@@ -123,6 +124,9 @@ class OrpahApp:
         # 但它**真的走空口和 UDP** —— 空口帧 / UDP 帧的总额里含它。
         self.id_sent = 0                   # Client 注入的 ID-REPORT（含页面注入的攻击报文）
         self.router_id_up = 0              # 路由器透传给 Server 的 ID-REPORT
+        # 设备时钟偏移/漂移估计（2026-09-12）：由「设备自报 ts vs 服务器接收时刻」反推，
+        # **只估计不改数据**（§5.5 的时间语义仍由 effective_ts 负责）。
+        self.clock = clk.ClockTracker(offset_warn=alr.CLOCK_OFFSET_SEC)
         # 最近报文（按 seq 记，stage 点亮；最多 50 条）
         self.reports = {}
         self.order = []
@@ -282,6 +286,10 @@ class OrpahApp:
         # 设备清册：更新最近见时间；IoTDB 写上报点；走失案件：被看到即触发「发现」
         if msg.get("sn"):
             sn = msg["sn"]
+            # 时钟估计：只有“设备自己的时钟”可用时才是一条有效观测（ts_src=device）。
+            # ts=0/缺失 → 我们用了服务器时刻，拿它算偏移恒为 0（假数据）→ 不喂。
+            if ts_src == P.TS_SRC_DEVICE:
+                self.clock.add(sn, msg.get("ts"), rx)
             self.registry.touch(sn, ts=ts_s)
             self.tsdb.write_report(sn, ts=ts_s, rssi=msg.get("rssi"),
                                    seq=msg.get("seq"))
@@ -680,6 +688,8 @@ class OrpahApp:
             "id_report_total": self.id_report_total,
             "id_level": self.id_level,               # 当前降级模式（§8.2 演示）
             "id_level_modes": list(ID_LEVEL_MODES),  # 页面下拉选项（单一源）
+            "clock": self.clock.snapshot(),          # 设备时钟偏移/漂移估计（估计，不改数据）
+            "clock_off": getattr(self.client, "ts_off", 0) if self.client else 0,
             # 防 spoof 演示的攻击清单（脚本/UI 同一份，见 spoof.py；页面按语言取 zh/en）
             "spoof_kinds": [{"kind": k, "zh": spoof.case_info(k)[0],
                              "en": spoof.case_info(k)[1],
@@ -689,7 +699,7 @@ class OrpahApp:
                            if self.client else False),
         }
 
-    def cmd(self, action, sn=None, every=None, note="", kind=None, level=None):
+    def cmd(self, action, sn=None, every=None, note="", kind=None, level=None, sec=None):
         if action == "pause":
             self.paused = True
         elif action == "resume":
@@ -700,6 +710,12 @@ class OrpahApp:
                 self._ensure_id_device()   # 按新 SN 重建 Orpah ID 设备并重注册密钥
         elif action == "every" and every and every > 0:
             self.every = float(every)
+        elif action == "clock_off":
+            # 演示设备时钟偏移（秒）：让设备自报的 ts = now + N，服务器侧靠估计器看出来。
+            # 只影响**设备自报 ts**，不改服务器记录的时间语义（§5.5）。
+            if self.client is not None and isinstance(sec, (int, float)):
+                self.client.ts_off = int(sec)
+            return {"ok": True, "clock_off": getattr(self.client, "ts_off", 0)}
         elif action == "id_level":
             # 演示降级策略（§8.2）：切换"哪个环节坏了"，下一条 ID 上报就走对应的降级路径。
             # 非法值不改（返回实际生效值，前端据此回弹）
@@ -791,7 +807,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/alerts":
             # 无状态评估：每次用当前快照重算活跃告警（规则见 alerts.py）
-            al = alr.evaluate(APP.registry, APP.cases, APP.id_reports)
+            al = alr.evaluate(APP.registry, APP.cases, APP.id_reports,
+                              clock=APP.clock.snapshot())
             self._send(200, json.dumps({"ok": True, "counts": alr.summary(al),
                                         "alerts": al}).encode())
             return
@@ -1515,7 +1532,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         r = APP.cmd(req.get("action"), sn=req.get("sn"), every=req.get("every"),
                     note=req.get("note") or "", kind=req.get("kind"),
-                    level=req.get("level"))
+                    level=req.get("level"), sec=req.get("sec"))
         self._send(200, json.dumps(r).encode())
 
 

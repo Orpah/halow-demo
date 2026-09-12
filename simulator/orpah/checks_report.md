@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 16:25:08
-- git HEAD：`01cf65a`
+- 时间：2026-09-12 19:31:40
+- git HEAD：`8594564`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（16/16 套件通过）
 
@@ -10,20 +10,20 @@
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
 | 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
 | IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
-| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
+| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 | 降级策略（§8.2 选级 / §8.3 服务端） | `test_levels.py` | ✅ PASS | 0.1s | 通过 |
 | 抓包解析 / 双源对照 | `test_capture.py` | ✅ PASS | 0.1s | 通过 |
 | L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
 | L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
-| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
-| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.0s | 通过 |
+| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.3s | 通过 |
+| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.1s | 通过 |
 | 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
 
 ## 关键输出
@@ -39,7 +39,7 @@
       OK   replay.html ��ҳȡ /api/config��HTML ���ֻ�Ƕ��ף�
     ȫ��ͨ��
 
-### 密钥生命周期 — PASS（0.2s）
+### 密钥生命周期 — PASS（0.1s）
 
     == 1. ǩ�����ݵȣ� ==
     == 2. ��ǩ���� 1 ���� ==
@@ -83,7 +83,8 @@
     == 1. effective_ts 归一化规则（唯一入口，各层共用）==
     == 2. 验签的时间窗（ts=0 跳过窗口，仅靠 nonce 防重放）==
     == 3. 端到端（进程内 UDP）：ts=0 的报告落库时刻 + 审计留痕 ==
-      OK   留痕：ts_src=device（时间来自设备）
+    == 4. 设备时钟偏移/漂移估计 ==
+      OK   Tracker：没见过的 SN → None
     时钟可信测试全部通过
 
 ### IoTDB 审计/时间窗 — PASS（0.5s）
@@ -108,7 +109,7 @@
     Ran 18 tests in 0.010s
     OK
 
-### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.0s）
+### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
 
     == 1. 黄金样本（校验位只算 ORG-UNIQUE，不含 CC）==
     == 2. SN 边界（格式：CC-ORG-UNIQUE[-CHECK]，Crockford Base32 去 I L O U）==
@@ -153,7 +154,7 @@
     分支一(未命中 NOT-TRACKED): PASS
     分支二(命中 TRACKED): PASS
 
-### L3 多 Router 漫游/去重 — PASS（4.2s）
+### L3 多 Router 漫游/去重 — PASS（4.3s）
 
     --- 阶段A：sn=CN-WH01-9AF3C1D2 在 R1 网络（2 条，未 mark）---
     --- 阶段B：sn=CN-WH01-9AF3C1D2 漫游到 R2 网络（seq 续 3）---
@@ -162,7 +163,7 @@
     --- 阶段E：去重测试（重发已接受的 seq=4）---
     --- 阶段F：SN 校验（非法 sn → FORMAT-ERR）---
 
-### L3b 主动拉表 — PASS（1.0s）
+### L3b 主动拉表 — PASS（1.1s）
 
     --- 模拟 Router 重启（清空本地缓存 + 未同步）---
     --- Server untrack sn=CN-WH01-9AF3C1D2（变更推送，Router 无需再拉）---
@@ -175,7 +176,7 @@
 
       无认证空口防 spoof 端到端演示
       被冒充设备 SN : CN-WH01-9AF3C1D2
-      攻击者 SN    : CN-WH01-N504KZECE9-39（未登记 → 服务器不认识）
+      攻击者 SN    : CN-WH01-802MRRC3RA-66（未登记 → 服务器不认识）
       链路          : Client→STA→空口→AP→Router→UDP:19847→Server
       用例数        : 12（含 1 条合法对照）
     [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…
