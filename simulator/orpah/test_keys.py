@@ -207,6 +207,38 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+print("== 11. 演示密钥的确定性（跨对象/跨进程仍对得上 = AGENTS.md §0 的坑） ==")
+# 派生式密钥的**全部意义**：同一 (sn, gen) 在任何时刻、任何进程都得到同一把钥。
+# 若派生前缀/算法/JCS 预像被改动、或代码落到随机分支，本节立刻红 —— 那等于作废整个密钥库
+# （持久化库里的公钥/hmac 会全部对不上，表现为"重启后验签全失败"）。故两条都要锁：
+# ① 同一个体两次构造相同；② 用 A 注册的库能验 B 签的报文（不同个体 = 模拟重启）。
+a1 = oid.Device(sn=SN, gen=1)
+a2 = oid.Device(sn=SN, gen=1)
+ck("ES256 公钥逐位相同（同 sn+gen，两个不同对象）",
+   oid.pubkey_to_pem(a1.pubkey) == oid.pubkey_to_pem(a2.pubkey))
+ck("HMAC 降级密钥逐位相同（同 sn+gen）",
+   a1.hmac_key == a2.hmac_key and len(a1.hmac_key) == 32)
+g2 = oid.Device(sn=SN, gen=2)
+ck("换一代 → 两把钥都不同", oid.pubkey_to_pem(g2.pubkey) != oid.pubkey_to_pem(a1.pubkey)
+   and g2.hmac_key != a1.hmac_key)
+ck("换 SN → HMAC 不同", oid.derive_demo_hmac("CN-WH02-BBBBBBBB", 1) != a1.hmac_key)
+ck("derive_demo_hmac 返回 32 字节 bytes（函数完整、不是半截）",
+   isinstance(oid.derive_demo_hmac(SN, 1), bytes) and len(oid.derive_demo_hmac(SN, 1)) == 32)
+ck("gen 已是 int 归一（'1'/1.0 与 1 同钥，无需外部类型检查）",
+   oid.derive_demo_hmac(SN, "1") == a1.hmac_key
+   and oid.derive_demo_hmac(SN, 1.0) == a1.hmac_key)
+
+ks_a = oid.KeyStore()
+ks_a.register(a1, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
+ck("★ 用 A 注册的库验 B（L0/ES256）签的报文 → 通过（重启后仍能验）",
+   verify(ks_a, a2, level=0)["accepted"])
+ck("★ 同上 L1（HS256 降级路径）→ 通过（HMAC 也跨对象一致）",
+   verify(ks_a, a2, level=1)["accepted"])
+ks_b = oid.KeyStore()
+ks_b.register(a1, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
+ck("另一代（gen=2）签的报文用第 1 代的库验 → 拒（代次不能串）",
+   not verify(ks_b, g2, level=0)["accepted"])
+
 print()
 if FAIL:
     print(f"{len(FAIL)} 项失败: " + "; ".join(FAIL))
