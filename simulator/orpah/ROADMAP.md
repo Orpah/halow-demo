@@ -599,6 +599,24 @@
 - ❌ **驳回：`replay.html` `lastEvent`/`smoothAt` 每帧线性扫描**。无实测卡顿证据
   （回放窗口 ≤12 h、事件上限 2000）；按"没有测量之前不优化"不动。
 
+### 服务端审查裁决记录（2026-09-13，`ui_server.py` 三点）
+
+- ✅ **修（真 bug，报告指对了）**：`_api_truth` / `_api_replay` 用 `str.isdigit()` / `lstrip("-").isdigit()`
+  **当整数校验** —— 它问的是"字符是不是数字类"，不是"`int()` 能不能解析"：
+  `"--123".lstrip("-").isdigit()` 与 `"²".isdigit()`（上标二）**都为 True 但 `int()` 抛 ValueError**。
+  `do_GET` **没有外层 try** → 异常直接冒到 socketserver → 连接线程崩、**客户端拿到「Failed to fetch」**
+  （不是 400）。浏览器实测四条全中：`/api/truth?from=--123`、`?from=²`、`?step=²`、`/api/replay?from=²`
+  （后三条报告没提，是同一根因）。修法：**唯一入口** `ui_server._int_arg(s, default)`（try/except int()），
+  三处调用点全部换掉；语义保持（非法→回退默认值，`from` 负数仍可用；`to` 非法仍显式 `bad_param`）。
+  回归：`test_server.TestUiQueryArgs` 4 条（行为表 + **AST 守卫「源码里不再有 `*.isdigit()` 调用」**）+
+  浏览器复测四条 URL 全部 200、正常路径（负 from / step / minutes）不变。
+- ❌ **驳回：`_api_upload` 的 `finally: settimeout(None)` 会抛 `OSError` 盖掉 400 响应**。代码里
+  **本来就**用 `try/except OSError: pass` 包住了（读的是同一份源码，评审漏看那两行）。顺手实测确认
+  `close()` 后的 socket 调 `settimeout(None)` **确实抛 OSError** → 所以那层 except 不能删；已加断言锁住。
+- ✅ **修（措辞）**：上传读超时的报错原来写「无 Content-Length 且客户端未关流」，而 `settimeout`
+  是**每次 recv 各算**（持续有数据就一直不超时）→ 改成「读取超时（无 Content-Length：需客户端关流
+  结束上传；10 秒内没有收到数据即超时）」，把"怎么修 + 判据"都写出来。
+
 ## 六、页面 × 存储接入现状（2026-09-11 审计）
 
 | 页面 | 接口 | 存储 | 说明 |

@@ -86,6 +86,23 @@ def _verify_of(algo, body):
         return m97.mod97_verify(body)
     raise ValueError(f"未知算法: {algo}")
 
+
+def _int_arg(s, default=None):
+    """查询参数 → int（拿不到合法整数就返回 `default`）——**不要用 `str.isdigit()` 当校验**。
+
+    2026-09-13 实测踩到：`isdigit()` 问的是“字符是不是数字类”，**不是**“`int()` 能不能解析”：
+      · `"--123".lstrip("-").isdigit()` → True，但 `int("--123")` 抛 ValueError；
+      · `"²".isdigit()` → True（上标二），但 `int("²")` 同样抛。
+    异常发生在 `do_GET` 里（那里**没有**外层 try）→ 连接线程直接崩、客户端只看到
+    “Failed to fetch”（不是 400）。实测复现：`/api/truth?from=--123`、`/api/truth?from=²`、
+    `/api/truth?step=²`、`/api/replay?from=²` 四条全部把连接打断。
+    故统一用 try/except int()（唯一入口），垃圾输入→回退默认值（与 `abc` 同待遇）。
+    """
+    try:
+        return int(str(s).strip())
+    except (TypeError, ValueError):
+        return default
+
 # ---- 端口分配（默认，可 --port 改 HTTP；组件端口固定避免冲突） ----
 HTTP_PORT = 8901
 CONSOLE_A, LINK_A, HOST_A = 9401, 9411, 9421    # AP（Router 模块）
@@ -1016,15 +1033,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         # 无/非法 Content-Length（chunked 等）→ 最多读 MAX+1 字节。
         # 必须带套接字超时：keep-alive 连接上等不到 EOF 会永久挂住该连接线程。
+        # 超时是**每次 recv 各算**（持续有数据就一直不超时）→ 文案如实写“10 秒内没有收到数据”，
+        # 别只说“客户端未关流”（那会让人以为只要在传就不会超时；2026-09-13 按评审意见改准）。
         if n < 0:
             try:
                 self.connection.settimeout(10.0)
                 data = self.rfile.read(MAX + 1)
             except (TimeoutError, OSError):
-                self._send(400, json.dumps({"ok": False,
-                    "err": "读取超时（无 Content-Length 且客户端未关流）"}).encode())
+                self._send(400, json.dumps({"ok": False, "err": (
+                    "读取超时（无 Content-Length：需客户端关流结束上传；"
+                    "10 秒内没有收到数据即超时）")}).encode())
                 return
             finally:
+                # 连接可能已在上面失败/被对端关掉 → `settimeout(None)` 会抛 OSError，
+                # 必须吞掉（否则 finally 里的异常会盖掉上面的 400 响应）。
                 try:
                     self.connection.settimeout(None)
                 except OSError:
@@ -1326,7 +1348,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         minutes = min(max(minutes, 1), 720)          # 1 分 ~ 12 小时
         from_q = (qs.get("from") or [""])[0].strip()
-        from_ms = int(from_q) if from_q.isdigit() else to_ms - minutes * 60_000
+        from_ms = _int_arg(from_q, to_ms - minutes * 60_000)
         if from_ms > to_ms:                          # 容错：反了就换过来
             from_ms, to_ms = to_ms, from_ms
         if to_ms - from_ms > 720 * 60_000:
@@ -1402,14 +1424,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         "err": "bad_param"}).encode())
             return
         from_q = (qs.get("from") or [""])[0].strip()
-        from_ms = int(from_q) if from_q.lstrip("-").isdigit() else to_ms - 30 * 60_000
+        from_ms = _int_arg(from_q, to_ms - 30 * 60_000)
         span = min(abs(to_ms - from_ms), 720 * 60_000)      # 与回放同一上限（12h）
         to_ms = max(to_ms, from_ms)
         from_ms = to_ms - span
         step_q = (qs.get("step") or [""])[0].strip()
         pts, step = motion.truth_samples(
             APP.walk, from_ms, to_ms,
-            step=(int(step_q) if step_q.isdigit() else None))
+            step=_int_arg(step_q))          # 非法 step → None → 按窗口自适应
         self._send(200, json.dumps({
             "ok": True, "src": "motion.Walk",
             "from": from_ms, "to": to_ms, "step": step, "n": len(pts),

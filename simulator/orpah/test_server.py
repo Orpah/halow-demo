@@ -278,5 +278,63 @@ class TestIdReport(unittest.TestCase):
         self.assertEqual(rec["error"], "signature_invalid")
 
 
+class TestUiQueryArgs(unittest.TestCase):
+    """ui_server 的**查询参数解析**（HTTP 层最外层输入）。
+
+    背景（2026-09-13 实测）：`do_GET` 没有外层 try，参数解析一旦抛异常，连接线程直接崩、
+    客户端只看到「Failed to fetch」（不是 400）。而原来用的是 `str.isdigit()` 当校验 ——
+    `"²".isdigit()` 与 `"--123".lstrip("-").isdigit()` 都为 True，但 `int()` 两个都抛。
+    现在统一走 `ui_server._int_arg()`（唯一入口），本类同时锁住「源码里不再出现 isdigit 调用」。
+    """
+
+    def setUp(self):
+        self.ui = __import__("ui_server")
+
+    def test_int_arg_normal(self):
+        self.assertEqual(self.ui._int_arg("1789217468000"), 1789217468000)
+        self.assertEqual(self.ui._int_arg(" 42 "), 42)
+        self.assertEqual(self.ui._int_arg("0"), 0)
+        self.assertEqual(self.ui._int_arg("+5"), 5)
+        self.assertEqual(self.ui._int_arg("-123"), -123)   # `from=-123` 语义保留（回退到窗口上限）
+
+    def test_int_arg_rejects_isdigit_traps(self):
+        """这两条是报告/实测点名的坑：`isdigit()` 为真但 `int()` 抛。"""
+        self.assertIsNone(self.ui._int_arg("--123"))
+        self.assertIsNone(self.ui._int_arg("\u00b2"))       # 上标二
+        for bad in ("", "abc", "12.5", None, "1e3", "0x10"):
+            self.assertIsNone(self.ui._int_arg(bad), bad)
+
+    def test_int_arg_default(self):
+        self.assertEqual(self.ui._int_arg("--123", 99), 99)
+        self.assertIsNone(self.ui._int_arg("abc"))
+
+    def test_no_isdigit_calls_left_in_ui_server(self):
+        """单一入口守卫：源码里不该再有 `*.isdigit()` **调用**（注释/文档字符串里提到不算）。"""
+        import ast
+        with open(os.path.join(HERE, "ui_server.py"), encoding="utf-8") as f:
+            src = f.read()
+        calls = [n.lineno for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr == "isdigit"]
+        self.assertEqual(calls, [], f"改回 isdigit 校验会重新引入崩溃路径，见 _int_arg 注释：行 {calls}")
+
+    def test_upload_finally_guards_settimeout(self):
+        """上传读超时后的 `settimeout(None)` 必须被 try/except OSError 包住（评审 #1 的点）。
+
+        评审担心“连接已关时 settimeout(None) 抛 OSError 盖掉 400 响应” —— 代码里本来就吞了，
+        这里把**该防护存在**锁住：对已关闭的 socket 调 settimeout 确实抛 OSError（下面顺手实测），
+        所以那层 except 不能删。
+        """
+        import socket
+        s = socket.socket()
+        s.close()
+        with self.assertRaises(OSError):
+            s.settimeout(None)          # 证明这个 OSError 真的会发生
+        with open(os.path.join(HERE, "ui_server.py"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("except OSError:\n                    pass", text,
+                      "上传路径 finally 里的 settimeout(None) 防护被我删掉了")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

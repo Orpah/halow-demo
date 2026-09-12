@@ -647,7 +647,7 @@ register/issue ──> active ──rotate──> grace ──宽限到期(sweep
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `sn` | ✅ | 设备 SN；缺 → `{"ok":false,"code":"no_sn"}` |
-| `from` / `to` | 建议 | epoch 毫秒；缺 `from` 时用 `to - minutes×60000`；非数字 → 按缺省处理 |
+| `from` / `to` | 建议 | epoch 毫秒；缺 `from` 时用 `to - minutes×60000`；非数字 → 按缺省处理（**含 `"--123"` / `"²"` 这类“看着像数字”的垃圾：回退默认值，不再打断连接**，见 §11 的参数容错） |
 | `minutes` | 可选 | 省略 `from` 时的窗宽（默认 **30**，钳到 1…720） |
 | `evlimit` | 可选 | 事件条数上限（默认 2000） |
 
@@ -751,6 +751,12 @@ POST /api/truth   body {"times":[t1,t2,…]}                    → 指定时刻
   `test_motion.py` 有「与 walk.pos 逐点一致」的断言，避免页面/服务端各写一套行走模型）。
 - 窗口上限 12h（与 `/api/replay` 一致）；`POST` 的时刻数上限 `motion.TRUTH_MAX_TIMES=5000`，
   页面对超出部分**均匀抽稀**并把**实际参与帧数**如实显示（不虚报精度）。
+- **参数容错**（2026-09-13 修）：`from` / `step` 非法 → **回退默认值**（`from` = `to`−30min、`step` = 按窗口自适应），
+  与 `from=abc` 同待遇；只有 `to` 非法才显式回 `bad_param`。**修前**这两处用 `str.isdigit()` 当校验，
+  而它对 `"--123"`、`"²"`（上标二）都返回 True → `int()` 抛异常 → `do_GET` 无外层 try →
+  **连接线程直接崩、客户端只看到「Failed to fetch」**（实测 `?from=--123` / `?from=²` / `?step=²` /
+  `/api/replay?from=²` 四条全中）。现在统一走 `ui_server._int_arg()`（唯一入口，
+  `test_server.TestUiQueryArgs` 锁住「源码里不再有 `*.isdigit()` 调用」）。
 
 **误差 CDF 的口径**（`replay.html`）：
 
