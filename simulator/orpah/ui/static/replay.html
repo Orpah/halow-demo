@@ -853,6 +853,18 @@ document.querySelectorAll("[data-min]").forEach(b => {
   };
 });
 
+/* A/n 默认值取自服务端标定（motion.py = 唯一源 → /api/config）。
+   本页拿 A/n 把**真实落库的 RSSI** 反算成距离，所以必须与模拟器/实时页同一套参数，
+   否则回放的定位会系统性偏离（且不报错）。用户仍可手改（例如试别的 n 看历史数据怎样变）。 */
+async function loadConfig() {
+  try {
+    const r = await (await fetch("/api/config")).json();
+    const pl = r.path_loss || {};
+    if (pl.A != null) $("rpA").value = pl.A;
+    if (pl.n != null) $("rpN").value = pl.n;
+  } catch (e) { /* 服务端不可达：保留 HTML 兜底值 */ }
+}
+
 /* 初始化：最近 30 分钟 */
 (async () => {
   const now = Date.now();
@@ -860,6 +872,7 @@ document.querySelectorAll("[data-min]").forEach(b => {
   $("rpFrom").value = dateTimeOf(now - 30 * 60000);
   buildTileOptions();          // 必须早于任何 ensureMap：它决定本语言的默认瓦片源
   OrpahI18n.apply();
+  await loadConfig();          // 早于首次 loadReplay：它决定距离换算
   await loadSnList();
   if ($("rpSn").value) await loadReplay();
 })();

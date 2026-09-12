@@ -24,8 +24,8 @@ import math
 #   三台路由器围成一个三角，人到各台的距离在 5~70 m 之间，RSSI 落在 -55~-88 dBm。
 WALK_EPOCH_MS = 1767225600000          # 2026-01-01T00:00:00Z：位置相位基准（固定 → 可复现）
 SPEED_MPS = 1.2                        # 步行速度（m/s）
-RSSI_A = -40.0                         # 1 m 处参考强度（与页面默认 A 一致）
-RSSI_N = 2.5                           # 路径损耗指数（与页面默认 n 一致）
+RSSI_A = -40.0                         # 1 m 处参考强度（**唯一源**：页面从 /api/config 取）
+RSSI_N = 2.5                           # 路径损耗指数（**唯一源**：页面从 /api/config 取）
 MIN_DIST_M = 1.0                       # 距离下限（防 log10(0)）
 RSSI_MIN, RSSI_MAX = -95, -30          # 实测可达范围（钳制）
 # 测量噪声幅度（±dBm，矩形分布）。**为什么要有**：真实 RSSI 每次测量都抰动（多径/干扰），
@@ -42,12 +42,44 @@ WAYPOINTS = [
 ]
 
 
+def calibration():
+    """标定参数快照（→ `GET /api/config`）—— **A/n/噪声的唯一源**。
+
+    为什么要有这个函数（2026-09-12）：A/n/噪声原本在**四个地方各写一份**：
+    本模块（模拟器发 RSSI 用）+ `track.html` / `rssi.html` / `replay.html`
+    （反算距离用，输入框默认值）。靠注释“与页面默认一致”互相提醒 —— 改一处不改另一处时，
+    模拟器发的 RSSI 与页面反算的距离就用不同的模型，**而且不会报错**（位置/椭圆半径静默偏离）。
+    现在以本模块为唯一源，页面开页时取 `/api/config` 把默认值填进输入框（仍可手改）。
+
+    页面的 HTML `value=` 只当**离线兜底**，`test_motion.py` 有一条“单源守卫”
+    断言兜底值与这里的常量一致（否则兜底会骗人）。
+    """
+    return {
+        "path_loss": {"A": RSSI_A, "n": RSSI_N},
+        "noise_db": NOISE_DB,
+        "rssi_range": {"min": RSSI_MIN, "max": RSSI_MAX},
+        "walk": {"speed_mps": SPEED_MPS, "epoch_ms": WALK_EPOCH_MS},
+    }
+
+
+def clamp_rssi(v):
+    """dBm → 钳到实测可达范围并取整（**唯一**的钳位实现：正向换算与加噪之后都走它）。
+
+    为什么要单独一个函数（2026-09-12 审查修复）：`path_loss()` 自己钳了，但 `rssi_to()`
+    与 `nearest()` 是**先钳再加噪声** → 站位恰在量程边界时（远端站已到底 -95、A 调大时近端
+    已到顶 -30）噪声会把结果推出 `[RSSI_MIN, RSSI_MAX]`。实测：400 m 外的站位，
+    600 秒 / 1200 条测量里有 **438 条越界**（最低 -97 dBm），而 `/api/config` 把 `rssi_range`
+    当作量程对外声明 —— 声明与数据不符。噪声是**测量**误差，不会把收不到的信号变出来，
+    所以钳位只能在加噪之后。
+    """
+    return int(round(max(RSSI_MIN, min(RSSI_MAX, float(v)))))
+
+
 def path_loss(dist_m, A=RSSI_A, n=RSSI_N):
     """距离(m) → RSSI(dBm)（对数距离路径损耗模型，钳到实测可达范围；返回整数 dBm）。"""
     d = max(float(dist_m), MIN_DIST_M)
     r = float(A) - 10.0 * float(n) * math.log10(d)
-    r = max(RSSI_MIN, min(RSSI_MAX, r))
-    return int(round(r))
+    return clamp_rssi(r)
 
 
 def dist(ax, ay, bx, by):
@@ -121,8 +153,8 @@ class Walk:
         """
         x, y = self.pos(t_ms)
         v = path_loss(dist(x, y, sx, sy), A, n)
-        return int(round(v + noise_db(sid if sid is not None else f"{sx},{sy}",
-                                      t_ms, self.noise)))
+        return clamp_rssi(v + noise_db(sid if sid is not None else f"{sx},{sy}",
+                                       t_ms, self.noise))
 
     def nearest(self, t_ms, stations):
         """t_ms 时刻离人最近的那台路由器 → (sid, rssi)；stations = [(sid, x, y)] 或 Station 列表。
@@ -143,8 +175,8 @@ class Walk:
                 best, best_d = (sid, sx, sy), d
         if best is None:
             return None, None
-        return best[0], int(round(path_loss(best_d)
-                                 + noise_db(best[0], t_ms, self.noise)))
+        return best[0], clamp_rssi(path_loss(best_d)
+                                   + noise_db(best[0], t_ms, self.noise))
 
 
 _default = None

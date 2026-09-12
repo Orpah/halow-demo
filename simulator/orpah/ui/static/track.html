@@ -982,12 +982,27 @@ $("stationBody").onchange = async (e) => {
   }
 };
 
+/* 标定参数默认值：A/n **以服务端 motion.py 为唯一源**（GET /api/config）→ 开页填进输入框。
+   为什么不让页面自己写死：模拟器发 RSSI 用一份 A/n、页面把 RSSI 反算成距离又用一份，
+   两边一旦不同步，定位与置信椭圆会**静默偏离**（不报错）。这里只填「默认值」，用户仍可手改
+   （例如试别的 n 看定位怎样变）。取不到时保留 HTML 里的兜底值（test_motion.py 有单源守卫）。 */
+async function loadConfig() {
+  try {
+    const r = await (await fetch("/api/config")).json();
+    const pl = r.path_loss || {};
+    if (pl.A != null) $("plA").value = pl.A;
+    if (pl.n != null) $("plN").value = pl.n;
+    draw(); updateStat(null);
+  } catch (e) { /* 服务端不可达：保留 HTML 兜底值 */ }
+}
+
 /* 默认：3 个测点 + 初始画面 */
 addRow(30, 0); addRow(-15, 26); addRow(-15, -26);
 OrpahI18n.apply();
 buildTileOptions();      // 必须早于任何 ensureMap：它决定本语言的默认瓦片源
 refreshSnList();
 draw(); updateStat(null);
+loadConfig();            // A/n 默认值取自服务端标定（异步；填完会重画一帧）
 </script>
 </body>
 </html>

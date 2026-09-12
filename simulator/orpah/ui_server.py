@@ -53,6 +53,7 @@ import registry as reg                    # noqa: E402  设备清册（SN↔走�
 import cases                              # noqa: E402  走失案件闭环（以人为单位）
 import stations as sta                     # noqa: E402  定位站位（无人机悬停测点 / 路由器坐标）
 import motion                              # noqa: E402  演示用「移动的人」运动模型 + RSSI 换算
+                                           #           （标定 A/n/噪声为唯一源 → /api/config）
 import spoof                               # noqa: E402  防 spoof：攻击报文构造（脚本/UI 共用）
 import alerts as alr                      # noqa: E402  告警规则引擎（页面红点）
 import metrics                            # noqa: E402  指标面板纯计算（/api/metrics）
@@ -748,6 +749,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/keys":
             self._send(200, json.dumps(APP.keys_view()).encode())
+            return
+        if self.path == "/api/config":
+            # 标定参数（A/n/噪声…）：以 motion.py 为唯一源，页面开页取默认值用。
+            # 见 motion.calibration() 与 test_motion.py 的「单源守卫」。
+            self._send(200, json.dumps({"ok": True, **motion.calibration()}).encode())
             return
         if self.path == "/api/alerts":
             # 无状态评估：每次用当前快照重算活跃告警（规则见 alerts.py）

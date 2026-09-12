@@ -287,6 +287,19 @@ addRow(-15, 26);
 addRow(-15, -26);
 simulate();
 locate();
+
+/* A/n 默认值取自服务端标定（motion.py = 唯一源 → /api/config），与模拟器/回放用同一套参数；
+   本页是「教学计算器」：A/n 同时用于正向仿真与反向反算，用户可随意改成别的值看公式表现。 */
+async function loadConfig() {
+  try {
+    const r = await (await fetch("/api/config")).json();
+    const pl = r.path_loss || {};
+    if (pl.A != null) $("plA").value = pl.A;
+    if (pl.n != null) $("plN").value = pl.n;
+    simulate(); locate();
+  } catch (e) { /* 服务端不可达：保留 HTML 兜底值 */ }
+}
+loadConfig();
 </script>
 </body>
 </html>

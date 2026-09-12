@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 15:11:20
-- git HEAD：`dbfac69`
+- 时间：2026-09-12 15:36:05
+- git HEAD：`38d1027`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（14/14 套件通过）
 
@@ -11,16 +11,16 @@
 |---|---|---|---|---|
 | 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
 | 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
-| 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.2s | 通过 |
+| 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
 | IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
 | L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
-| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
+| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.3s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.5s | 通过 |
 | 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
 
@@ -28,53 +28,53 @@
 
 ### 运动/定位数据源 — PASS（0.1s）
 
-    == 1. 构造与几何 ==
-    == 2. pos 确定性与周期性 ==
-    == 3. 连续性（不瞬移） ==
-    == 4. RSSI 路径损耗换算 ==
-    == 5. 多路由器一致（演示数据可用性） ==
-    == 5b. 测量噪声（无噪声时平滑/椭圆都没意义，所以演示数据必须带噪） ==
-      OK   default() 复用同一实例
-    全部通过
+    == 1. �����뼸�� ==
+    == 2. pos ȷ������������ ==
+    == 3. �����ԣ���˲�ƣ� ==
+    == 4. RSSI ·����Ļ��� ==
+    == 4b. ǯλҪ��ס�����Ľ����2026-09-12 ��飩 ==
+    == 5. ��·����һ�£���ʾ���ݿ����ԣ� ==
+      OK   replay.html ��ҳȡ /api/config��HTML ���ֻ�Ƕ��ף�
+    ȫ��ͨ��
 
 ### 密钥生命周期 — PASS（0.1s）
 
-    == 1. 签发（幂等） ==
-    == 2. 验签（第 1 代） ==
-    == 3. 轮换：旧钥进宽限、新旧都能验 ==
-    == 4. 宽限到期 → 退役 ==
-    == 5. grace_sec=0：旧钥立即失效 ==
-    == 6. 提前强制退役 ==
-      OK   旧格式导入后能验签
+    == 1. ǩ�����ݵȣ� ==
+    == 2. ��ǩ���� 1 ���� ==
+    == 3. �ֻ�����Կ�����ޡ��¾ɶ����� ==
+    == 4. ���޵��� �� ���� ==
+    == 5. grace_sec=0����Կ����ʧЧ ==
+    == 6. ��ǰǿ������ ==
+      OK   �ɸ�ʽ���������ǩ
     all key lifecycle tests passed
 
-### 防 spoof（离线逐条） — PASS（0.2s）
+### 防 spoof（离线逐条） — PASS（0.1s）
 
-    == 1. 清单自洽 ==
-    == 2. 逐条裁决（离线） ==
-    == 3. 防线语义 ==
-    == 4. 攻击确实改动了报文（不是把合法报文原样发了一遍） ==
-    == 5. 顺序无关（revoked 用临时库，不污染传进来的 keystore） ==
-      OK   revoked 排最前 vs 排最后，逐条 (kind, 裁决) 完全一致  （与第 2 节的默认顺序对比；两侧顺序不同，故按集合比）
-    全部通过
+    == 1. �嵥��Ǣ ==
+    == 2. �����þ������ߣ� ==
+    == 3. �������� ==
+    == 4. ����ȷʵ�Ķ��˱��ģ����ǰѺϷ�����ԭ������һ�飩 ==
+    == 5. ˳���޹أ�revoked ����ʱ�⣬����Ⱦ�������� keystore�� ==
+      OK   revoked ����ǰ vs ��������� (kind, �þ�) ��ȫһ��  ����� 2 �ڵ�Ĭ��˳��Աȣ�����˳��ͬ���ʰ����ϱȣ�
+    ȫ��ͨ��
 
 ### 告警规则（含处置态） — PASS（0.1s）
 
-    PASS  长未上报：启用/走失中的都报，停用/报废不报
-    PASS  长未上报：带 gap 且等级 warn
-    PASS  C：默认 no_report 升级阈值 300s（ORPAH_ALERT_NO_REPORT_CRIT_SEC）
-    PASS  C：默认 case_handled 升级阈值 48h（ORPAH_ALERT_CASE_HANDLED_CRIT_SEC；注意与起步阈值 CASE_HANDLED_SEC=24h 是两个不同的量）
-    PASS  C：刚过起步但未到升级点 → warn
-    PASS  C：超过升级点 → crit
+    PASS  ��δ�ϱ�������/��ʧ�еĶ�����ͣ��/���ϲ���
+    PASS  ��δ�ϱ����� gap �ҵȼ� warn
+    PASS  C��Ĭ�� no_report ������ֵ 300s��ORPAH_ALERT_NO_REPORT_CRIT_SEC��
+    PASS  C��Ĭ�� case_handled ������ֵ 48h��ORPAH_ALERT_CASE_HANDLED_CRIT_SEC��ע��������ֵ CASE_HANDLED_SEC=24h ��������ͬ������
+    PASS  C���չ��𲽵�δ�������� �� warn
+    PASS  C������������ �� crit
 
 ### 指标面板纯计算 — PASS（0.1s）
 
-    PASS  签名：总数/通过/被拒
-    PASS  签名：失败率 1/4
-    PASS  签名：算法分布
-    PASS  签名：其它类型事件不进统计
-    PASS  签名：取不到 alg → unknown（不猜）
-    PASS  签名：无样本 → fail_ratio=None（不编 0）
+    PASS  ǩ��������/ͨ��/����
+    PASS  ǩ����ʧ���� 1/4
+    PASS  ǩ�����㷨�ֲ�
+    PASS  ǩ�������������¼�����ͳ��
+    PASS  ǩ����ȡ���� alg �� unknown�����£�
+    PASS  ǩ���������� �� fail_ratio=None������ 0��
 
 ### 时钟可信（ts=0 无 RTC） — PASS（0.4s）
 
@@ -86,14 +86,14 @@
 
 ### IoTDB 审计/时间窗 — PASS（0.6s）
 
-    == 1. actor 字段 ==
-    == 2. query_events 回读 actor ==
-    == 3. 保留期限清理 ==
-    == 4. 时间窗查询（回放用） ==
-    == 6. 路由器侧观测（多路由器定位的数据源） ==
-    == 7. 环境变量解析 ==
-      OK   合法值生效
-    全部通过
+    == 1. actor �ֶ� ==
+    == 2. query_events �ض� actor ==
+    == 3. ������������ ==
+    == 4. ʱ�䴰��ѯ���ط��ã� ==
+    == 6. ·������۲⣨��·������λ������Դ�� ==
+    == 7. ������������ ==
+      OK   �Ϸ�ֵ��Ч
+    ȫ��ͨ��
 
 ### UI 服务器契约 — PASS（0.1s）
 
@@ -103,7 +103,7 @@
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
-    Ran 16 tests in 0.010s
+    Ran 16 tests in 0.009s
     OK
 
 ### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.0s）
@@ -115,7 +115,7 @@
       OK   parse_eth_frame：ethertype 不符 → None
     批量用例：全部通过
 
-### L1 端到端 — PASS（1.3s）
+### L1 端到端 — PASS（1.4s）
 
     === ORPAH L1 验收 ===
     结果: [PASS]
@@ -129,7 +129,7 @@
     分支一(未命中 NOT-TRACKED): PASS
     分支二(命中 TRACKED): PASS
 
-### L3 多 Router 漫游/去重 — PASS（4.2s）
+### L3 多 Router 漫游/去重 — PASS（4.3s）
 
     --- 阶段A：sn=CN-WH01-9AF3C1D2 在 R1 网络（2 条，未 mark）---
     --- 阶段B：sn=CN-WH01-9AF3C1D2 漫游到 R2 网络（seq 续 3）---
@@ -151,7 +151,7 @@
 
       无认证空口防 spoof 端到端演示
       被冒充设备 SN : CN-WH01-9AF3C1D2
-      攻击者 SN    : CN-WH01-2QZ3AYD6VZ-13（未登记 → 服务器不认识）
+      攻击者 SN    : CN-WH01-2TFH2A65KM-61（未登记 → 服务器不认识）
       链路          : Client→STA→空口→AP→Router→UDP:19847→Server
       用例数        : 12（含 1 条合法对照）
     [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…

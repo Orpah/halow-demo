@@ -9,8 +9,12 @@
 跑法：C:\\Python313\\python.exe test_motion.py
 """
 import math
+import os
+import re
 
 import motion
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 FAIL = []
 
@@ -75,6 +79,35 @@ ck("过近按 1 m 算（不放大、不报错）",
 ck("A 高于上限时钳到上限",
    motion.path_loss(1.0, A=-20) == motion.RSSI_MAX, str(motion.path_loss(1.0, A=-20)))
 
+print("== 4b. 钳位要盖住加噪后的结果（2026-09-12 审查） ==")
+# 噪声是“测量”误差，不会把收不到的信号变出来：path_loss 已到量程边界时，噪声不得把结果推出去。
+# 先证明这条测试有意义（钳位前确实会越界），再验钳位后不再越界。
+w_noisy = motion.Walk()
+t0k = [t0 + k * 1000 for k in range(600)]      # 600 秒（1 s 一条测量；覆盖噪声正负两侧）
+# 远端站位：路径损耗已到底 -95，负噪声会给出 -97
+_raw_lo = [motion.path_loss(motion.dist(*w_noisy.pos(t), 400.0, 0.0))
+           + motion.noise_db("FAR", t, motion.NOISE_DB) for t in t0k]
+ck("远端站位：钳位前确实会越界（否则本条测试是空的）",
+   min(_raw_lo) < motion.RSSI_MIN, f"钳位前最低 {min(_raw_lo):.1f} dBm")
+_far = [w_noisy.rssi_to(t, 400.0, 0.0, sid="FAR") for t in t0k]
+ck("rssi_to：加噪后仍在 [RSSI_MIN, RSSI_MAX]",
+   all(motion.RSSI_MIN <= v <= motion.RSSI_MAX for v in _far),
+   f"{min(_far)}..{max(_far)} dBm（量程 {motion.RSSI_MIN}..{motion.RSSI_MAX}）")
+_near = [w_noisy.nearest(t, [("FAR", 400.0, 0.0)])[1] for t in t0k]
+ck("nearest：加噪后仍在 [RSSI_MIN, RSSI_MAX]",
+   all(motion.RSSI_MIN <= v <= motion.RSSI_MAX for v in _near),
+   f"{min(_near)}..{max(_near)} dBm")
+# 上边界同理：把 A 调大到近端已顶到 -30，正噪声会把 -30 变成 -28
+_raw_hi = [motion.path_loss(motion.dist(*w_noisy.pos(t), *w_noisy.pos(t)), A=-10.0)
+           + motion.noise_db("NEAR", t, motion.NOISE_DB) for t in t0k]
+ck("近端 A 调大：钳位前确实会越上限（同样不是空测试）",
+   max(_raw_hi) > motion.RSSI_MAX, f"钳位前最高 {max(_raw_hi):.1f} dBm")
+_hi = [w_noisy.rssi_to(t, *w_noisy.pos(t), A=-10.0) for t in t0k]
+ck("rssi_to：A 调大时加噪后也不越上限",
+   all(v <= motion.RSSI_MAX for v in _hi), f"最高 {max(_hi)} dBm")
+ck("path_loss 仍是整数（钳位单一实现后没破）",
+   all(isinstance(v, int) for v in (_far + _near + _hi)))
+
 print("== 5. 多路由器一致（演示数据可用性） ==")
 lo, hi = 999, -999
 for k in range(240):                          # 采样 8 分钟（每 2 s 一个上报点）
@@ -107,7 +140,9 @@ for k in range(400):
     exact = motion.path_loss(motion.dist(*wn.pos(t), 30, 0))
     diffs.append(wn.rssi_to(t, 30, 0, sid="S1") - exact)
 ck("噪声幅度不超 ±NOISE_DB",
-   max(abs(d) for d in diffs) <= motion.NOISE_DB + 1, f"max|Δ|={max(abs(d) for d in diffs)}")
+   max(abs(d) for d in diffs) <= motion.NOISE_DB,
+   f"max|Δ|={max(abs(d) for d in diffs)}（理论上限 = NOISE_DB：噪声严格 < amp，"
+   f"取整后最多 ±{motion.NOISE_DB:.0f}）")
 ck("噪声确实在动（不是常数偏移）", len(set(diffs)) >= 3, f"不同值 {len(set(diffs))} 个")
 nd = {round(motion.noise_db("S1", t0 + k * 1000), 4) for k in range(300)}
 ck("底层噪声取值连续（矩形分布；取整到 dBm 后只有 5 种差值）",
@@ -144,6 +179,42 @@ ck("空站位表不炸", w.nearest(t0, []) == (None, None))
 
 print("== 7. 默认单例 ==")
 ck("default() 复用同一实例", motion.default() is motion.default())
+
+# A/n/噪声曾在四处各写一份（motion + track/rssi/replay 三个页面的输入框默认值），
+# 靠注释「与页面默认一致」互相提醒 → 改一处不改另一处时两边用不同的模型反算距离，
+# 位置会静默偏离。现在以 motion.py 为唯一源、页面开页取 /api/config，
+# 本节锁死两件事：① 接口给的值就是常量；② 页面兜底值与常量一致（兜底不许骗人）且页面确实去取接口。
+print("== 8. 标定参数单一源 ==")
+cal = motion.calibration()
+ck("calibration() 给出页面要用的键与值",
+   set(cal) == {"path_loss", "noise_db", "rssi_range", "walk"}
+   and set(cal["path_loss"]) == {"A", "n"}
+   and cal["path_loss"]["A"] == motion.RSSI_A
+   and cal["path_loss"]["n"] == motion.RSSI_N
+   and cal["noise_db"] == motion.NOISE_DB,
+   f"A={cal['path_loss']['A']} n={cal['path_loss']['n']} 噪声±{cal['noise_db']}")
+
+STATIC = os.path.join(HERE, "ui", "static")
+PAGES = {                    # 页面 → (A 输入框 id, n 输入框 id)
+    "track.html": ("plA", "plN"),
+    "rssi.html": ("plA", "plN"),
+    "replay.html": ("rpA", "rpN"),
+}
+for _page, (_ida, _idn) in PAGES.items():
+    try:
+        _txt = open(os.path.join(STATIC, _page), encoding="utf-8").read()
+    except OSError as e:
+        ck(f"{_page} 可读", False, str(e))
+        continue
+
+    def _default(i):
+        m = re.search(r'<input id="%s"[^>]*?\bvalue="([-0-9.]+)"' % re.escape(i), _txt)
+        return float(m.group(1)) if m else None
+
+    _va, _vn = _default(_ida), _default(_idn)
+    ck(f"{_page} 兜底 A/n 与服务端常量一致（改了常量就得同步改兜底）",
+       _va == motion.RSSI_A and _vn == motion.RSSI_N, f"A={_va} n={_vn}")
+    ck(f"{_page} 开页取 /api/config（HTML 里的只是兜底）", '"/api/config"' in _txt)
 
 print()
 if FAIL:
