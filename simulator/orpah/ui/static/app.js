@@ -429,12 +429,24 @@ async function refresh() {
     // 设备时钟偏移/漂移估计（clock.py）：只**估计**，不改记录时间语义（§5.5）
     if (!document.activeElement || document.activeElement.id !== "ctlClock")
       $("ctlClock").value = s.clock_off || 0;
+    // 设备能力声明（2026-09-13）：null=未声明 / true=有 RTC / false=无 RTC
+    const selCap = $("ctlCap");
+    if (selCap && document.activeElement !== selCap)
+      selCap.value = s.id_cap_rtc === true ? "yes" : (s.id_cap_rtc === false ? "no" : "none");
+    const cbTs = $("ctlTsBroken");
+    if (cbTs && document.activeElement !== cbTs) cbTs.checked = !!s.id_ts_broken;
     const ci = $("clockInfo");
     if (ci) {
       const est = (s.clock || {})[s.sn];
       const off = s.clock_off || 0;
       const why = (est && est.drift_ppm == null && est.drift_why)
         ? T("clock_why_" + est.drift_why) : "";
+      const idr = (s.id_demo || {});
+      // 上报卡上先说清“时间是谁给的”：无 RTC / ts 置 0 时设备没有可用时钟（§5.5）
+      const capTxt = s.id_cap_rtc === false ? T("cap_rtc_no")
+        : (s.id_cap_rtc === true ? T("cap_rtc_yes") : T("cap_none"));
+      const tsTxt = (s.id_ts_broken || idr.ts_src === "server")
+        ? " · " + T("cap_ts_server").replace("{cap}", capTxt) : " · " + capTxt;
       ci.textContent = (est && est.ok)
         ? T("clock_info")
             .replace("{off}", (est.offset >= 0 ? "+" : "") + est.offset.toFixed(1))
@@ -442,7 +454,8 @@ async function refresh() {
             .replace("{why}", why)
             .replace("{n}", est.n)
           + (off ? "  ·  " + T("clock_demo_on").replace("{v}", off) : "")
-        : T("clock_none");
+          + tsTxt
+        : T("clock_none") + tsTxt;
     }
   } catch (e) { /* 服务器未就绪 */ }
 }
@@ -470,6 +483,10 @@ $("btnApply").onclick = async () => {
   });
   await postCtl({ action: "set_sn", sn: $("ctlSn").value || "CN-WH01-9AF3C1D2" });
   await postCtl({ action: "clock_off", sec: parseFloat($("ctlClock").value) || 0 });
+  // 能力声明：none → 不声明（null），yes/no → true/false
+  const cap = $("ctlCap").value;
+  await postCtl({ action: "cap", rtc: cap === "yes" ? true : (cap === "no" ? false : null) });
+  await postCtl({ action: "ts_broken", on: !!$("ctlTsBroken").checked });
 };
 $("btnMark").onclick = async () => {
   const sn = $("lostSn").value || $("ctlSn").value || "CN-WH01-9AF3C1D2";

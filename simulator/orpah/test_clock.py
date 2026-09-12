@@ -61,6 +61,59 @@ for ts, want, want_src, why in CASES:
 ck("rx 缺省时用当前时间（不报错、不为 0）",
    P.effective_ts(0)[0] > 1600000000 and P.effective_ts(0)[1] == P.TS_SRC_SERVER)
 
+print("== 1b. 能力声明 cap（设备自报“有无 RTC”）==")
+for msg, want, why in [
+    ({"cap": {"rtc": True}}, {"rtc": True}, "有 RTC → {rtc: True}"),
+    ({"cap": {"rtc": False}}, {"rtc": False}, "无 RTC → {rtc: False}"),
+    ({}, {}, "未声明 → 空（**不是** False：未声明 ≠ 无 RTC）"),
+    ({"cap": None}, {}, "cap 为 null → 空"),
+    ({"cap": 3}, {}, "cap 不是对象 → 空"),
+    ({"cap": {"rtc": 1}}, {}, "数字 1 **不**当 True（只认 JSON bool，免得把“没声明”猜成“有”）"),
+    ({"cap": {"rtc": "true"}}, {}, "字符串 'true' 也**不**认"),
+    ({"cap": {"rtc": None}}, {}, "显式 null → 未声明（回到老行为，而不是“无 RTC”）"),
+    ({"cap": {"rtc": True, "gps": True}}, {"rtc": True},
+     "未知字段丢弃（能力位可扩展，但只归一化 CAP_FIELDS 里的已知位）"),
+]:
+    got = P.cap_of(msg)
+    ck(f"cap_of({msg!r}) → {want}  ({why})", got == want and all(
+        isinstance(v, bool) for v in got.values()), f"got={got}")
+
+ck("rtc_of 三态可辨：未声明=None，显式 false=False（不能合并）",
+   (P.rtc_of({}), P.rtc_of({"cap": {"rtc": None}}), P.rtc_of({"cap": {"rtc": False}}),
+    P.rtc_of({"cap": {"rtc": True}})) == (None, None, False, True),
+   f"{P.rtc_of({})},{P.rtc_of({'cap': {'rtc': None}})},"
+   f"{P.rtc_of({'cap': {'rtc': False}})},{P.rtc_of({'cap': {'rtc': True}})}")
+
+# 声明“无 RTC” ⇒ 服务器一律用接收时刻，**即使 ts 看着正常**
+got, src = P.effective_ts(NOW, NOW, rtc=False)
+ck("rtc=False + ts=正常值 → 仍用服务器时刻（无时钟的设备，它的 ts 不可信）",
+   (got, src) == (NOW, P.TS_SRC_SERVER), f"got=({got},{src})")
+got, src = P.effective_ts(NOW - 120, NOW, rtc=False)
+ck("rtc=False + ts 偏差 120s → 用服务器时刻（不把噪声喂给时钟估计器）",
+   (got, src) == (NOW, P.TS_SRC_SERVER), f"got=({got},{src})")
+got, src = P.effective_ts(NOW, NOW, rtc=True)
+ck("rtc=True + ts 正常 → 用设备时间（声明有 RTC 就该给准时间）",
+   (got, src) == (NOW, P.TS_SRC_DEVICE), f"got=({got},{src})")
+got, src = P.effective_ts(0, NOW, rtc=True)
+ck("rtc=True + ts=0 → 服务器时刻（缺省仍要能收；不一致由 id_cap_mismatch 告警）",
+   (got, src) == (NOW, P.TS_SRC_SERVER), f"got=({got},{src})")
+got, src = P.effective_ts(NOW, NOW, rtc=None)
+ck("rtc 未声明 → 沿用原行为（有利旧设备/旧固件）",
+   (got, src) == (NOW, P.TS_SRC_DEVICE), f"got=({got},{src})")
+
+print("== 1c. ts_usable：判断“设备的时间能不能用” ==")
+for ts, want, why in [
+    (NOW, True, "正常"), (0, False, "ts=0"), (None, False, "缺失"),
+    (True, False, "bool"), ("123", False, "字符串"),
+    (946684799, False, "荒谬早"), (NOW + 86401, False, "超前太多"),
+    (NOW + 86400, True, "边界含"),
+]:
+    got = P.ts_usable(ts, NOW)
+    ck(f"ts_usable({ts!r}) → {want}  ({why})", got is want, f"got={got!r}")
+ck("ts_usable 与 effective_ts 同源（不会各自漂）",
+   all(P.ts_usable(t, NOW) == (P.effective_ts(t, NOW)[1] == P.TS_SRC_DEVICE)
+       for t in [0, None, True, "x", NOW, NOW + 86401, 946684799]), "")
+
 print("== 2. 验签的时间窗（ts=0 跳过窗口，仅靠 nonce 防重放）==")
 ks = oid.KeyStore()
 dev = oid.Device(sn="CN-WH01-9AF3C1D2", se_sn="ATECC608B-DEMO")

@@ -58,6 +58,21 @@ ck("改 ts / 改观测 / 改 hdr 都落在签名这一道（不是靠时间窗�
        for k in ("ts_tamper", "obs_tamper", "level_downgrade")))
 ck("用别人的钥匙签被冒充设备的 SN → signature_invalid",
    by["sig_foreign"]["got"] == "signature_invalid")
+ck("能力降级（改已签声明 cap.rtc）→ signature_invalid（声明在预像里，不能赖成“本来就没时钟”）",
+   by["cap_downgrade"]["got"] == "signature_invalid")
+# 直接把不变式测一步：cap 参与签名 → 改它必定验签失败；而不改的带 cap 报文照常通过
+_p = dev.report(level=0, ts=now, cap={"rtc": True})
+_ks = oid.KeyStore()
+_ks.register(dev, model="CH32V203+TX-AH+ATECC608B", firmware="1.0.3")
+_v1 = oid.verify_report(_p, _ks, now=now, used_nonces=oid.NonceCache())
+_p2 = copy.deepcopy(_p)
+_p2["payload"]["cap"]["rtc"] = False
+_v2 = oid.verify_report(_p2, _ks, now=now, used_nonces=oid.NonceCache())
+ck("带 cap 的合法 ID 报告能过签（cap 本身不影响合法性）",
+   bool(_v1.get("accepted")), f"got={_v1.get('error')}")
+ck("把 cap.rtc 改掉 → 验签失败（cap 在 JCS 预像内 = 防篡改的声明）",
+   _v2.get("error") == "signature_invalid" and not _v2.get("accepted"),
+   f"got={_v2.get('error')}")
 ck("校验位错不查库就被挡", by["bad_check"]["got"] == "bad_check")
 ck("免签冒充被压到 level3", by["alg_none"]["got"] == "none_requires_level3")
 ck("吊销优先于验签", by["revoked"]["got"] == "revoked")
@@ -69,7 +84,7 @@ ck("已知边界如实展示：路由器侧 xport 不进签名 → 通过",
 print("== 4. 攻击确实改动了报文（不是把合法报文原样发了一遍） ==")
 legit, _, _ = spoof.build_case("legit", dev, now)
 for kind in ("sig_foreign", "ts_tamper", "obs_tamper", "level_downgrade",
-             "alg_none", "bad_check", "unknown_sn", "stale"):
+             "cap_downgrade", "alg_none", "bad_check", "unknown_sn", "stale"):
     r, _, _ = spoof.build_case(kind, dev, now, attacker=attacker)
     diff = (r.get("hdr") != legit.get("hdr")
             or r.get("payload") != legit.get("payload")

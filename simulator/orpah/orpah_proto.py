@@ -118,19 +118,62 @@ TS_SRC_SERVER = "server"      # 时间来自服务器接收时刻（设备无时
 TS_MIN = 946684800            # 2000-01-01 之前视为荒谬时钟
 TS_MAX_SKEW_S = 86400         # 允许超前服务器 1 天（时区/轻微漂移），再多视为时钟错乱
 
+# ---------------------------------------------------------------------------
+# 设备能力声明 `cap`（2026-09-13）
+# ---------------------------------------------------------------------------
+# 为什么要有（而不是靠 ts=0 推断）：`ts=0` 只说明**这一条**的时间不可用，分不清
+#   ① 设备**本来就没有 RTC**（免电池可穿戴，设计如此 → 正常）
+#   ② 设备**有 RTC 但时钟坏了/被动了手脚**（→ 异常，该有人看一眼）
+# 两者在下游处理上不同：①不该被当成故障、也不该拿它的 ts 去估时钟偏移/漂移
+# （它没有参考时钟，估出来恒为常数、纯噪声）；②却是值得告警的信号。
+#
+# **哪个字段算数**：业务报文 `ORPAH-REPORT` **没有签名**（Phase 1），其 `cap` 只能当**提示**
+# （用于选时间口径）；**已签 ID 报告**的 `cap` 在 JCS 预像里 → 篡改即验签失败，
+# 是**权威且防篡改**的声明（`spoof.py` 的 `cap_downgrade` 用例就是在演示这条）。
+CAP_FIELDS = ("rtc",)         # 目前只定义 rtc；以后加能力往这里加（JSON 对象，不用位运算）
 
-def effective_ts(ts, rx=None):
+
+def cap_of(msg):
+    """报文 → **规范化**的能力声明 `{field: True/False}`（未知字段丢弃、非布尔丢弃、缺失省略）。
+
+    空 dict = 未声明（与「声明了但都是 false」区分开：前者按老行为处理，后者按声明处理）。
+    """
+    cap = (msg or {}).get("cap")
+    if not isinstance(cap, dict):
+        return {}
+    return {k: bool(cap[k]) for k in CAP_FIELDS
+            if isinstance(cap.get(k), bool)}
+
+
+def rtc_of(msg):
+    """该报文声明的「有无实时时钟」→ `True` / `False` / `None`（未声明）。"""
+    return cap_of(msg).get("rtc")
+
+
+def effective_ts(ts, rx=None, rtc=None):
     """(ts_int, src)：设备时间可用则用设备时间；ts=0/缺失/非整数/荒谬 → 用 rx（服务器接收时刻）。
 
     第二个返回值是**留痕**用的：src=server 表示这条记录的时间来自服务器而非设备，
     调用方应把它写进审计（`ts_src=server`），否则事后无从分辨两种时间。
+
+    `rtc=False`（设备声明**无实时时钟**）→ 一律用服务器接收时刻：即使它某条 ts 看着"像真的"
+    （例如按上电时间编的），也不该被当成时间基准 —— 否则一个没有时钟的设备可以把服务端的
+    时间线带着走。`rtc=True`/`None`（未声明）→ 沿用上面的判断（未声明 = 老行为）。
     """
     rx_i = int(rx if rx is not None else time.time())
+    if rtc is False:
+        return rx_i, TS_SRC_SERVER
     if isinstance(ts, bool) or not isinstance(ts, int):
         return rx_i, TS_SRC_SERVER
     if ts == 0 or ts < TS_MIN or ts > rx_i + TS_MAX_SKEW_S:
         return rx_i, TS_SRC_SERVER
     return ts, TS_SRC_DEVICE
+
+
+def ts_usable(ts, rx=None):
+    """该 ts 是否可作为**设备时间**使用（`effective_ts` 的判断，不传 rtc）——供告警判定用。"""
+    return effective_ts(ts, rx)[1] == TS_SRC_DEVICE
+
 
 
 
@@ -191,14 +234,18 @@ def build_access_info(sn, tracked, server_ok=True, status=None, ts=None):
     return msg
 
 
-def build_report(sn, ts=None, rssi=None, seq=1, extra=None):
+def build_report(sn, ts=None, rssi=None, seq=1, extra=None, cap=None):
     """C→R/S ORPAH-REPORT：IMEI/序列号上报。
 
     sn：被追踪设备序列号/IMEI（F-01 未定，先用字符串 sn，将来可换 15 位 IMEI）
     ts：unix 秒（缺省 now）
     rssi：Client 侧听到的 AP 信号（dBm，可选）
+    cap：设备**能力声明**（如 `{"rtc": False}` = 无实时时钟，见 `cap_of`）；不给则不声明。
+         注意本报文**没有签名**（Phase 1），`cap` 只能当**提示**；权威声明在已签 ID 报告里。
     """
     msg = _base(MSG_REPORT, sn, ts, seq=int(seq))
+    if cap:
+        msg["cap"] = dict(cap)
     if rssi is not None:
         msg["rssi"] = int(rssi)
     if extra:

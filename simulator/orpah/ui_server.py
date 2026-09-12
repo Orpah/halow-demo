@@ -149,6 +149,8 @@ class OrpahApp:
         self.id_used = oid.NonceCache()
         self.id_demo = {}
         self.id_level = "auto"             # 演示降级模式（§8.2，见 ID_LEVEL_MODES）
+        self.id_cap_rtc = None             # 设备声明的「有无 RTC」（None=未声明 / True / False）
+        self.id_ts_broken = False          # 演示：ID 上报的 ts 置 0（无时钟，2026-09-13）
         self.id_reports = deque(maxlen=20)     # 环形（appendleft 自动截断，线程安全）
         self.id_report_total = 0
         self._last_id_report = None        # 最近一条已签上报（供“重放”演示）
@@ -277,7 +279,8 @@ class OrpahApp:
         # 以前是 write_report / _write_router_obs / registry.touch 各自 time.time() 兑底，
         # 既会有毫秒级偏差，也会出现「设备流存服务器时间、报文流还显示 0（1970）」的不一致。
         rx = time.time()
-        ts_s, ts_src = P.effective_ts(msg.get("ts"), rx)
+        rtc = P.rtc_of(msg)                    # 设备能力声明（业务报文未签名 → 只能当提示）
+        ts_s, ts_src = P.effective_ts(msg.get("ts"), rx, rtc=rtc)
         msg["ts_src"] = ts_src                 # 只改服务器侧这份副本，供前端标注；报文原文不动
         if ts_src == P.TS_SRC_SERVER:
             msg["ts_eff"] = ts_s
@@ -286,9 +289,9 @@ class OrpahApp:
         # 设备清册：更新最近见时间；IoTDB 写上报点；走失案件：被看到即触发「发现」
         if msg.get("sn"):
             sn = msg["sn"]
-            # 时钟估计：只有“设备自己的时钟”可用时才是一条有效观测（ts_src=device）。
-            # ts=0/缺失 → 我们用了服务器时刻，拿它算偏移恒为 0（假数据）→ 不喂。
-            if ts_src == P.TS_SRC_DEVICE:
+            # 时钟估计：只有“设备自己的时钟”可用时才是一条有效观测（ts_src=device），
+            # 且设备**声明无 RTC** 时永不喂 —— 它没有参考时钟，拿它估偏移/漂移是纯噪声。
+            if ts_src == P.TS_SRC_DEVICE and rtc is not False:
                 self.clock.add(sn, msg.get("ts"), rx)
             self.registry.touch(sn, ts=ts_s)
             self.tsdb.write_report(sn, ts=ts_s, rssi=msg.get("rssi"),
@@ -509,11 +512,12 @@ class OrpahApp:
         传的是"哪个环节坏了"而不是直接写死 level —— 走的才是规格里那条路径。
         """
         self._ensure_id_device()
+        cap = None if self.id_cap_rtc is None else {"rtc": bool(self.id_cap_rtc)}
         return self.id_dev.report(
-            ts=ts,
+            ts=0 if self.id_ts_broken else ts,
             seen_routers=[{"bssid": "AA:BB:CC:DD:EE:FF",
                            "ssid": "ORPAHID_ZONE_A", "rssi": -42}],
-            battery_mv=3700, firmware="1.0.3",
+            battery_mv=3700, firmware="1.0.3", cap=cap,
             **ID_LEVEL_MODES.get(self.id_level, ID_LEVEL_MODES["auto"]))
 
     def _send_id_report(self, ts=None):
@@ -574,6 +578,8 @@ class OrpahApp:
             "coverage_only": rec.get("coverage_only"),
             # 时钟可信：设备无时钟（ts=0）→ 卡片上标一句，别让人以为设备报了 1970
             "ts_src": rec.get("ts_src"), "ts_eff": rec.get("ts_eff"),
+            # 能力声明（2026-09-13）：None=未声明 / True=有 RTC / False=无 RTC
+            "cap_rtc": rec.get("cap_rtc"), "ts_ok": rec.get("ts_ok"),
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)
@@ -599,6 +605,9 @@ class OrpahApp:
                     (f" gen={rec.get('gen')}" if rec.get("gen") is not None else "") +
                     # 设备无时钟（ts=0）时如实标出：审计要能区分“设备说的时间”与“服务器看到的时间”
                     (" ts_src=server" if rec.get("ts_src") == P.TS_SRC_SERVER else "") +
+                    # 能力声明（2026-09-13）：1=声明有 RTC、0=声明无 RTC、缺省=未声明
+                    (" cap_rtc=%d" % int(bool(rec.get("cap_rtc")))
+                     if rec.get("cap_rtc") is not None else "") +
                     (f" err={rec.get('error')}" if rec.get("error") else "")))
 
     # ---------------- 密钥库（P1 密钥/证书生命周期） ----------------
@@ -690,6 +699,9 @@ class OrpahApp:
             "id_level_modes": list(ID_LEVEL_MODES),  # 页面下拉选项（单一源）
             "clock": self.clock.snapshot(),          # 设备时钟偏移/漂移估计（估计，不改数据）
             "clock_off": getattr(self.client, "ts_off", 0) if self.client else 0,
+            # 设备能力声明（2026-09-13）：None=未声明 / True / False；ts_broken = 自报 ts 置 0
+            "id_cap_rtc": self.id_cap_rtc,
+            "id_ts_broken": self.id_ts_broken,
             # 防 spoof 演示的攻击清单（脚本/UI 同一份，见 spoof.py；页面按语言取 zh/en）
             "spoof_kinds": [{"kind": k, "zh": spoof.case_info(k)[0],
                              "en": spoof.case_info(k)[1],
@@ -699,7 +711,8 @@ class OrpahApp:
                            if self.client else False),
         }
 
-    def cmd(self, action, sn=None, every=None, note="", kind=None, level=None, sec=None):
+    def cmd(self, action, sn=None, every=None, note="", kind=None, level=None, sec=None,
+            rtc="__missing__", on=None):
         if action == "pause":
             self.paused = True
         elif action == "resume":
@@ -716,6 +729,24 @@ class OrpahApp:
             if self.client is not None and isinstance(sec, (int, float)):
                 self.client.ts_off = int(sec)
             return {"ok": True, "clock_off": getattr(self.client, "ts_off", 0)}
+        elif action == "cap":
+            # 设备能力声明（2026-09-13）：rtc=true/false/null（null = 不声明，回老行为）。
+            # 同时应用到**业务报文**（client.cap_rtc，未签名 → 只能当提示）与
+            # **已签 ID 报告**（在 JCS 预像里 → 权威、篡改即验签失败）。
+            if rtc != "__missing__":
+                val = None if rtc is None else bool(rtc)
+                self.id_cap_rtc = val
+                if self.client is not None:
+                    self.client.cap_rtc = val
+            return {"ok": True, "id_cap_rtc": self.id_cap_rtc}
+        elif action == "ts_broken":
+            # 演示“设备没有可用时钟”：ID 上报与业务报文的 ts 一律置 0
+            # （§5.5：ts=0 → 验签跳过时间窗，服务端用接收时刻记账）。
+            if on is not None:
+                self.id_ts_broken = bool(on)
+                if self.client is not None:
+                    self.client.ts_broken = bool(on)
+            return {"ok": True, "id_ts_broken": self.id_ts_broken}
         elif action == "id_level":
             # 演示降级策略（§8.2）：切换"哪个环节坏了"，下一条 ID 上报就走对应的降级路径。
             # 非法值不改（返回实际生效值，前端据此回弹）
@@ -1607,7 +1638,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         r = APP.cmd(req.get("action"), sn=req.get("sn"), every=req.get("every"),
                     note=req.get("note") or "", kind=req.get("kind"),
-                    level=req.get("level"), sec=req.get("sec"))
+                    level=req.get("level"), sec=req.get("sec"),
+                    rtc=req.get("rtc", "__missing__"), on=req.get("on"))
         self._send(200, json.dumps(r).encode())
 
 

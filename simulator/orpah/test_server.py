@@ -225,6 +225,58 @@ class TestIdReport(unittest.TestCase):
         self.assertTrue(rec["accepted"])
         self.assertEqual(rec["trust"], "none")
 
+    def test_id_report_cap_rtc_is_tristate_bool(self):
+        """能力声明落进记录时必须是**三态布尔**（True/False/None），不是规范化后的 dict。
+
+        2026-09-13 实测踩到的坑：server 里误把 `cap_of()`（返回 `{"rtc": true}`）当 `rtc` 传给
+        `effective_ts` / 写进 `cap_rtc` → `rtc is False` 永不成立（"声明无 RTC → 一律用服务器时刻"
+        静默失效），且 `alerts.id_cap_mismatch` 的 `cap_rtc is True` 永远对不上（告警永不出）。
+        """
+        rec = self._send(self.dev.report(level=0, cap={"rtc": True}))
+        self.assertIs(rec["cap_rtc"], True)
+        self.assertIs(rec["ts_ok"], True)          # 有 RTC 且 ts 正常 → 可用设备时间
+        rec = self._send(self.dev.report(level=0, cap={"rtc": False}))
+        self.assertIs(rec["cap_rtc"], False)
+        self.assertEqual(rec["ts_src"], "server")  # 声明无 RTC → 一律服务器时刻
+        self.assertIs(rec["ts_ok"], False)
+        rec = self._send(self.dev.report(level=0))  # 未声明 → None（沿用老行为）
+        self.assertIsNone(rec["cap_rtc"])
+        self.assertEqual(rec["ts_src"], "device")
+
+    def test_id_report_cap_no_rtc_uses_server_time_even_with_plausible_ts(self):
+        """声明无 RTC 的设备，即使 ts 看着完全正常，也不当时间基准（那是它自己编的）。"""
+        now = int(time.time())
+        rec = self._send(self.dev.report(level=0, ts=now - 120, cap={"rtc": False}))
+        self.assertTrue(rec["accepted"])
+        self.assertEqual(rec["ts_src"], "server")
+        # 设备说 now-120，但落的是服务器接收时刻（别用 ==now 断言：同一秒内本来就可能相等）
+        self.assertGreaterEqual(rec["ts_eff"], now - 5)
+        self.assertLessEqual(rec["ts_eff"], now + 5)
+        self.assertNotEqual(rec["ts_eff"], now - 120)
+        self.assertIs(rec["ts_ok"], False)
+
+    def test_id_report_cap_rtc_true_with_broken_ts(self):
+        """有 RTC 却送 ts=0：照收（缺省仍要能收），但标记 ts_ok=False 供告警判定。"""
+        rec = self._send(self.dev.report(level=0, ts=0, cap={"rtc": True}))
+        self.assertTrue(rec["accepted"])
+        self.assertIs(rec["cap_rtc"], True)
+        self.assertIs(rec["ts_ok"], False)
+        self.assertEqual(rec["ts_src"], "server")
+
+    def test_id_report_cap_unknown_field_dropped(self):
+        """只归一化已知能力位；未知字段既不报错也不写进记录。"""
+        rec = self._send(self.dev.report(level=0, cap={"rtc": True, "gps": True}))
+        self.assertTrue(rec["accepted"])
+        self.assertIs(rec["cap_rtc"], True)
+
+    def test_id_report_cap_tamper_breaks_signature(self):
+        """`cap` 在 JCS 预像里 → 改它就验签失败（能力声明防篡改，见 spoof.cap_downgrade）。"""
+        r = self.dev.report(level=0, cap={"rtc": True})
+        r["payload"]["cap"]["rtc"] = False
+        rec = self._send(r)
+        self.assertFalse(rec["accepted"])
+        self.assertEqual(rec["error"], "signature_invalid")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

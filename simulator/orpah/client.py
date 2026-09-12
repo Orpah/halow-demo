@@ -56,6 +56,11 @@ class ClientHost:
         # 演示：设备时钟偏移（秒）。0 = 设备时钟正常；非 0 = 模拟 RTC 偏/漂。
         # 服务器侧只**估计**这个偏移（clock.ClockTracker），不改报文与记录（见 §5.5）。
         self.ts_off = 0
+        # 演示：设备**能力声明**（`cap`，2026-09-13）。None = 不声明（老行为）；
+        # False = 声明「无实时时钟」→ 服务器一律用接收时刻记账、也不估它的时钟偏移。
+        self.cap_rtc = None
+        # 演示：把自报 ts 置 0（模拟“无晶振/时钟不可用”），用来演示能力声明与不一致判定。
+        self.ts_broken = False
         self.on_sent = on_sent              # callable(msg_dict, eth_len) 注入成功
         self.on_recv = on_recv              # callable(msg_dict) 收到下行
         self.sent = 0
@@ -102,11 +107,13 @@ class ClientHost:
         `ts_off`：演示用——把设备自报的 `ts` 拨快/拨慢 N 秒（模拟 RTC 偏移/漂移）。
         服务器侧由 `clock.ClockTracker` 从「设备 ts vs 接收时刻」反推 offset/drift，
         **只估计不改数据**（§5.5 的时间语义仍由 `effective_ts` 负责）。
+        `ts_broken`：ts 置 0（无时钟）；`cap_rtc`：随报文声明「有无 RTC」（None=不声明）。
         """
         self.seq += 1
-        ts = int(time.time()) + int(getattr(self, "ts_off", 0) or 0)
+        ts = 0 if self.ts_broken else int(time.time()) + int(getattr(self, "ts_off", 0) or 0)
+        cap = None if getattr(self, "cap_rtc", None) is None else {"rtc": bool(self.cap_rtc)}
         msg = build_report(sn=self.sn, ts=ts, rssi=self.rssi, seq=self.seq,
-                           extra=extra)
+                           extra=extra, cap=cap)
         n = self._inject(msg)
         if n > 0:
             self.sent += 1

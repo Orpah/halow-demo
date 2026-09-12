@@ -43,12 +43,12 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | L3c 发现走失上报 `ORPAH-FOUND` | `router._announce_found` | `demo_l3.py` + 首页「发现记录」 |
 | Orpah ID：码号/CHECK/签名/防重放/密钥多代轮换吊销 | `orpah_id.py` / `keystore.py` | `demo_id.py`、`test_keys.py` |
 | 降级策略（§8）：按环节坏在哪自动选级 L0→L3；L2 告警、L3 只做覆盖发现（不当人员出现） | `orpah_id.pick_level()` / `counts_as_presence()` + `alerts.id_degraded` | `test_levels.py` + 首页「降级演示」下拉 |
-| 无认证空口防 spoof（12 种攻击端到端） | `spoof.py` | `demo_spoof.py`、`test_spoof.py` |
+| 无认证空口防 spoof（13 种攻击端到端） | `spoof.py` | `demo_spoof.py`、`test_spoof.py` |
 | 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
-| 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / **设备时钟**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
+| 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / 设备时钟 / **能力声明不一致**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
 | 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
 | 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py` |
-| 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据；长基线才给漂移，原因可见：基线不足/噪声） | `orpah_proto.effective_ts` / `clock.py`（`ClockTracker`） | `test_clock.py`（64 条）+ `demo_clock.py` + 首页「上报控制」拨偏演示 |
+| 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据；长基线才给漂移，原因可见：基线不足/噪声）③**设备自报能力位 `cap.rtc`**（三态；已签声明防篡改；无 RTC ⇒ 一律服务器时刻且不喂估计器；声明有 RTC 却给不出可用时间 → `id_cap_mismatch` 告警） | `orpah_proto`（`effective_ts`/`cap_of`/`rtc_of`） / `clock.py`（`ClockTracker`） | `test_clock.py`（88 条）+ `test_server.py`（23 条）+ `test_alerts.py` + `demo_clock.py` + 首页「上报控制」能力下拉/ts 置 0 |
 | 抓包解析 / 双源对照（pcap → ORPAH 报文；与 UDP 侧计数对差） | `capture.py`（解析复用 `orpah_proto` 单一源） | `test_capture.py` |
 | 存储：SQLite（元数据）+ IoTDB（时序/事件） | `registry`/`cases`/`keystore`/`stations` + `tsdb.py` | `test_tsdb_audit.py` |
 
@@ -291,7 +291,7 @@ simulator/
     ├── damm32.py         # 【身份】SN 校验位算法**单一源**（与 luhn32.py / mod97.py 同；前后端都调它）
     ├── luhn32.py         # 【身份】同上（Luhn mod 32）
     ├── mod97.py          # 【身份】同上（Mod 97 两位）
-    ├── spoof.py          # 【安全】攻击构造**单一源**（12 种 + 合法对照），脚本与页面共用
+    ├── spoof.py          # 【安全】攻击构造**单一源**（13 种 + 合法对照），脚本与页面共用
     ├── registry.py       # 【业务】人员↔设备台账（SQLite persons/devices，写穿透 + 首启播种）
     ├── cases.py          # 【业务】案件状态机（立案→发现→找回/撤销→结案；handler 与 status 正交）
     ├── alerts.py         # 【业务】告警规则（无存储、按快照重算；阈值走 ORPAH_ALERT_* 环境变量）

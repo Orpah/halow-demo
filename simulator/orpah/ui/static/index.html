@@ -216,6 +216,15 @@
     <label><span data-i18n="ctl_every">间隔</span> <input id="ctlEvery" type="number" value="2" min="0.3" step="0.1"> <span data-i18n="ctl_sec">秒</span></label>
     <label><span data-i18n="ctl_sn">序列号</span> <input id="ctlSn" value="CN-WH01-9AF3C1D2"></label>
     <label><span data-i18n="ctl_clock">设备时钟偏移</span> <input id="ctlClock" type="number" step="5" value="0" style="width:80px"> <span data-i18n="ctl_sec">秒</span></label>
+    <label><span data-i18n="ctl_cap">设备能力</span>
+      <select id="ctlCap">
+        <option value="none" data-i18n="cap_none">未声明</option>
+        <option value="yes" data-i18n="cap_rtc_yes">有 RTC</option>
+        <option value="no" data-i18n="cap_rtc_no">无 RTC</option>
+      </select>
+    </label>
+    <label title="设备没有可用时钟：自报 ts 一律置 0，服务端改用接收时刻记账（§5.5）">
+      <input id="ctlTsBroken" type="checkbox"> <span data-i18n="ctl_ts_broken">ts 置 0（无时钟）</span></label>
     <button class="btn primary" id="btnApply" data-i18n="btn_apply">应用</button>
     <span class="hint" data-i18n="hint">客户端自动周期上报；服务器每收到一条即点亮对应行。</span>
   </div>
@@ -225,6 +234,6 @@
 </section>
 
 <script src="ui_i18n.js"></script>
-<script src="app.js?v=20260913b"></script>
+<script src="app.js?v=20260913c"></script>
 </body>
 </html>

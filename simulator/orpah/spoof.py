@@ -49,6 +49,10 @@ CASES = [
     ("level_downgrade", "降级攻击（改 hdr）", "header downgrade",
      "signature_invalid",
      "把 hdr 改成 level=1/alg=HS256（想骗服务器用弱算法）—— hdr 在预像里，签名随即失效"),
+    ("cap_downgrade", "能力降级（改 payload.cap）", "capability downgrade",
+     "signature_invalid",
+     "设备已签声明「有 RTC」，攻击者把 payload.cap.rtc 改成 false —— 想让服务端把\n"
+     "“有 RTC 设备的异常时钟”当成“无 RTC 的正常设备”而不告警。cap 在 JCS 预像里 → 签名失效"),
     ("alg_none", "免签冒充（alg=none）", "alg=none impersonation",
      "none_requires_level3",
      "声明 alg=none 且想去掉签名冒充 level0 —— 只允许 level3（仅覆盖发现，不做人员确认）"),
@@ -133,6 +137,13 @@ def build_case(kind, dev, now, attacker=None, used_nonce=None):
         r = _legit(dev, now)
         r["hdr"]["level"] = 1
         r["hdr"]["alg"] = oid.ALG_HS256
+        return r, expect, note
+
+    if kind == "cap_downgrade":
+        # 设备**已签**声明「有 RTC」（cap 在 payload 里 → 在签名覆盖范围内）
+        r = dev.report(level=0, ts=int(now), seen_routers=SEEN_ROUTERS,
+                       battery_mv=3700, firmware="1.0.3", cap={"rtc": True})
+        r["payload"]["cap"]["rtc"] = False        # 攻击者想把它说成“本来就没有时钟”
         return r, expect, note
 
     if kind == "alg_none":

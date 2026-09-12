@@ -418,13 +418,16 @@ class Device:
         return sign_preimage(alg, preimage, self)
 
     def report(self, level=None, ts=None, nonce=None, seen_routers=None,
-               battery_mv=None, firmware=None, extra=None,
+               battery_mv=None, firmware=None, extra=None, cap=None,
                se_ok=True, sign_ok=True, hmac_ok=True):
         """构建完整已签报文（§5.4 格式）。
 
         `level=None`（默认）→ 按 §8.2 用 `pick_level(se_ok, sign_ok, hmac_ok)` **自动选级**
         （全部正常→L0，与老行为一致，故旧调用 `report()` 不受影响）；
         显式传 `level=0..3` 则按传的级别组包（演示/测试用）。
+
+        `cap` = 设备能力声明（如 `{"rtc": False}`）→ 写进 **payload**，因预像是
+        `jcs({"hdr","payload"})` ，它**在签名覆盖范围内** → 篡改即验签失败（防“能力降级”）。
         """
         if level is None:
             level = pick_level(se_ok, sign_ok, hmac_ok)[0]
@@ -436,6 +439,8 @@ class Device:
             "nonce": nonce if nonce is not None else os.urandom(16).hex().upper(),
             "seen_routers": seen_routers or [],
         }
+        if cap:
+            payload["cap"] = dict(cap)
         if battery_mv is not None:
             payload["battery_mv"] = int(battery_mv)
         if firmware is not None:

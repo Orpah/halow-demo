@@ -17,6 +17,9 @@ alerts.py — 告警规则引擎（供页面红点消费）
       ORPAH_ALERT_CASE_HANDLED_CRIT_SEC 接手后又多久升 crit（秒，默认 172800 = 48 小时）
       ORPAH_ALERT_SIG_WINDOW          签名失败率窗口（条，默认 5）
       ORPAH_ALERT_SIG_FAIL_RATIO      签名失败率阈值（0~1，默认 0.5）
+      ORPAH_ALERT_CLOCK_OFFSET_SEC    设备时钟偏移阈值（秒，默认 30）
+      ORPAH_ALERT_CLOCK_DRIFT_PPM     设备时钟漂移阈值（ppm，默认 200）
+      ORPAH_ALERT_CAP_MISMATCH_SEC    能力声明不一致的消警窗口（秒，默认 300）
 
   例（立案后 10 分钟才算超时，避免演示时刚立案就亮红点）：
       PowerShell:  $env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901
@@ -33,6 +36,12 @@ alerts.py — 告警规则引擎（供页面红点消费）
     sig_fail_rate           最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
     id_degraded             最近 id_degraded_sec 内出现过降级上报（§8.3）：L2 warn / L3 crit
     id_clock                设备时钟偏移/漂移超出阈值（估计值，§5.5 深化）
+    id_cap_mismatch         设备**已签**声明「有 RTC」却送出不可用的 ts（故障/被动手脚的信号）
+
+**能力声明不一致（`id_cap_mismatch`，2026-09-13）**：声明 `cap.rtc=true` 的设备**本应**
+有时钟，但某条上报的 `ts` 不可用（ts=0/荒谬/非整数）→ 报 warn。反之「声明无 RTC + ts=0」
+是**正常**（免电池终端的预期行为）→ 不报。只吃**已签**上报里的声明（`cap` 在 JCS 预像内，
+篡改即验签失败 → 声明可信），业务报文未签名、其 `cap` 只能当提示，不参与告警。
 
 **设备时钟（2026-09-12）**：`clock.ClockTracker` 从「设备自报 ts vs 服务器接收时刻」估计
 每台设备的**偏移**（中位数）与**漂移**（最小二乘斜率，ppm）。本规则在超阈时报 warn：
@@ -112,6 +121,7 @@ SIG_FAIL_RATIO = _env_float("ORPAH_ALERT_SIG_FAIL_RATIO", 0.5)  # 窗口内被�
 ID_DEGRADED_SEC = _env_int("ORPAH_ALERT_ID_DEGRADED_SEC", 300)  # 降级上报（L2/L3）消警窗口（秒）
 CLOCK_OFFSET_SEC = _env_int("ORPAH_ALERT_CLOCK_OFFSET_SEC", 30)  # 设备时钟偏移超此值 → 告警（秒）
 CLOCK_DRIFT_PPM = _env_int("ORPAH_ALERT_CLOCK_DRIFT_PPM", 200)   # 设备时钟漂移超此值 → 告警（ppm）
+CAP_MISMATCH_SEC = _env_int("ORPAH_ALERT_CAP_MISMATCH_SEC", 300)  # 能力声明不一致的消警窗口（秒）
 
 
 def _alert(kind, level, key_obj, msg, since, **data):
@@ -146,6 +156,7 @@ def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
     win = th.get("sig_window", SIG_WINDOW)
     fail_ratio = th.get("sig_fail_ratio", SIG_FAIL_RATIO)
     deg_sec = th.get("id_degraded_sec", ID_DEGRADED_SEC)
+    cap_sec = th.get("cap_mismatch_sec", CAP_MISMATCH_SEC)
     off_max = th.get("clock_offset_sec", CLOCK_OFFSET_SEC)
     drift_max = th.get("clock_drift_ppm", CLOCK_DRIFT_PPM)
     out = []
@@ -248,6 +259,27 @@ def evaluate(registry, cases, id_reports, now=None, clock=None, **th):
                               sn=sn, offset_sec=(round(off, 3) if off is not None else None),
                               drift_ppm=(round(drift, 1) if drift is not None else None),
                               n=est.get("n")))
+
+    # 6) 能力声明不一致（2026-09-13）：设备**已签**声明「有 RTC」，但送来的 ts 不可用
+    #    （ts=0/荒谬/非整数）—— 它本来该有时钟，这属于设备故障或被动了手脚，值得看一眼。
+    #    反之（声明无 RTC + ts=0）是**正常**，不告警：那正是免电池终端的预期行为。
+    #    以规则 4 同样的口径处理：**状态型问题**（固件不回 RTC/被降级），
+    #    同一台只出一条（取最近一次），窗口只用于「最近没再犯 = 自动消警」。
+    bad_cap = {}
+    for rec in list(id_reports):                 # deque 最新在前，上限 20 条
+        if not rec.get("accepted") or rec.get("cap_rtc") is not True:
+            continue                             # 只吃**已签**的权威声明；未声明/无 RTC 不管
+        if rec.get("ts_ok"):
+            continue                             # 声明有 RTC 且 ts 可用 → 正常
+        ts = int(rec.get("ts_eff") or 0)
+        if ts and now - ts > cap_sec:            # 超出窗口 → 不再视为当前问题
+            continue
+        sn = rec.get("sn")
+        if sn and sn not in bad_cap:             # 最新一条优先（deque 最新在前）
+            bad_cap[sn] = (ts or now, rec.get("ts_src"), rec.get("ts"))
+    for sn, (ts, src, ts_raw) in bad_cap.items():
+        out.append(_alert("id_cap_mismatch", LEVEL_WARN, sn, "alert_id_cap_mismatch",
+                          ts, sn=sn, ts_src=src, ts_raw=ts_raw))
 
     out.sort(key=lambda a: (0 if a["level"] == LEVEL_CRIT else 1, a["since"]))
     return out

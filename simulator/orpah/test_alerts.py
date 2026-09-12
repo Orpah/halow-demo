@@ -267,6 +267,53 @@ check("时钟：多设备各自成条（分别挂在各自 SN 上）",
 check("时钟：负偏移取绝对值（-120s 也超阈，offset_sec 保留符号）",
       any(x["sn"] == "B" and x["offset_sec"] == -120.0 for x in a))
 
+# ---- 规则 6：能力声明不一致（cap.rtc=true 却给了不可用的 ts）----------------
+# 口径（2026-09-13）：只吃**已签**声明（`cap_rtc is True`）；「声明无 RTC + ts=0」是正常，
+# 不告警。状态型问题 → 同一台只出一条、窗口内没再犯自动消警。
+def crep(cap_rtc, ts_ok, accepted=True, t=NOW, src="server", sn=None, ts_raw=0):
+    d = {"accepted": accepted, "t": t, "cap_rtc": cap_rtc, "ts_ok": ts_ok,
+         "ts_src": src, "ts": ts_raw, "ts_eff": t}
+    if sn:
+        d["sn"] = sn
+    return d
+
+
+a = alr.evaluate(regis(), case_mgr(), deque([crep(True, False, sn="A")]), now=NOW)
+check("能力：声明有 RTC 却送 ts=0（服务器代填时间）→ id_cap_mismatch warn",
+      kinds(a) == ["id_cap_mismatch"] and a[0]["level"] == "warn" and a[0]["sn"] == "A")
+check("能力：告警带 ts_src（页面能解释“时间是谁填的”）",
+      a[0]["ts_src"] == "server" and a[0]["ts_raw"] == 0)
+
+a = alr.evaluate(regis(), case_mgr(), deque([crep(True, True, sn="A", src="device")]), now=NOW)
+check("能力：声明有 RTC 且 ts 可用 → 不告警（正常）", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque([crep(False, False, sn="A")]), now=NOW)
+check("能力：声明**无 RTC** + ts=0 → **不**告警（免电池终端的预期行为）", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque([crep(None, False, sn="A")]), now=NOW)
+check("能力：**未声明** + ts=0 → 不告警（老设备/老固件，沿用老行为）", a == [])
+
+a = alr.evaluate(regis(), case_mgr(), deque([crep(True, False, accepted=False, sn="A")]), now=NOW)
+check("能力：验签被拒的上报不算（声明不可信，不能凭它报设备故障）", a == [])
+
+a = alr.evaluate(regis(), case_mgr(),
+                 deque([crep(True, False, t=NOW - 400, sn="A")]), now=NOW)
+check(f"能力：超出消警窗口（> {alr.CAP_MISMATCH_SEC}s 没再犯）→ 自动消警", a == [])
+
+a = alr.evaluate(regis(), case_mgr(),
+                 deque([crep(True, False, t=NOW - 5, sn="B"), crep(True, False, t=NOW, sn="A")]),
+                 now=NOW)
+check("能力：同一台只出一条（最近一次），多台各自成条",
+      sorted(x["sn"] for x in a) == ["A", "B"] and len(a) == 2)
+check("能力：同一台取**最近**一次的 since（deque 最新在前）",
+      [x["since"] for x in a if x["sn"] == "A"] == [NOW])
+check("能力：阈值可配（cap_mismatch_sec=0 → 1 秒前的记录即过期不报）",
+      alr.evaluate(regis(), case_mgr(), deque([crep(True, False, t=NOW - 1, sn="A")]),
+                   now=NOW, cap_mismatch_sec=0) == [])
+check("能力：窗口边界含（age=100 且 cap_mismatch_sec=100 → 仍报，与 id_degraded 同口径）",
+      kinds(alr.evaluate(regis(), case_mgr(), deque([crep(True, False, t=NOW - 100, sn="A")]),
+                         now=NOW, cap_mismatch_sec=100)) == ["id_cap_mismatch"])
+
 # ---- 排序 / 计数 / 空态 ----------------------------------------------------
 a = alr.evaluate(regis(dev("A", last_seen=NOW - 100)),
                  case_mgr(case("C001", created=NOW - 300)),
@@ -391,6 +438,18 @@ check("env：500ppm 在新阈值下不告警",
                  clock={"A": clock_est(off=0, drift=500)}) == [])
 a = reload_with(ORPAH_ALERT_CLOCK_OFFSET_SEC="abc", ORPAH_ALERT_CLOCK_DRIFT_PPM="")
 check("env：时钟阈值非法值/空串回退默认", (a.CLOCK_OFFSET_SEC, a.CLOCK_DRIFT_PPM) == (30, 200))
+
+# 能力声明消警窗口也可配（演示里 300s 太长，压小才看得到"自动消警"）
+a = reload_with(ORPAH_ALERT_CAP_MISMATCH_SEC="60")
+check("env：能力消警窗口可覆盖", a.CAP_MISMATCH_SEC == 60)
+check("env：窗口覆盖值切实用于评估（age=120 > 60 → 不报）",
+      a.evaluate(regis(), case_mgr(), deque([crep(True, False, t=NOW - 120, sn="A")]),
+                 now=NOW) == [])
+check("env：窗口内仍报（age=30 < 60）",
+      kinds(a.evaluate(regis(), case_mgr(), deque([crep(True, False, t=NOW - 30, sn="A")]),
+                       now=NOW)) == ["id_cap_mismatch"])
+a = reload_with(ORPAH_ALERT_CAP_MISMATCH_SEC=None)
+check("env：能力窗口清后回默认 300", a.CAP_MISMATCH_SEC == 300)
 a = reload_with(ORPAH_ALERT_CLOCK_OFFSET_SEC=None, ORPAH_ALERT_CLOCK_DRIFT_PPM=None)
 
 print()

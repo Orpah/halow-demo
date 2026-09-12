@@ -101,11 +101,13 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 | 字段 | 说明 |
 |---|---|
-| `id_demo` | 最近一条上报的验签结果：`sn/alg/level/trust/accepted/error/kid/gen/nonce/sig` + `degraded`（L2）/`coverage_only`（L3）（§8.3，2026-09-12 新增） |
+| `id_demo` | 最近一条上报的验签结果：`sn/alg/level/trust/accepted/error/kid/gen/nonce/sig` + `degraded`（L2）/`coverage_only`（L3）（§8.3，2026-09-12 新增）+ `cap_rtc`/`ts_ok`/`ts_src`/`ts_eff`（§5.5 能力位，2026-09-13 新增） |
 | `id_reports` | 合成上报流（环形 20 条，最新在前），表格直接渲染 |
 | `id_report_total` | 累计条数 |
 | `id_level` / `id_level_modes` | 当前**降级演示模式**（§8.2）及其可选值（选项单一源，页面下拉据此生成） |
 | `id_revoked` | 当前设备是否已吊销（按钮文案随之切换） |
+| `id_cap_rtc` | 当前设备**声明的有无 RTC**：`true`=有 / `false`=无 / `null`=未声明（三态，页面下拉回显） |
+| `id_ts_broken` | 演示开关：设备自报 `ts` 一律置 0（“没有可用时钟”，页面复选框回显） |
 | **`spoof_kinds`** | **防 spoof 演示的攻击清单** `[{kind, zh, en, expect}]`（来自 `spoof.UI_KINDS`，脚本/页面同一份）。页面按当前语言取 `zh`/`en` 生成下拉，`expect` 用于「期望 vs 实际」对比——**后端不返回本地化文案，只给两种语言让页面挑**，避免中英混排 |
 
 **设备时钟字段**（index 的「上报控制」卡片用；`clock.py`，2026-09-13 新增）：
@@ -114,6 +116,16 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 |---|---|
 | `clock` | `{sn: 估计}`：从「设备自报 `ts` vs 服务器接收时刻 `rx`」反推的时钟估计。`offset`（秒，正=设备比服务器快）/ `drift_ppm`（相对服务器时基的斜率，正=设备走得快）/ `drift_why`（`null`=给了数；否则 `min_span`=基线不足 / `noise`=噪声里看不出趋势）/ `drift_n`/`drift_span`（**真正参与拟合**的那段样本数/跨度秒）/ `n`（整窗样本数）/ `n_off`（算偏移用的最近条数）/ `span`（整窗跨度秒）/ `spread`（**最近 `n_off` 条**的偏移极差＝当前抖动）/ `spread_win`（**整窗**偏移极差：只是**指示器**，拨表与缓慢漂移都会让它变大；它**不是**漂移门）/ `ok`（样本够不够）/ `breach_since`（首次越界时刻，未越界为 `null`） |
 | `clock_off` | 演示用：客户端把自报 `ts` 拨快/拨慢了多少秒（0 = 正常） |
+
+**能力声明（`cap`，§5.5 深化，2026-09-13 新增）**：设备在报文里自报**能力位**
+`cap = {"rtc": true|false}`（JSON 对象，不用位运算；`CAP_FIELDS` 是唯一白名单，未知字段丢弃）。
+
+| 口径 | 说明 |
+|---|---|
+| 三态 | `true`=有 RTC / `false`=无 RTC / **缺省=未声明**（未声明 = 老设备，走老行为；**不能**当成无 RTC） |
+| 权威性 | **已签 ID 报告**的 `cap` 在 JCS 预像内 → 篡改即验签失败（`spoof.py` 的 `cap_downgrade`），是**防篡改**的声明；业务报文 `ORPAH-REPORT` **未签名**，其 `cap` 只能当**提示** |
+| 服务端处理 | 声明 `rtc=false` ⇒ **一律**用服务器接收时刻（`ts_src=server`），且**不喂给时钟估计器**（它没有参考时钟，估出来是常数/噪声）；`ts_ok=false` |
+| 声明有 RTC | 照常按 §5.5 判 `ts` 可用性；若 `ts` 不可用 → 记 `ts_ok=false`，由 `id_cap_mismatch` 告警 |
 
 ⚠ 三个“不给数”的门（都是实测出来的，宁可说“还看不出来”）：
 
@@ -152,6 +164,19 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - 拨偏后：**偏移**约 8 条上报（8s @1s 间隔）就反映出来；**漂移**会显示 `—（基线不足…）`
   —— 跳变之后要重新攒够 `DRIFT_MIN_SPAN`（600s）干净基线才算漂移。想知道漂移值跑
   `demo_clock.py`（合成几小时数据，毫秒出结果）。
+
+**新增 `cap` / `ts_broken`（能力位演示，2026-09-13）**：
+
+- `{action:"cap", rtc:true|false|null}` —— 设备自报能力声明（`null` = 不声明，回到老行为）。
+  同时应用到**业务报文**（`client.cap_rtc`，未签名 → 仅提示）与**已签 ID 报告**（在预像内 → 权威）。
+  返回 `{ok:true, id_cap_rtc:<当前值>}`。
+- `{action:"ts_broken", on:true|false}` —— 把设备自报 `ts` 一律置 0（“没有可用时钟”）。
+  返回 `{ok:true, id_ts_broken:<当前值>}`（`on` 缺省时不改）。
+- 演示组合：
+  - **有 RTC + ts 置 0** ⇒ 上报被收下（缺省兼容），但 `ts_ok=false` + 审计 `cap_rtc=1 ts_src=server`
+    ⇒ **`id_cap_mismatch` warn**：「声明有 RTC，却送出不可用的时间」。
+  - **无 RTC + ts 置 0** ⇒ **正常**（免电池终端就是这样），**不告警**；即使 `ts` 看着正常也不会被当时间基准。
+  - 告警是**状态型**（窗口 `ORPAH_ALERT_CAP_MISMATCH_SEC=300s`）：切换后旧告警会再挂一会儿才消，同 `id_degraded`。
 
 **新增 `id_level`（§8.2 降级策略演示，2026-09-12）**：`{action:"id_level", level:"<模式>"}`
 
@@ -428,12 +453,19 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 |---|---|---|
 | 正常（整数、非 0、≥2000-01-01、不超前服务器 >1 天） | 用设备时间 | `ts_src=device` |
 | `0` / 缺失 / 非整数 / 早于 2000 / 超前 >1 天 | **服务器接收时刻** | `ts_src=server` |
+| **声明 `cap.rtc=false`（无 RTC）** | **一律**服务器接收时刻（即使 ts 看着正常） | `ts_src=server` |
 
+- **未声明 `cap`（老设备/老固件）→ 走前两行**（不把它当无 RTC）；能力位的三态与权威性见上文「能力声明」。
 - **一次算、各处用**：设备测点流（`devices.<sn>`）、路由器观测序列（`routers.<sid>.<sn>`）、
   `registry.last_seen`、审计事件、页面展示都用同一个时刻 —— 否则定位/回放按时间对齐时两边对不上。
-- **留痕**：审计事件 detail 写 `ts_src=server`；`/api/status.reports[]` 带 `ts_src`/`ts_eff`
-  （页面时间列显示服务器时刻 + `*`）；`/api/status.id_demo` 带 `ts_src`（卡片显「设备无时钟」）。
-- **不改报文**：`ts` 在签名预像里 → 改了验签不过；归一化只用于记录，原始 `ts` 原样保留在报文里。
+- **留痕**：审计事件 detail 写 `ts_src=server` 与 `cap_rtc=1|0`（未声明则不写）；
+  `/api/status.reports[]` 带 `ts_src`/`ts_eff`（页面时间列显示服务器时刻 + `*`）；
+  `/api/status.id_demo`/`id_reports[]` 带 `ts_src`/`ts_eff`/`cap_rtc`/`ts_ok`。
+- **@ 坑（2026-09-13 实测）**：server 侧必须取**三态布尔** `rtc_of()`，
+  不能传 `cap_of()` 的**规范化 dict**（`{"rtc":true}`）—— 传 dict 时 `effective_ts` 里 `rtc is False`
+  永不成立（“无 RTC ⇒ 服务器时刻”静默失效），且 `id_cap_mismatch` 的 `cap_rtc is True` 也对不上（告警永不出）。
+  已加回归测试 `test_server.TestIdReport.test_id_report_cap_rtc_is_tristate_bool`。
+- **不改报文**：`ts`/`cap` 都在签名预像里 → 改了验签不过；归一化只用于记录，原始字段原样保留在报文里。
 
 **处置态（2026-09-12 用户定 A 方案）**：`case_overtime` 额外要求案件**无人接手**
 （`Case.handler` 为空）才报 —— 原来只要案件还 `open` 就永远 crit，红点**恒亮被淹没**
@@ -475,6 +507,7 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 | `case_handled_overtime` | `warn` → `crit` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` / 升级 `172800` | `ORPAH_ALERT_CASE_HANDLED_SEC` / `ORPAH_ALERT_CASE_HANDLED_CRIT_SEC` |
 | `sig_fail_rate` | `crit`（不分级） | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
 | `id_degraded` | L2 `warn` / L3 `crit` | 最近 N 秒内出现过**降级上报**（§8.3）：L2 = SE 不可用（仍更新定位）、L3 = 无可用密钥（裸上报） | `300` | `ORPAH_ALERT_ID_DEGRADED_SEC` |
+| `id_cap_mismatch` | `warn`（不分级） | 设备**已签**声明「有 RTC」（`cap_rtc is True`），却送出不可用的 `ts`（`ts_ok=false`） | `300` | `ORPAH_ALERT_CAP_MISMATCH_SEC` |
 
 ⚠ **默认值分两类，别看混**：
 - **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s（升级 300s）、
@@ -490,7 +523,15 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   未设 / 空串 / 非法值 → 回退上表默认值。
 - 也可以在进程内覆盖：`alerts.evaluate(..., no_report_sec=…, no_report_crit_sec=…,
   case_overtime_sec=…, case_handled_sec=…, case_handled_crit_sec=…,
-  sig_window=…, sig_fail_ratio=…, id_degraded_sec=…)`（单测用的就是这个入口）。
+  sig_window=…, sig_fail_ratio=…, id_degraded_sec=…, cap_mismatch_sec=…)`（单测用的就是这个入口）。
+
+**能力声明不一致 `id_cap_mismatch`（§5.5 能力位，2026-09-13）**：
+- 同一道口径分两种现实：①设备**本来就没有 RTC**（免电池可穿戴，设计如此）→ **正常，不告警**；
+  ②设备**声明有 RTC**（`cap.rtc=true`）却送出不可用的 `ts` → 固件不回 RTC/时钟坏了/被动了手脚，**值得看一眼**。
+- 只吃**已签**上报的声明（`accepted && cap_rtc is True`）：业务报文的 `cap` 未签名，不能凭它报设备故障。
+- 状态型问题：**同一台只出一条**（取最近一次），窗口只用于「很久没再犯 → 自动消警」（同 `id_degraded`）。
+- 文案：`alert_id_cap_mismatch`（数据字段 `sn` / `ts_src` / `ts_raw`）；`since` 用该条的 `ts_eff`、缺则 `now`
+  （**不能**用 `t`——那是 `"15:46:21"` 展示字符串，`int()` 会抛，`sig_fail_rate` 踩过这个坑）。
 
 **降级告警 `id_degraded`（§8.3，2026-09-12）**：
 - 数据源 = `/api/status.id_reports` 的环形快照（最新 20 条）；判定用 `accepted && level∈{2,3}`。

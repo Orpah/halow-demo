@@ -40,7 +40,8 @@ from orpah_proto import (ORPAH_UDP_PORT, MSG_REPORT, MSG_REQ_CONNECT,
                          build_tracking_status, build_lost_table,
                          build_error, decode_msg, encode_msg,
                          ST_TRACKED, ST_NOT_TRACKED, ST_LOG_OK,
-                         ERR_FORMAT, ERR_LOG, sn_err, effective_ts)
+                         ERR_FORMAT, ERR_LOG, sn_err, effective_ts,
+                         TS_SRC_DEVICE, rtc_of)
 import orpah_id as oid                     # Orpah ID 验签（§9.3）
 
 LOG = True
@@ -276,7 +277,14 @@ class OrpahServer:
         sig = (report or {}).get("sig") or ""
         # 时钟可信（§5.5）：ts=0/缺失/荒谬 → 验签层已跳过时间窗，这里再把「时间是从设备来的
         # 还是服务器接收时刻」记下来（审计需要能区分，否则事后无从分辨）。
-        ts_eff, ts_src = effective_ts(payload.get("ts"), None)
+        # 设备能力（2026-09-13）：声明 `cap.rtc=false` 的设备**一律**用服务器接收时刻
+        # （它没有参考时钟，ts 即使“看着像真的”也不是时间基准）。
+        # 2026-09-13 实测捉到的坑：这里必须取**三态布尔** `rtc_of()`（True/False/None），
+        # 不能传 `cap_of()` 的**规范化 dict** —— 传 dict 时 `effective_ts` 里 `rtc is False`
+        # 永远不成立，“声明无 RTC → 一律用服务器时刻”这条策略会静默失效，
+        # 而且 `alerts.id_cap_mismatch` 的 `cap_rtc is True` 也永远对不上（告警永远不出）。
+        rtc = rtc_of(payload)
+        ts_eff, ts_src = effective_ts(payload.get("ts"), None, rtc=rtc)
         rec = {
             "t": time.strftime("%H:%M:%S"),
             "sn": sn or "-",
@@ -295,6 +303,8 @@ class OrpahServer:
             "nonce": payload.get("nonce", ""),
             "ts_src": ts_src,          # device / server（留痕用，见 orpah_proto.effective_ts）
             "ts_eff": ts_eff,          # 实际用于记录的时刻（秒）
+            "cap_rtc": rtc,            # 设备声明的「有无 RTC」（None = 未声明）；见 orpah_proto.rtc_of
+            "ts_ok": ts_src == TS_SRC_DEVICE,   # 本条的 ts 是否可当设备时间用（告警判定用）
         }
         self.id_report_total += 1
         self.id_reports.appendleft(rec)
