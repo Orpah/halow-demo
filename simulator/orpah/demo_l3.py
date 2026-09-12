@@ -74,16 +74,28 @@ def _loop(core, stop):
 
 
 class Downs:
-    """按 Router 记录下行（r1/r2）与 Client 收到的 ERROR，供断言。"""
+    """按 Router 记录下行（r1/r2）与 Client 收到的 ERROR，供断言。
+
+    第 3 槽的语义**按消息类型**取（别混装）：ACCESS-INFO 取权威的 `tracked` 布尔值
+    （`status` 只是可选文案，见 `build_access_info(status=None)`），TRACKING-STATUS 取
+    `status`，ERROR 取 `code`。这样断言不必猜“这个槽里可能是什么”。
+    """
 
     def __init__(self):
-        self.r1 = []        # [(type, sn, status/code)]
+        self.r1 = []        # [(type, sn, 状态字段)]
         self.r2 = []
         self.err_c2 = []    # c2(漫游到 R2 的 Client) 收到的 ERROR
 
+    @staticmethod
+    def _field(msg):
+        t = msg.get("type")
+        if t == MSG_ACCESS_INFO:
+            return ST_TRACKED if msg.get("tracked") else ST_NOT_TRACKED
+        return msg.get("status", msg.get("code", "-"))
+
     def _down(self, which, msg):
         which.append((msg.get("type"), msg.get("sn", "-"),
-                      msg.get("status", msg.get("code", "-"))))
+                      self._field(msg)))
 
     def r1_down(self, msg):
         self._down(self.r1, msg)
@@ -94,9 +106,6 @@ class Downs:
     def c2_recv(self, msg):
         if msg.get("type") == MSG_ERROR:
             self.err_c2.append(msg)
-
-
-from waiting import wait_until             # noqa: E402  按截止时间等待（只这一份实现）
 
 
 def count_tracking(downs):
@@ -186,8 +195,8 @@ def main():
                       rec.r2 and rec.r2[-1][2] == ST_TRACKED, timeout=5, interval=0.1)
     # 检查最近一次 ACCESS-INFO 是否 tracked=True（经 R2 下行）
     acc_r2 = [m for m in rec.r2 if m[0] == MSG_ACCESS_INFO]
-    d_tracked = bool(acc_r2 and acc_r2[-1][2] in (True, ST_TRACKED, "TRACKED"))
-    print(f"R2 最近 ACCESS-INFO tracked 标志: {acc_r2[-1][2] if acc_r2 else '-'}")
+    d_tracked = bool(acc_r2 and acc_r2[-1][2] == ST_TRACKED)
+    print(f"R2 最近 ACCESS-INFO tracked 标志: {acc_r2[-1][2] if acc_r2 else '-'}（期望 {ST_TRACKED}）")
     accepted_before = srv.count
 
     # ========== 阶段 E：去重（同 seq 重发，F-04）==========
