@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 13:15:08
-- git HEAD：`d5b7221`
+- 时间：2026-09-12 13:20:09
+- git HEAD：`4e21acc`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（8/8 套件通过）
 
@@ -9,18 +9,18 @@
 
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
-| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.0s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
+| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
-| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.5s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
+| 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 
 ## 关键输出
 
-### 运动/定位数据源 — PASS（0.0s）
+### 运动/定位数据源 — PASS（0.1s）
 
     == 1. �����뼸�� ==
     == 2. pos ȷ������������ ==
@@ -31,7 +31,7 @@
       OK   default() ����ͬһʵ��
     ȫ��ͨ��
 
-### 密钥生命周期 — PASS（0.1s）
+### 密钥生命周期 — PASS（0.2s）
 
     == 1. ǩ�����ݵȣ� ==
     == 2. ��ǩ���� 1 ���� ==
@@ -63,7 +63,7 @@
     PASS  env�����ָ�Ĭ��
     all alert tests passed
 
-### 时钟可信（ts=0 无 RTC） — PASS（0.5s）
+### 时钟可信（ts=0 无 RTC） — PASS（0.4s）
 
     == 1. effective_ts 归一化规则（唯一入口，各层共用）==
     == 2. 验签的时间窗（ts=0 跳过窗口，仅靠 nonce 防重放）==
@@ -71,7 +71,7 @@
       OK   留痕：ts_src=device（时间来自设备）
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.5s）
+### IoTDB 审计/时间窗 — PASS（0.6s）
 
     == 1. actor �ֶ� ==
     == 2. query_events �ض� actor ==

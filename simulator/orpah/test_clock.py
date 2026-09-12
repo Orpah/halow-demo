@@ -12,6 +12,7 @@
 """
 import json
 import os
+import queue
 import socket
 import sys
 import time
@@ -88,21 +89,36 @@ ck("ts=0 也不能重放（nonce 仍拦）",
 
 print("== 3. 端到端（进程内 UDP）：ts=0 的报告落库时刻 + 审计留痕 ==")
 PORT = 19711
-srv = OrpahServer(port=PORT, keystore=ks, id_nonces=oid.NonceCache())
+# 用 server 自带的 on_id_report 回调 + 队列来等结果，**不轮询 deque**：
+# 轮询要拍一个“猜得够不够长”的次数（曾写 20×0.05s=1s）—— 一旦超时就只剩一句
+# “拿到了 None”，查起来很难；队列等待是确定性的，超时也能报清是“没等到回调”。
+ID_EVENTS = queue.Queue()
+srv = OrpahServer(port=PORT, keystore=ks, id_nonces=oid.NonceCache(),
+                  on_id_report=ID_EVENTS.put)
 srv.start()
 time.sleep(0.3)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(3)
+WAIT_S = 5.0                                  # 回调等待上限（进程内 UDP 实测 <10ms）
 
 
 def send_id(ts, nonce):
+    """发一条签名上报 → 等服务器回调，返回那条 rec（超时返回 None）。"""
+    while not ID_EVENTS.empty():              # 丢掉上一条的残留，避免拿错
+        ID_EVENTS.get_nowait()
     msg = P.build_id_report(dev.report(level=0, ts=ts, nonce=nonce))
     sock.sendto(P.encode_msg(msg), ("127.0.0.1", PORT))
-    for _ in range(20):                       # 等 on_id_report 回调（异步线程）落到 deque
-        time.sleep(0.05)
-        if srv.id_reports and srv.id_reports[0].get("nonce") == nonce:
-            return srv.id_reports[0]
-    return None
+    deadline = time.time() + WAIT_S
+    while True:
+        left = deadline - time.time()
+        if left <= 0:
+            return None                       # 超时（调用方的断言会报 None）
+        try:
+            rec = ID_EVENTS.get(timeout=left)
+        except queue.Empty:
+            return None
+        if rec.get("nonce") == nonce:         # 要的就是这条（正常就是第一条）
+            return rec
 
 
 t0 = int(time.time())
