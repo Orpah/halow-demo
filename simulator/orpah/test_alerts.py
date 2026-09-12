@@ -372,6 +372,29 @@ check("分流：两条的严重度不同（沉默那条反而更轻）",
       {x["kind"]: x["level"] for x in a} == {"no_report_energy": "warn", "id_energy": "crit"})
 
 
+# ---- 规则 4：降级上报（含“没有可用 ts_eff”时不漏报）-------------------------
+# 外部评审（2026-09-13）读 `ts = int(r.get("ts_eff") or 0)` + `if ts and ...` 后断言
+# “缺 ts_eff 的记录会跳过 → 漏报”。**实际不会**：ts=0 只是**不参与窗口判定**，
+# 告警照样出，`since` 回退到 `now`（下一行 `worst[sn] = (lv, ts or now)`）。
+# 这三条把它锁住 —— 免得以后有人按那个误读把 `ts or now` 删成 `ts`。
+for lv, mark in ((2, "warn"), (3, "crit")):
+    for label, ts in (("缺失", None), ("=0", 0), ("=None", None)):
+        rec = {"accepted": True, "level": lv, "sn": "A"}
+        if ts is not None:
+            rec["ts_eff"] = ts
+        a = alr.evaluate(regis(), case_mgr(), deque([rec]), now=NOW)
+        got = [x for x in a if x["kind"] == "id_degraded"]
+        check("降级：ts_eff %s 也不漏报（L%d → %s）" % (label, lv, mark),
+              len(got) == 1 and got[0]["level"] == mark and got[0]["since"] == NOW)
+# 反过来：确实超出窗口只是“不再视为当前问题”，这是**有意**的（自动消警）
+a = alr.evaluate(regis(), case_mgr(), deque(
+    [{"accepted": True, "level": 2, "sn": "A", "ts_eff": NOW - 10 ** 6}]), now=NOW)
+check("降级：超窗不再报（自动消警，有意如此）", kinds(a) == [])
+a = alr.evaluate(regis(), case_mgr(), deque(
+    [{"accepted": False, "level": 2, "sn": "A", "ts_eff": NOW}]), now=NOW)
+check("降级：被拒的记录不算降级上报（§8.3 只看已签接受的）", kinds(a) == [])
+
+
 # ---- 排序 / 计数 / 空态 ----------------------------------------------------
 
 

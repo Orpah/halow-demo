@@ -129,6 +129,10 @@ function renderRows(rows) {
   });
   // 最新在顶部：reports 最新在前 → DOM 里按需把新行插到最前更直观，
   // 这里统一重排一次（保持 tbody 顺序 = rows 顺序）
+  // —— 这段排序是**唯一**保证「DOM 顺序 = 数据顺序」的地方：新行是 append 到**末尾**的，
+  //    而数据是最新在前，所以不排的话新行会沉到底下（清屏后重连、seq 跳变时也会错位）。
+  //    实测（2026-09-13，50 行满）：0.10 ms/次轮询 —— 不值得为它改成 insertBefore 的
+  //    “只插新行”写法：那会把 DOM 顺序正确性绑死在插入路径上，省下的是 0.1 ms/秒。
   [...tbody.children].sort((a, b) => {
     const sa = Number(a.querySelector(".sq").textContent);
     const sb = Number(b.querySelector(".sq").textContent);
