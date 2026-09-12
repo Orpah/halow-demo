@@ -61,26 +61,31 @@
       <div class="node-row small" data-i18n="sub_client">主机 · 组 ORPAH-REPORT</div>
       <div class="node-row"><span data-i18n="lbl_sn">序列号</span> <b id="snClient">-</b></div>
       <div class="node-row" id="rowClientCnt"></div>
+      <div class="node-row" id="rowClientId"></div>
     </div>
     <div class="link" id="linkAir" data-i18n-title="air_frames_tip">
       <div class="link-flow"><span class="arr">→</span><b class="link-frames" id="airFrames">0</b> <span class="link-unit" data-i18n="lbl_frame">帧</span></div>
       <div class="link-label" data-i18n="link_air">HaLow 虚拟空口</div>
+      <div class="link-split" id="airSplit"></div>
     </div>
     <div class="node" id="nodeRouter">
       <div class="node-title"><span data-i18n="node_router">路由器</span><span class="chip" id="chipRouter">--</span></div>
       <div class="node-row small" data-i18n="sub_router">空口收 · UDP 上行</div>
       <div class="node-row" id="rowRouterCnt"></div>
+      <div class="node-row" id="rowRouterId"></div>
       <div class="node-row" id="rowRouterLost"></div>
       <div class="node-row" id="rowRouterFound"></div>
     </div>
-    <div class="link" id="linkUdp">
+    <div class="link" id="linkUdp" data-i18n-title="udp_frames_tip">
       <div class="link-flow"><span class="arr">→</span><b class="link-frames" id="udpFrames">0</b> <span class="link-unit" data-i18n="lbl_frame">帧</span></div>
       <div class="link-label" data-i18n="link_udp">UDP :19447</div>
+      <div class="link-split" id="udpSplit"></div>
     </div>
     <div class="node" id="nodeServer">
       <div class="node-title"><span data-i18n="node_server">服务器</span><span class="chip" id="chipServer">--</span></div>
       <div class="node-row small" data-i18n="sub_server">Python UDP</div>
       <div class="node-row" id="rowServerCnt"></div>
+      <div class="node-row" id="rowServerId"></div>
       <div class="node-row" id="rowServerPub"></div>
       <div class="node-row" id="rowServerFound"></div>
     </div>

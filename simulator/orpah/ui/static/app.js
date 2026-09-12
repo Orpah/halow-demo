@@ -336,30 +336,49 @@ async function refresh() {
     const r = await fetch("/api/status");
     const s = await r.json();
     $("snClient").textContent = s.sn;
-    // 计数行（字典 fmt，数字高亮）
+    // 计数行（字典 fmt，数字高亮）。**按内容分色**：同一颜色 = 同一类内容，
+    // 蓝 = L2（REQ-CONNECT/REPORT）、紫 = Orpah ID 签名上报、黄 = 发现（ORPAH-FOUND）。
+    // 口径（为什么会看到不同数字，全部在此说明，避免"看起来不一致"）：
+    //   · 客户端「上行注入」= client_sent = REQ-CONNECT + REPORT（每周期 2 条）
+    //   · 客户端「ID 上报」= id_sent = 本机注入的 ID-REPORT（含页面注入的重放/超窗/伪造报文）
+    //   · 空口帧 = tx_sta = 上面两者之和（STA 发出的**数据**帧；不含信标/关联帧）
+    //   · 转发 REPORT / 转发 ID = 路由器真正发给 Server 的两种内容（REQ-CONNECT 本机应答不过 UDP）
+    //   · 服务器「收到」只计 REPORT；ID 走验签通道单独计（含被拒，供防 spoof 演示）
     $("rowClientCnt").innerHTML =
       T("lbl_sent").replace("{n}", `<b class="cnt">${s.client_sent}</b>`);
+    $("rowClientCnt").title = T("lbl_sent_tip");
+    $("rowClientId").innerHTML =
+      T("lbl_id_up").replace("{n}", `<b class="cnt-id">${s.id_sent || 0}</b>`);
     $("rowRouterCnt").innerHTML =
       T("lbl_up").replace("{n}", `<b class="cnt">${s.router_up}</b>`);
+    $("rowRouterId").innerHTML =
+      T("lbl_id_fwd").replace("{n}", `<b class="cnt-id">${s.router_id_up || 0}</b>`);
     $("rowRouterLost").innerHTML =
       T("lbl_lost_recv").replace("{n}", `<b class="cnt">${s.router_lost_recv || 0}</b>`);
     $("rowRouterFound").innerHTML =
-      T("lbl_found").replace("{n}", `<b class="cnt">${s.found_total || 0}</b>`);
+      T("lbl_found").replace("{n}", `<b class="cnt-found">${s.found_total || 0}</b>`);
     $("rowServerCnt").innerHTML =
       T("lbl_recv").replace("{n}", `<b class="cnt">${s.server_recv}</b>`);
+    $("rowServerId").innerHTML =
+      T("lbl_id_recv").replace("{n}", `<b class="cnt-id">${s.id_report_total || 0}</b>`);
     $("rowServerPub").innerHTML =
       T("lbl_pub").replace("{n}", `<b class="cnt">${s.publish_total || 0}</b>`);
     $("rowServerFound").innerHTML =
-      T("lbl_found_recv").replace("{n}", `<b class="cnt">${s.found_recv || 0}</b>`);
-    // 链路段帧数（方向箭头旁），两个口径不同、**不该相等**：
-    //   空口帧 = 客户端 STA 在空口发出的**数据帧**总数(tx_sta)，含每周期
-    //     REQ-CONNECT + REPORT + Orpah ID 签名上报（后者只走空口、不转发服务器，
-    //     见 client.send_id_report(notify=False)）；不含信标/关联帧与下行帧。
-    //   UDP 帧 = 路由器**转发给服务器**的条数(router_up)，只有 REPORT
-    //     （REQ-CONNECT 由路由器查本地走失缓存就地应答）；所以它 == 服务器收到数。
-    //   左侧「上行注入」是 client_sent = REQ-CONNECT + REPORT 两类注入，故恒为 router_up 的 2 倍。
+      T("lbl_found_recv").replace("{n}", `<b class="cnt-found">${s.found_recv || 0}</b>`);
+    // 两段链路：总数的口径见下 + 「按内容」拆行（颜色与节点行一致）
+    //   空口帧 = L2 注入 + ID 注入（= STA 发出的数据帧总数，所以两项相加等于总数）
+    //   UDP 帧 = 转发 REPORT + 转发 ID + 发现（= 路由器真正发给 Server 的帧总数；
+    //            不含控制面：REQ-CONNECT 本机应答、LOST-TABLE 拉表/推送）
+    const found = s.found_total || 0;
     $("airFrames").textContent = s.tx_sta;
-    $("udpFrames").textContent = s.router_up;
+    $("airSplit").innerHTML =
+      `<span class="s-l2">L2 <b>${s.client_sent}</b></span> · ` +
+      `<span class="s-id">ID <b>${s.id_sent || 0}</b></span>`;
+    $("udpFrames").textContent = s.router_up + (s.router_id_up || 0) + found;
+    $("udpSplit").innerHTML =
+      `<span class="s-l2">REPORT <b>${s.router_up}</b></span> · ` +
+      `<span class="s-id">ID <b>${s.router_id_up || 0}</b></span> · ` +
+      `<span class="s-found">${T("sp_found")} <b>${found}</b></span>`;
     // 连接 / 徽标（展示层按字典中文化）
     const setConn = (elId, val) => {
       const el = $(elId);

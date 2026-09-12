@@ -61,6 +61,20 @@
   - **超时必须可见、失败要响**：`wait_until` 返回 False 时打印 `[!!] …未…` 并让用例失败
     （`return 1/2`），**绝不静默继续**（旧代码就是静默 `continue`，链路没通也报 PASS）。
   - 判据：任何等待都该能回答「等的是什么条件、超时多少、超时后怎么办」；答不上来就是猜次数。
+- **拓扑计数是「按内容」分色的三个口径，别合并成一个数（2026-09-12）**：
+  - **蓝 `--acc`** = L2 上行（REQ-CONNECT / REPORT）；**紫 `--id`** = Orpah ID 签名上报
+    （ID-REPORT）；**黄 `--org`** = 发现（ORPAH-FOUND）。同一颜色 = 同一类内容，节点行与链路拆行一致。
+  - 各口径（`ui_server.status()` 提供原始计数，前端只做加和/分色）：
+    `client_sent` = REQ-CONNECT + REPORT（每周期 2 条，故恒为 `router_up` 的 2 倍）；
+    `id_sent` = 本机注入的 ID-REPORT（周期 + 页面重放/超窗/伪造，全部经 `_inject_id` 计数）；
+    `tx_sta` = STA 空口**数据**帧 = `client_sent + id_sent`；
+    `router_up`/`router_id_up` = 路由器真正发给 Server 的 REPORT / ID（REQ-CONNECT 本机应答不过 UDP）；
+    UDP 帧总额 = `router_up + router_id_up + found_total`；`server_recv` 只计 REPORT，
+    ID 走验签通道（`id_report_total`，**含被拒**）。
+  - **新增一种上行内容时**：在 router 的转发表里加计数 + 回调（仿 `on_up_id`），
+    `ui_server` 计一份、`status()` 暴露、前端给颜色与悬停说明，四步都要做；
+    只在空口加而不在 UDP 侧加，页面立刻"对不上"（本次 ID 上报就是这样被发现的）。
+  - 周期上报的 ID 条数会比会话数多 1：启动时立刻 `_id_tick()` 一次（见 `start()` 注释），不是漏洞。
 - **IoTDB 查询：时间可进 `WHERE`，值不行（2026-09-12，回放要按窗取数）**：
   - **时间过滤写进 SQL**（`WHERE time >= <ms> AND time <= <ms>` + `ORDER BY time ASC`）——
     时间戳是 IoTDB 的原生索引，准确且快。`tsdb.query_report_range` / `query_events_range`

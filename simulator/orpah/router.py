@@ -58,15 +58,18 @@ class RouterBridge:
 
     def __init__(self, ap_port, server_port=ORPAH_UDP_PORT,
                  ap_host="127.0.0.1", server_host="127.0.0.1",
-                 self_mac=None, on_up=None, on_down=None, on_found=None):
+                 self_mac=None, on_up=None, on_down=None, on_found=None,
+                 on_up_id=None):
         self.ap = HostBus(host=ap_host, port=ap_port, name="router")
         self.server_addr = (server_host, server_port)
         self.up_count = 0
         self.down_count = 0
+        self.id_up_count = 0               # 透传给 Server 的 ID-REPORT 条数（与 up_count 分开）
         self.found_count = 0               # 发现走失（ORPAH-FOUND 上报）次数
         self.on_up = on_up                  # callable(msg) 上行转发（REPORT）
         self.on_down = on_down              # callable(msg) 下行注入（回 Client）
         self.on_found = on_found            # callable(msg) 发现走失上报
+        self.on_up_id = on_up_id            # callable(msg) 上行转发（ID-REPORT）
         # 本地走失缓存（Server LOST-TABLE 下发）：sn -> tracked(bool)
         self.lost_cache = {}
         # 本 Router 的 MAC（下行帧 src；缺省给个演示值）
@@ -148,14 +151,18 @@ class RouterBridge:
             return
         if mtype == MSG_ID_REPORT:
             # 已签 orpah-id-report：Router 只透传（不改 hdr/payload/sig），
-            # Server 侧验签（§9.3）。不占 REPORT 上行计数。
+            # Server 侧验签（§9.3）。不占 REPORT 上行计数（up_count），
+            # 但它是真实进 UDP 的帧 → 单独计 id_up_count（UI 把 UDP 段按内容分色显示）。
             try:
                 self.udp.sendto(encode_msg(msg), self.server_addr)
             except OSError as e:
                 log(f"转发 Server 失败: {e}")
                 return
-            log(f"上行 ORPAH-ID-REPORT sn={sn} -> "
+            self.id_up_count += 1
+            log(f"[{self.id_up_count}] 上行 ORPAH-ID-REPORT sn={sn} -> "
                 f"{self.server_addr[0]}:{self.server_addr[1]}")
+            if self.on_up_id:
+                self.on_up_id(msg)
             return
         # 其它类型（一般不会经 Router 上行）——记录
         log(f"收到上行类型 {mtype} sn={sn}，忽略")

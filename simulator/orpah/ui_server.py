@@ -105,9 +105,13 @@ class OrpahApp:
         self.paused = False
         self.stop = threading.Event()
         # 三端计数
-        self.client_sent = 0
-        self.router_up = 0
-        self.server_recv = 0
+        self.client_sent = 0               # L2 上行注入：REQ-CONNECT + REPORT
+        self.router_up = 0                 # 路由器转发给 Server 的 REPORT
+        self.server_recv = 0               # Server 收到的 REPORT
+        # 按内容分开的两个计数（UI 分色显示）：Orpah ID 签名上报不走 L2 计数，
+        # 但它**真的走空口和 UDP** —— 空口帧 / UDP 帧的总额里含它。
+        self.id_sent = 0                   # Client 注入的 ID-REPORT（含页面注入的攻击报文）
+        self.router_id_up = 0              # 路由器透传给 Server 的 ID-REPORT
         # 最近报文（按 seq 记，stage 点亮；最多 50 条）
         self.reports = {}
         self.order = []
@@ -234,6 +238,15 @@ class OrpahApp:
         self._remember(msg, "router")
         self._push_flow("up", msg, "router")
         self._emit("router", msg)
+
+    def _on_up_id(self, msg):
+        """Router 透传 ID-REPORT → Server（不占 L2 上行计数，单独计）。
+
+        ID 上报不进「L2 协议消息流」面板（那不是 L2 报文），只计数 + 发 SSE
+        （页面/日志能看到），与 `_on_id_report`（Server 验签结果）分开。
+        """
+        self.router_id_up += 1
+        self._emit("log", msg, dir="tx-id")
 
     def _on_down(self, msg):
         """Router 注入下行（回 Client：ACCESS-INFO/TRACKING-STATUS/ERROR）。"""
@@ -387,7 +400,8 @@ class OrpahApp:
         # 3) Router 桥（AP host 口 ⇄ UDP ⇄ Server；双向）
         self.router = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV,
                                    on_up=self._on_up, on_down=self._on_down,
-                                   on_found=self._on_found_router)
+                                   on_found=self._on_found_router,
+                                   on_up_id=self._on_up_id)
         if not self.router.start():
             print("[ui] Router 连不上 AP host 口，退出")
             return False
@@ -480,8 +494,19 @@ class OrpahApp:
         """生成一条已签 orpah-id-report 并注入上行；ts 可指定（演示超窗）。"""
         r = self._legit_id_report(ts=ts)
         self._last_id_report = r
-        self.client.send_id_report(r)
+        self._inject_id(r)
         return r
+
+    def _inject_id(self, report):
+        """注入一条 ID-REPORT 并计数（周期上报 / 重放 / 超窗 / 伪造都经此）。
+
+        计数放这里而不是 `client.send_id_report` 的各调用点：空口帧总额
+        (tx_sta) = L2 注入 + ID 注入，四处各计一次迟早漏一个 → 页面上对不上。
+        """
+        n = self.client.send_id_report(report)
+        if n > 0:
+            self.id_sent += 1
+        return n
 
     def spoof_attack(self, kind):
         """防 spoof 演示：造一条攻击报文并经**既有空口链路**上行 → (ok, info)。
@@ -505,7 +530,7 @@ class OrpahApp:
                 attacker=self.id_attacker, used_nonce=used_nonce)
         except Exception as e:
             return False, {"err": str(e)}
-        self.client.send_id_report(report)
+        self._inject_id(report)
         zh, en, _, _ = spoof.case_info(kind)
         return True, {"kind": kind, "zh": zh, "en": en,
                       "expect": expect, "note": note}
@@ -595,6 +620,9 @@ class OrpahApp:
             "client_sent": self.client_sent,
             "router_up": self.router_up,
             "server_recv": self.server_recv,
+            # 按内容分色显示的第二个维度（见 index.html 拓扑）
+            "id_sent": self.id_sent,
+            "router_id_up": self.router_id_up,
             "tx_sta": tx_sta, "rx_sta": rx_sta,
             "tx_ap": tx_ap, "rx_ap": rx_ap,
             "conn_a": conn_a, "conn_b": conn_b,
@@ -643,7 +671,7 @@ class OrpahApp:
         elif action == "unrevoke" and self.client:
             self.id_ks.unrevoke(self.client.sn)
         elif action == "replay" and self._last_id_report:
-            self.client.send_id_report(self._last_id_report)
+            self._inject_id(self._last_id_report)
         elif action == "stale":
             self._send_id_report(ts=int(time.time()) - 3600)
         elif action == "spoof":
