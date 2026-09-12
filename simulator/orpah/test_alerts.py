@@ -76,6 +76,59 @@ check("长未上报：启用/走失中的都报，停用/报废不报",
       [x["sn"] for x in a] == ["A", "D"])
 check("长未上报：带 gap 且等级 warn", a[0]["gap"] == 100 and a[0]["level"] == "warn")
 
+# ---- C 方案：按持续时长分级（2026-09-12）----------------------------------
+# 起步 > 30s 是 warn；沉默超过 NO_REPORT_CRIT_SEC（默认 300s）升 crit。
+NRC = alr.NO_REPORT_CRIT_SEC
+check("C：默认 no_report 升级阈值 300s", NRC == 300)
+check("C：默认 case_handled 升级阈值 48h", alr.CASE_HANDLED_CRIT_SEC == 172800)
+
+
+def lv(alerts, sn):
+    return [x["level"] for x in alerts if x.get("sn") == sn]
+
+
+a = alr.evaluate(regis(dev("A", last_seen=NOW - (NRC - 1))), case_mgr(), deque(), now=NOW)
+check("C：刚过起步但未到升级点 → warn", lv(a, "A") == ["warn"])
+a = alr.evaluate(regis(dev("A", last_seen=NOW - (NRC + 1))), case_mgr(), deque(), now=NOW)
+check("C：超过升级点 → crit", lv(a, "A") == ["crit"])
+a = alr.evaluate(regis(dev("A", last_seen=NOW - NRC)), case_mgr(), deque(), now=NOW)
+check("C：刚好等于升级点 → 仍 warn（用 > 比较）", lv(a, "A") == ["warn"])
+# 停用/报废即使沉默很久也不报（分级不改变“哪些设备该盯”）
+a = alr.evaluate(regis(dev("E", status=reg.STATUS_DISABLED, last_seen=NOW - 99999),
+                       dev("F", status=reg.STATUS_SCRAPPED, last_seen=NOW - 99999)),
+                 case_mgr(), deque(), now=NOW)
+check("C：分级不影响“盯谁”（停用/报废沉默很久也不报）", a == [])
+
+# ---- B + C 合用：接手后 24h warn，48h 升 crit ----
+HC = alr.CASE_HANDLED_SEC
+HCC = alr.CASE_HANDLED_CRIT_SEC
+
+def case_lv(alerts):
+    return [(x["kind"], x["level"]) for x in alerts]
+
+
+a = alr.evaluate(regis(), case_mgr(case("C001", handler="张警官",
+                                        handled_at=NOW - HC - 10)), deque(), now=NOW)
+check("B+C：接手后刚超 24h → warn", case_lv(a) == [("case_handled_overtime", "warn")])
+a = alr.evaluate(regis(), case_mgr(case("C001", handler="张警官",
+                                        handled_at=NOW - HCC - 10)), deque(), now=NOW)
+check("B+C：接手后超 48h → crit", case_lv(a) == [("case_handled_overtime", "crit")])
+
+# ---- 不该分级的两条：定性问题，一发生就是 crit（守住 A 方案的语义）----
+check("C：case_overtime（无人接手）仍是恒 crit",
+      [x["level"] for x in alr.evaluate(regis(), case_mgr(case("C001", created=NOW - 200)),
+                                         deque(), now=NOW)] == ["crit"])
+check("C：sig_fail_rate 仍是恒 crit",
+      [x["level"] for x in alr.evaluate(regis(), case_mgr(),
+                                         deque([rep(False)] * 5), now=NOW)] == ["crit"])
+
+# 分级与排序互动：crit 的 no_report 应排在 warn 的 no_report 之前
+a = alr.evaluate(regis(dev("A", last_seen=NOW - (NRC - 1)),        # warn
+                       dev("B", last_seen=NOW - (NRC + 1))),      # crit
+                 case_mgr(), deque(), now=NOW)
+check("C：排序 crit 在前（同 kind 不同等级也遵守）",
+      [(x["sn"], x["level"]) for x in a] == [("B", "crit"), ("A", "warn")])
+
 # 走失设备的告警单独确认（避免以后又被“非启用就不报”改回去）
 a_lost = alr.evaluate(regis(dev("D", status=reg.STATUS_LOST, last_seen=NOW - 100)),
                       case_mgr(), deque(), now=NOW)
@@ -249,6 +302,21 @@ check("env：B 未超新阈值则不报",
       b.evaluate(regis(), case_mgr(case("C001", handler="张警官",
                                         handled_at=NOW - 110)), deque(), now=NOW) == [])
 a = reload_with(ORPAH_ALERT_CASE_HANDLED_SEC=None)
+
+# C 的两个升级阈值也要能用环境变量改（并把“关闭分级”的途径测到：crit <= warn → 直接 crit）
+c = reload_with(ORPAH_ALERT_NO_REPORT_CRIT_SEC="120")
+check("env：C 的 no_report 升级阈值可覆盖", c.NO_REPORT_CRIT_SEC == 120)
+check("env：C 覆盖值切实生效（130s → crit）",
+      [x["level"] for x in c.evaluate(regis(dev("A", last_seen=NOW - 130)), case_mgr(),
+                                       deque(), now=NOW)] == ["crit"])
+check("env：C 覆盖值切实生效（110s → warn）",
+      [x["level"] for x in c.evaluate(regis(dev("A", last_seen=NOW - 110)), case_mgr(),
+                                       deque(), now=NOW)] == ["warn"])
+c = reload_with(ORPAH_ALERT_NO_REPORT_CRIT_SEC="10")     # 设得比起步阈值 30 还小
+check("env：crit 阈值 <= 起步阈值 → 直接 crit（相当于关掉分级）",
+      [x["level"] for x in c.evaluate(regis(dev("A", last_seen=NOW - 40)), case_mgr(),
+                                       deque(), now=NOW)] == ["crit"])
+a = reload_with(ORPAH_ALERT_NO_REPORT_CRIT_SEC=None)
 # 立案 300s 前：默认 180 会告警，改成 600 后不该告警
 check("env：覆盖值切实用于评估",
       a.evaluate(regis(), case_mgr(case("C001", created=NOW - 300)),
@@ -264,7 +332,8 @@ check("env：浮点阈值切实用于评估", a2 == [])
 
 a = reload_with(ORPAH_ALERT_CASE_OVERTIME_SEC=None, ORPAH_ALERT_SIG_FAIL_RATIO=None)
 check("env：清后恢复默认",
-      (a.CASE_OVERTIME_SEC, a.SIG_FAIL_RATIO, a.CASE_HANDLED_SEC) == (180, 0.5, 86400))
+      (a.CASE_OVERTIME_SEC, a.SIG_FAIL_RATIO, a.CASE_HANDLED_SEC,
+       a.NO_REPORT_CRIT_SEC, a.CASE_HANDLED_CRIT_SEC) == (180, 0.5, 86400, 300, 172800))
 
 print()
 if FAILS:

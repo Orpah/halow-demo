@@ -335,22 +335,36 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - 默认 `86400`（真实 24h）；演示（2s 一包）里不会自然发生，要看效果把 env 设小（如 `5`）。
 - 已 `found` / 已结案的案件不报；`handled_at` 缺失（老库/手工对象）回落到 `created`。
 
-未做：分级升级（C 方案，按持续时长升/降级）—— 见 `ROADMAP.md` §三。
+**按持续时长分级/升级（2026-09-12 用户定 C 方案）**：让“拖得越久越严重”能表达出来 ——
+原来是写死的等级（`no_report` 恒 warn、`case_overtime` 恒 crit）。只给**“沉默得越来越久”型**的两条
+加升级，因为它们的严重度真的随时间单调增长：
 
-规则（阈值可用**环境变量**覆盖，改了要重启；默认值是演示压缩时间，真实部署要调大）：
+| 规则 | 起步 | 升级为 `crit` |
+|---|---|---|
+| `no_report` | `> 30s` → `warn` | `> 300s`（`ORPAH_ALERT_NO_REPORT_CRIT_SEC`） |
+| `case_handled_overtime` | `> 24h` → `warn` | `> 48h`（`ORPAH_ALERT_CASE_HANDLED_CRIT_SEC`） |
+
+- **为何不给另外两条分级**：`case_overtime`（无人接手）与 `sig_fail_rate`（验签被拒）是**定性**问题，
+  一发生就是 `crit`；给它们加一段 warn 会把 A 方案刚解决的问题拿回来（刚超时先不报红）。
+- 两个升级阈值均可配；把升级阈值设得**比起步阈值还小/相等** → 一超起步就 `crit`
+  （等于把分级关掉，保留旧行为）。
+
+未做：Webhook/邮件通知、SSE 弹窗、RSSI 突变/校验位连续失败规则、页面展示当前阈值 —— 见 `ROADMAP.md` §三。
+
+规则（阈值可用**环境变量**覆盖，改了要重启；默认值有演示压缩也有真实时长，见下）：
 
 | kind | level | 条件 | 阈值 | 环境变量 |
 |---|---|---|---|---|
-| `no_report` | `warn` | **工作态**（启用 **或 走失中**）且**曾上报过**的设备，距上次上报超过 N 秒 | `30` | `ORPAH_ALERT_NO_REPORT_SEC` |
-| `case_overtime` | `crit` | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
-| `case_handled_overtime` | `warn` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` | `ORPAH_ALERT_CASE_HANDLED_SEC` |
-| `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
+| `no_report` | `warn` → `crit` | **工作态**（启用 **或 走失中**）且**曾上报过**的设备，距上次上报超过 N 秒 | `30` / 升级 `300` | `ORPAH_ALERT_NO_REPORT_SEC` / `ORPAH_ALERT_NO_REPORT_CRIT_SEC` |
+| `case_overtime` | `crit`（不分级） | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
+| `case_handled_overtime` | `warn` → `crit` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` / 升级 `172800` | `ORPAH_ALERT_CASE_HANDLED_SEC` / `ORPAH_ALERT_CASE_HANDLED_CRIT_SEC` |
+| `sig_fail_rate` | `crit`（不分级） | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
 
 ⚠ **默认值分两类，别看混**：
-- **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s、`case_overtime` 180s、
-  `sig_window` 5 条、`sig_fail_ratio` 0.5。
-- **真实时长**：`case_handled_overtime` 的 `86400`（= 24h）—— 真实世界里“接手后一天没找到”才算拖太久，
-  演示里不会自然发生；想现场看效果把它压小（如 `ORPAH_ALERT_CASE_HANDLED_SEC=5`）。
+- **演示压缩时间**（客户端 2s 一包，为了现场能看到效果）：`no_report` 30s（升级 300s）、
+  `case_overtime` 180s、`sig_window` 5 条、`sig_fail_ratio` 0.5。
+- **真实时长**：`case_handled_overtime` 的 `86400`（= 24h，升级 48h）—— 真实世界里“接手后一天没找到”
+  才算拖太久，演示里不会自然发生；想现场看效果把它压小（如 `ORPAH_ALERT_CASE_HANDLED_SEC=5`）。
 
 ⚠ `no_report` 为什么把**走失中**也算工作态（2026-09-12 修正）：走失者的追踪器正是最该盯的一台，
 它掉线（没电/出范围）往往就是“找不到人”的原因；原来只算“启用”，一旦立案（设备转 `lost`）
@@ -358,7 +372,8 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 - 环境变量与事件保留期限（`ORPAH_EVENT_RETENTION_DAYS`，见 §5）同一套机制：
   未设 / 空串 / 非法值 → 回退上表默认值。
-- 也可以在进程内覆盖：`alerts.evaluate(..., no_report_sec=…, case_overtime_sec=…,
+- 也可以在进程内覆盖：`alerts.evaluate(..., no_report_sec=…, no_report_crit_sec=…,
+  case_overtime_sec=…, case_handled_sec=…, case_handled_crit_sec=…,
   sig_window=…, sig_fail_ratio=…)`（单测用的就是这个入口）。
 - 例（想避免「刚立案 3 分钟就亮红点」的观感）：
   PowerShell `$env:ORPAH_ALERT_CASE_OVERTIME_SEC=600; python ui_server.py --port 8901`；

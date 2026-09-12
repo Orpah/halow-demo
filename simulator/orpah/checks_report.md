@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 14:20:04
-- git HEAD：`9e7e17d`
+- 时间：2026-09-12 14:24:24
+- git HEAD：`a39b97f`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（13/13 套件通过）
 
@@ -9,7 +9,7 @@
 
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
-| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
+| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.0s | 通过 |
 | 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
@@ -18,14 +18,14 @@
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 | L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
-| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.3s | 通过 |
+| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
 | L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.5s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.5s | 通过 |
+| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
 
 ## 关键输出
 
-### 运动/定位数据源 — PASS（0.1s）
+### 运动/定位数据源 — PASS（0.0s）
 
     == 1. 构造与几何 ==
     == 2. pos 确定性与周期性 ==
@@ -61,10 +61,10 @@
 
     PASS  长未上报：启用/走失中的都报，停用/报废不报
     PASS  长未上报：带 gap 且等级 warn
-    PASS  长未上报：走失中的追踪器掉线要报（2026-09-12 修正）
-    PASS  长未上报：停用的设备不报
-    PASS  长未上报：等于阈值不告警
-    PASS  走失超时：只报 open 的案件
+    PASS  C：默认 no_report 升级阈值 300s
+    PASS  C：默认 case_handled 升级阈值 48h
+    PASS  C：刚过起步但未到升级点 → warn
+    PASS  C：超过升级点 → crit
     PASS  env：清后恢复默认
     all alert tests passed
 
@@ -113,7 +113,7 @@
     Server 收到: 3 条  (sn 一致: True)
     结果: [PASS]
 
-### L2 消息流 — PASS（2.3s）
+### L2 消息流 — PASS（2.2s）
 
     --- 分支一：走失库未命中 sn=CN-WH01-9AF3C1D2 ---
     --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
@@ -141,7 +141,7 @@
       [PASS] ④ 变更推送仍生效且 REQ 不再多拉
     结果: [PASS]
 
-### 防 spoof 空口端到端 — PASS（1.5s）
+### 防 spoof 空口端到端 — PASS（1.6s）
 
     ==========================================================================
     ==========================================================================
