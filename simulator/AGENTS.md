@@ -108,6 +108,13 @@
     `CREATE TABLE IF NOT EXISTS` **不给老表补列** → `_init_db` 里用 `PRAGMA table_info` + `ALTER TABLE`
     兜迁移（否则老 `orpah.db` 写库报 `no such column`）。`test_alerts.py` 里的假 `Case` 必须带 `handler`
     （缺属性→测试直接崩；多给属性→掩盖真 AttributeError，两种都踩过）。
+  - **一键回归 = `orpah/run_checks.py`**（2026-09-12）：跑 `test_*.py` 七个离线套件 +
+    批量合规用例（`checks_batch.py`，表驱动：黄金样本/SN 边界/parse_sn/报文编解码），
+    报告写到 `orpah/checks_report.md`（**入库**，同 `host/test_results.txt` 惯例）。
+    **改完任何 orpah 代码先跑它**。两条硬规则：① 判定 = 退出码 0 **且** 输出无 `FAIL`/`Traceback`
+    （有些脚本自己 catch 异常还往下跑，只看退出码会漏）；② `--e2e`（L1/L2/L3/L3b/防 spoof）
+    **必须先在别的终端停掉 orpah-ui** —— demo 与它（:8901 那套端口）串扰会跑出假失败，
+    脚本自己也检查并拒绝（退出码 2）。
   - **查审计事件别读错字段**：`GET /api/ts/events` 返回的键是 **`rows`**（不是 `events`）；
     另注意它按 `etype`/`sn` 在**本地**过滤（值过滤不进 WHERE，见 §0 IoTDB 条），
     所以“某类事件为空”先确认字段名，再确认是不是真没写进去。

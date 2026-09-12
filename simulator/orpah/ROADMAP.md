@@ -281,7 +281,21 @@
     按「绿=可定位 / 橙=仅 1 台 / 灰=无观测」分色 + 顶部「有效 a% · 无效 b%」统计 +
     拉取后光标**落在首个可定位时刻** + 可选「跳过无效段」（跳过的缺口在轨迹里断开，不画假直线）。
     分段统计用 `pos.js` 的 `obsSegments()`（复用 `obsOfStation` 同一套判定）。
-- [ ] **重放/篡改自动化测试台**：批量用例（黄金样本、边界 SN、过期 nonce、错 CC）一键跑并出报告。
+- [x] **重放/篡改自动化测试台（2026-09-12 完成）**：`orpah/run_checks.py` 一键跑全部检查 + 出报告。
+  - **一键**：`python run_checks.py` 跑 7 个离线套件（`test_motion`/`test_keys`/`test_spoof`/`test_alerts`/`test_tsdb_audit`/`test_server`/`checks_batch`）；
+    加 `--e2e` 再跑 5 个端到端 demo（L1/L2/L3/L3b/防 spoof）；`--out` 指定报告路径；退出码可直接给 CI。
+  - **报告**：`checks_report.md`（入库，同 `host/test_results.txt` 的惯例）—— 含 git HEAD、解释器版本、
+    每套件结果/耗时/说明、关键输出行、失败套件的输出尾部 40 行。
+  - **新增表驱动批量用例 `checks_batch.py`**（补“边界取值”这一类，与按模块写的 `test_*.py` 互补）：
+    黄金样本（damm32=`B`/luhn32=`E`/mod97=`21`，并断言**里含 CC 就不对**、单字符改动/相邻换位必须被检出）、
+    SN 边界 28 条（空/超长/小写 CC/CC 位数/Crockford 排除字符 I L O U/中文/多段/缺分隔符/前导空格…）、
+    `sn_ok ⟺ sn_err is None` 一致性、`parse_sn` 四字段、报文编解码与以太网帧边界。
+    **算法全部调既有单一源**（`damm32`/`luhn32`/`mod97`/`orpah_proto`/`registry`），本文件只写用例表。
+  - **判定不只看出生码**：PASS = 退出码 0 **且** 输出里没有 `FAIL`/`Traceback`（双条件）——
+    有些脚本自己 catch 了异常还会往下跑。已用四个探针脚本实测：正常/静默 FAIL/非零退出/自己吞异常
+    四种情形判定全对。
+  - **⚠ e2e 端口守卫**：`demo_l1..l4`/`demo_spoof` 与 orpah-ui（:8901 那一套）**端口会串扰** ——
+    `--e2e` 前先检查 :8901，被占用就**直接拒绝（退出码 2）并提示先停 UI**，不制造“看起来失败”的假数据。
 
 ## 四、传输与真机适配
 
