@@ -24,13 +24,20 @@
   table.case th, table.case td { padding: 6px 10px; text-align: left; font-size: 13px; vertical-align: top; }
   table.case th { color: var(--mut); font-weight: 400; border-bottom: 1px solid var(--bd); }
   table.case td { border-bottom: 1px solid #21262d; }
-  .badge { padding: 2px 10px; border-radius: 10px; font-size: 12px; border: 1px solid; display: inline-block; white-space: nowrap; }
-  .c-open { color: var(--red); border-color: var(--red); }
-  .c-found { color: var(--org); border-color: var(--org); }
-  .c-closed { color: var(--grn); border-color: var(--grn); }
-  .c-revoked { color: var(--mut); border-color: var(--mut); }
+  /* 状态标签：**不加框**（加框像按钮，用户会以为能点）。只靠颜色区分，右侧留白靠 margin。
+     注意：共享 `style.css` 里也有 `.badge`（灰底 + 边框 + 圆角）——本页规则虽在其后生效，
+     但**只对本规则声明过的属性生效**，所以 padding/border/radius/background 必须显式清掉，
+     否则那几个属性会继续用共享样式里的值（表现就是「改了没生效」）。 */
+  .badge {
+    padding: 0; border: none; border-radius: 0; background: none;
+    font-size: 13px; white-space: nowrap;
+  }
+  .c-open { color: var(--red); }
+  .c-found { color: var(--org); }
+  .c-closed { color: var(--grn); }
+  .c-revoked { color: var(--mut); }
   /* 处置态（与状态正交的一维）：已接手/处置中 —— 用中性色，别跟“走失中”的红抢注意力 */
-  .c-handling { color: var(--acc); border-color: var(--acc); margin-left: 6px; }
+  .c-handling { color: var(--acc); margin-left: 10px; }
   .person-name { font-weight: 600; }
   .btn.sm { padding: 2px 8px; font-size: 12px; margin: 1px 0; }
   .btn.danger { color: var(--red); border-color: var(--red); }
@@ -39,12 +46,15 @@
   .devs { font-size: 12px; line-height: 1.6; }
   .hint.err { color: var(--red); }
   .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-  .toolbar input, .toolbar select {
+  .toolbar input:not([type="checkbox"]), .toolbar select {
     background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
     border-radius: 6px; padding: 4px 10px; font-size: 13px;
     font-family: "Cascadia Code", Consolas, monospace;
   }
-  .toolbar input { width: 210px; }
+  /* 搜索框宽度只管文本输入 —— 勾选框别跟着变 210px（否则勾选框与文字之间一大片空白） */
+  .toolbar input:not([type="checkbox"]) { width: 210px; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .toolbar input[type="checkbox"] { width: auto; margin: 0; }
   .ev-toggle { color: var(--acc); border-color: var(--bd); }
   .row input {
     background: #0d1117; color: var(--txt); border: 1px solid var(--bd);
