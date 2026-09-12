@@ -12,6 +12,7 @@ alerts.py — 告警规则引擎（供页面红点消费）
 
       ORPAH_ALERT_NO_REPORT_SEC       长未上报（秒，默认 30）
       ORPAH_ALERT_CASE_OVERTIME_SEC   走失超时（秒，默认 180）
+      ORPAH_ALERT_CASE_HANDLED_SEC    接手后仍未被发现（秒，默认 86400 = 24 小时）
       ORPAH_ALERT_SIG_WINDOW          签名失败率窗口（条，默认 5）
       ORPAH_ALERT_SIG_FAIL_RATIO      签名失败率阈值（0~1，默认 0.5）
 
@@ -23,14 +24,23 @@ alerts.py — 告警规则引擎（供页面红点消费）
   由前端本地化 —— 后端不拼中文/英文，免得又变成"后端文案不跟语言走"。
 - 时间戳单位统一为**秒**（与 `registry.touch` / `cases.mark` 一致）。
 
-已实现（第一批 3 条）：
-    no_report       启用中的设备超过 no_report_sec 无上报
-    case_overtime   案件立案超过 case_overtime_sec 仍未发现**且无人接手**（只算 open；已 found 不算）
-    sig_fail_rate   最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
+已实现（第一批 3 条 + B 方案 1 条）：
+    no_report               启用中的设备超过 no_report_sec 无上报
+    case_overtime           案件立案超过 case_overtime_sec 仍未发现**且无人接手**（只算 open；已 found 不算）
+    case_handled_overtime   已接手的案件，距**接手时刻**超过 case_handled_sec 仍未发现（B 方案）
+    sig_fail_rate           最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
 
 **处置态（2026-09-12 用户定 A 方案）**：`case_overtime` 额外要求「无人接手」（`case.handler` 空）——
-案件一旦有人接手就转入“处置中”跟踪、不再占红点；否否则只要案件还开着就永远 crit，
+案件一旦有人接手就转入“处置中”跟踪、不再占红点；否则只要案件还开着就永远 crit，
 红点恒亮被淹没（看不出新旧，也分不出“刚超时没人管”与“已在找人”）。
+
+**时长上限（2026-09-12 用户定 B 方案）**：A 方案有个反过来滞点 —— “已接手”一旦成立就
+永不再报，案子被认领后搁置（人没找着、也没人再管）就完全静默。故加
+`case_handled_overtime`：**从接手时刻**起再超 `case_handled_sec`（默认 24h）仍未被发现 → 再提醒一次。
+- 级别用 **warn 而非 crit**：它是“有人在办、只是拖太久”的提醒，不应盖过“没人接”的 crit。
+- `since` = **接手时刻**（不是立案时刻）—— 页面「持续 X」要读成“接手后多久还没找到”。
+- 默认 24h 是**真实时长**，演示（2s 一包）里不会自然发生；要看效果请把
+  `ORPAH_ALERT_CASE_HANDLED_SEC` 设小（例：`60`）。
 
 第二批可加：RSSI 突变、校验位连续失败（需要历史序列，本模块暂不做）。
 """
@@ -62,6 +72,7 @@ def _env_float(name, default):
 
 NO_REPORT_SEC = _env_int("ORPAH_ALERT_NO_REPORT_SEC", 30)        # 超过这么久没上报 → 告警
 CASE_OVERTIME_SEC = _env_int("ORPAH_ALERT_CASE_OVERTIME_SEC", 180)  # 立案后这么久还没发现
+CASE_HANDLED_SEC = _env_int("ORPAH_ALERT_CASE_HANDLED_SEC", 86400)  # 接手后这么久还没发现（B）
 SIG_WINDOW = _env_int("ORPAH_ALERT_SIG_WINDOW", 5)              # 签名失败率统计窗口（条）
 SIG_FAIL_RATIO = _env_float("ORPAH_ALERT_SIG_FAIL_RATIO", 0.5)  # 窗口内被拒比例超过它 → 告警
 
@@ -81,6 +92,7 @@ def evaluate(registry, cases, id_reports, now=None, **th):
     now = int(now if now is not None else time.time())
     no_rep = th.get("no_report_sec", NO_REPORT_SEC)
     case_ov = th.get("case_overtime_sec", CASE_OVERTIME_SEC)
+    case_handled = th.get("case_handled_sec", CASE_HANDLED_SEC)
     win = th.get("sig_window", SIG_WINDOW)
     fail_ratio = th.get("sig_fail_ratio", SIG_FAIL_RATIO)
     out = []
@@ -96,14 +108,26 @@ def evaluate(registry, cases, id_reports, now=None, **th):
                               "alert_no_report", rec.last_seen,
                               sn=rec.sn, gap=gap))
 
-    # 2) 走失超时：只有「还没被发现**且无人接手**」的 open 案件算超时。
-    #    为什么要加「无人接手」（2026-09-12 用户定 A 方案）：原来只要案件还 open 就永远 crit，
-    #    红点恒亮被淹没（看不出新旧），且「刚超时没人管」与「已在找人」分不出来。
-    #    现在点了「已接手」→ 本条告警消失（案件转“处置中”继续跟，时长仍累计）。
+    # 2) 走失案件：只看 open（已 found 的不算），分两支 ——
+    #    ① 无人接手（A 方案）：「刚超时没人管」最严重 → crit。
+    #    ② 已接手但太久没找到（B 方案）：「有人在办、拖太久」→ warn 提醒。
+    #    为什么要分：只做 ① 会让「已接手」变成永不再报（案子被认领后搁置就完全静默）；
+    #    只做 ② 又会让「没人管」淹没在“已接手”里。两条一起才既不恒亮、又不会静默。
     for c in cases.open_cases():
         if c.status != cs.CASE_OPEN:      # 常量在 cases 模块上，不在 CaseManager 实例上
             continue
-        if c.handler:                     # 已有人接手 → 不算告警
+        if c.handler:
+            # B 方案（2026-09-12）：已接手 ≠ 永不再报 —— 从**接手时刻**起再超
+            # case_handled_sec 仍未被发现，则再提醒一次（否则案子被认领后搁置就完全静默）。
+            # 起点用 handled_at（缺则回落到 created，兼容老库/手工对象），
+            # 级别 warn：有人在办、只是拖太久，不该盖过“没人接手”的 crit。
+            since_h = int(c.handled_at or c.created)
+            gap_h = now - since_h
+            if gap_h > case_handled:
+                out.append(_alert("case_handled_overtime", LEVEL_WARN, c.case_id,
+                                  "alert_case_handled_overtime", since_h,
+                                  case_id=c.case_id, person_id=c.person_id,
+                                  handler=c.handler, gap=gap_h))
             continue
         gap = now - int(c.created)
         if gap > case_ov:

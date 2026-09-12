@@ -326,14 +326,24 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 点「标记已接手」（`POST /api/cases {action:"assign"}`）→ 本条告警消失，案件转入「处置中」继续跟
 （时长照常累计、案件页可见）；「取消接手」→ 告警回来。
 **告警文案也跟着改了**（`alert_case_overtime` 加了“且无人接手”），否则会让人以为已接手还在报警。
-未做：时长上限（B 方案，认领后仍超 24h 再提醒）、分级升级（C 方案）—— 见 `ROADMAP.md` §三。
+
+**时长上限（2026-09-12 用户定 B 方案）**：A 方案有个反向滞点 —— 「已接手」一旦成立就**永不再报**，
+案子被认领后搁置（人没找着、也没人再管）就完全静默。故加 `case_handled_overtime`：
+从**接手时刻**（`Case.handled_at`）起再超 N 秒仍未被发现 → 再提醒一次。
+- 级别 **`warn`**（“有人在办、只是拖太久”的提醒），不盖过“没人接手”的 `crit`。
+- `since` = **接手时刻**（不是立案时刻）→ 页面「持续 X」读作“接手后多久还没找到”。
+- 默认 `86400`（真实 24h）；演示（2s 一包）里不会自然发生，要看效果把 env 设小（如 `5`）。
+- 已 `found` / 已结案的案件不报；`handled_at` 缺失（老库/手工对象）回落到 `created`。
+
+未做：分级升级（C 方案，按持续时长升/降级）—— 见 `ROADMAP.md` §三。
 
 规则（阈值可用**环境变量**覆盖，改了要重启；默认值是演示压缩时间，真实部署要调大）：
 
 | kind | level | 条件 | 阈值 | 环境变量 |
 |---|---|---|---|---|
 | `no_report` | `warn` | 启用中且**曾上报过**的设备，距上次上报超过 N 秒 | `30` | `ORPAH_ALERT_NO_REPORT_SEC` |
-| `case_overtime` | `crit` | `open` 状态的案件立案超过 N 秒仍未发现 | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
+| `case_overtime` | `crit` | `open` 状态的案件，立案超过 N 秒仍未发现 **且无人接手** | `180` | `ORPAH_ALERT_CASE_OVERTIME_SEC` |
+| `case_handled_overtime` | `warn` | `open` 且**已有接手人**，距**接手时刻**超过 N 秒仍未发现（B 方案） | `86400` | `ORPAH_ALERT_CASE_HANDLED_SEC` |
 | `sig_fail_rate` | `crit` | 最近 N 条签名上报中，被拒比例 > 比例阈值 | `5` 条 / `0.5` | `ORPAH_ALERT_SIG_WINDOW` / `ORPAH_ALERT_SIG_FAIL_RATIO` |
 
 - 环境变量与事件保留期限（`ORPAH_EVENT_RETENTION_DAYS`，见 §5）同一套机制：
@@ -350,8 +360,8 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - `msg` = **i18n 键**（不是成品文案）；页面用 `T(msg)` 取模板，再用告警对象里
   同名字段替换 `{占位符}`（`gap` 会先按界面语言格式化成时长，最多两段：
   中文 `10天2小时`/`10小时13分钟`/`3分20秒`/`45秒`，英文 `10d2h`/`10h13m`/`3m20s`/`45s`）。
-- `since` = 告警起算时间（设备用 `last_seen`、案件用 `created`、签名用首条样本时间），
-  页面显示为「持续 X」。
+- `since` = 告警起算时间（设备用 `last_seen`、案件 `case_overtime` 用 `created`、
+  `case_handled_overtime` 用 `handled_at`、签名用首条样本时间），页面显示为「持续 X」。
 - 排序：`crit` 先于 `warn`，同级按 `since` 升序。
 - 阈值未满样本时不告警（如签名样本不足 `sig_window` 条）；设备从未上报过、
   或状态非「启用」的，不参与 `no_report`。
