@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 14:17:37
-- git HEAD：`b8ecd1f`
+- 时间：2026-09-12 14:20:04
+- git HEAD：`9e7e17d`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（13/13 套件通过）
 
@@ -9,23 +9,23 @@
 
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
-| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.0s | 通过 |
+| 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
 | 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
 | 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
-| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
+| L2 消息流 | `demo_l2.py` | ✅ PASS | 2.3s | 通过 |
 | L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
-| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.6s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
+| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.5s | 通过 |
+| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.5s | 通过 |
 
 ## 关键输出
 
-### 运动/定位数据源 — PASS（0.0s）
+### 运动/定位数据源 — PASS（0.1s）
 
     == 1. 构造与几何 ==
     == 2. pos 确定性与周期性 ==
@@ -76,7 +76,7 @@
       OK   留痕：ts_src=device（时间来自设备）
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.6s）
+### IoTDB 审计/时间窗 — PASS（0.5s）
 
     == 1. actor 字段 ==
     == 2. query_events 回读 actor ==
@@ -107,13 +107,13 @@
       OK   parse_eth_frame：ethertype 不符 → None
     批量用例：全部通过
 
-### L1 端到端 — PASS（1.4s）
+### L1 端到端 — PASS（1.3s）
 
     === ORPAH L1 验收 ===
     Server 收到: 3 条  (sn 一致: True)
     结果: [PASS]
 
-### L2 消息流 — PASS（2.2s）
+### L2 消息流 — PASS（2.3s）
 
     --- 分支一：走失库未命中 sn=CN-WH01-9AF3C1D2 ---
     --- mark 走失 sn=CN-WH01-9AF3C1D2（Server 下发 LOST-TABLE）---
@@ -133,7 +133,7 @@
       [PASS] F 非法 SN → FORMAT-ERR 且不计数
     结果: [PASS]
 
-### L3b 主动拉表 — PASS（1.6s）
+### L3b 主动拉表 — PASS（1.5s）
 
     --- 模拟 Router 重启（清空本地缓存 + 未同步）---
     --- Server untrack sn=CN-WH01-9AF3C1D2（变更推送，Router 无需再拉）---
@@ -141,7 +141,7 @@
       [PASS] ④ 变更推送仍生效且 REQ 不再多拉
     结果: [PASS]
 
-### 防 spoof 空口端到端 — PASS（1.6s）
+### 防 spoof 空口端到端 — PASS（1.5s）
 
     ==========================================================================
     ==========================================================================

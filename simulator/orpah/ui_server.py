@@ -683,8 +683,10 @@ class OrpahApp:
         elif action == "stale":
             self._send_id_report(ts=int(time.time()) - 3600)
         elif action == "spoof":
+            # 响应**始终带 ok**（2026-09-12 review）：以前失败路径只回 {"err":…}，
+            # 调用方得靠“没有 ok”推断失败；现在显式 false。前端 `if (!info.ok)` 两种都能工作。
             ok, info = self.spoof_attack(kind or "legit")
-            return info if not ok else dict({"ok": True}, **info)
+            return dict({"ok": bool(ok)}, **info)
         return {"ok": True}
 
     def stop_all(self):
