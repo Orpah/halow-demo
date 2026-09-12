@@ -34,7 +34,8 @@ const EXPORT = ["rssiFromDist", "distFromRssi", "trilaterate", "wlsLocate", "ell
                 "ellipsePoints", "median", "qualityOf", "layoutCond", "gdopGrade",
                 "resGrade", "latestAt", "obsOfStation", "obsAt", "kalmanTrack",
                 "pathJitter", "obsSegments", "segIndexAt", "nextValidAt",
-                "truthAt", "errorsOf", "quantileOf", "cdfOf"];
+                "truthAt", "errorsOf", "quantileOf", "cdfOf",
+                "gdopOf", "suggestStation"];
 const src = fs.readFileSync(process.argv[2], "utf8")
           + "\nmodule.exports = {" + EXPORT.join(",") + "};\n";
 const m = { exports: {} };
@@ -137,6 +138,68 @@ ck("cdfOf：pts 升序且累积到 1（可直接画 CDF 曲线）",
    c.pts.length === 4 && near(c.pts[0][0], 1) && near(c.pts[3][1], 1));
 ck("cdfOf：空输入 → 各项 null（不许给 0 假装量过）",
    P.cdfOf([]).n === 0 && P.cdfOf([]).p50 === null && P.cdfOf([NaN]).max === null);
+
+/* ---- GDOP 单一实现 + 补站位建议（页面“几何不行”时给一句可执行的） ---- */
+const xy = (arr) => arr.map(p => ({ s: p, dist: 1 }));
+ck("gdopOf 与 qualityOf 同源（对同一组点算出同一个 GDOP）",
+   near(P.gdopOf({ x: 5, y: 5 }, anchors), P.qualityOf(anchors.map(a => ({ s: a, dist: 1 })), { x: 5, y: 5 }).gdop, 1e-12));
+ck("gdopOf：站位 < 2 / 与站位重合 → null（不可判定，不给大数）",
+   P.gdopOf({ x: 0, y: 0 }, [{ x: 0, y: 0 }]) === null);
+
+/* 三站完全共线 → 解不出来；建议点必须**离开那条直线**，且加入后条件数变有限 */
+const col = [{ x: -20, y: 0 }, { x: 0, y: 0 }, { x: 20, y: 0 }];
+const advCol = P.suggestStation(xy(col), null);
+ck("补站位：三站共线（无估计点）→ 给出建议", advCol && advCol.need, JSON.stringify(advCol));
+ck("补站位：共线场景判据用条件数（scoreBy=cond）、reason=collinear",
+   advCol.scoreBy === "cond" && advCol.reason === "collinear");
+ck("补站位：共线前条件数 ∞ → 建议点让条件数变有限",
+   advCol.condBefore === Infinity && isFinite(advCol.condAfter), JSON.stringify(advCol));
+ck("补站位：共线时建议点**离开直线**（|y| > 5 m）",
+   Math.abs(advCol.y) > 5, `建议 y=${advCol.y}`);
+ck("补站位：建议点不贴在已有站位上（minDist ≥ 跨度×0.25）",
+   advCol.minDist >= 40 * 0.25 - 1e-9, `minDist=${advCol.minDist}`);
+
+/* 有估计点时改用 GDOP 判据，并且必须真的降下来 */
+const advG = P.suggestStation(xy(col), { x: 0, y: 12 });
+ck("补站位：有估计点 → 判据换成 gdop（scoreBy=gdop）",
+   advG && advG.scoreBy === "gdop", JSON.stringify(advG));
+ck("补站位：建议点让该点 GDOP 下降",
+   advG.gdopAfter < advG.gdopBefore, `${advG.gdopBefore} → ${advG.gdopAfter}`);
+
+/* 几何已经够好 → 不给建议（而不是无话可说/乱指一处） */
+const good = [{ x: 0, y: 0 }, { x: 30, y: 0 }, { x: 0, y: 26 }];
+ck("补站位：几何够好（好三角 + 估计点在中心）→ null（无需补）",
+   P.suggestStation(xy(good), { x: 10, y: 9 }) === null);
+
+/* 两点：两台本来就只能定一条线（布局矩阵秩 1）→ 条件数 ∞ = 几何退化，
+   建议必须离开两点连线（不能用“只有两台”当理由就去指一个在连线上的点） */
+const two = [{ x: -20, y: 0 }, { x: 20, y: 0 }];
+const adv2 = P.suggestStation(xy(two), null);
+ck("补站位：只有两点 → reason=collinear（秩退化）且建议离开连线",
+   adv2 && adv2.reason === "collinear" && Math.abs(adv2.y) > 5, JSON.stringify(adv2));
+ck("补站位：只有两点时条件数 = ∞（不是 0、也不是“算不出来就跳过”）",
+   adv2.condBefore === Infinity && isFinite(adv2.condAfter),
+   `before=${adv2.condBefore} after=${adv2.condAfter}`);
+ck("补站位：无估计点时 gdopBefore/After 如实给 null（**不是 0**——0 会被误读为“完美几何”）",
+   adv2.gdopBefore === null && adv2.gdopAfter === null);
+
+/* 一个站位：连方向都定不了 → 先说“凑够有观测的站位”，不编坐标 */
+const adv1 = P.suggestStation(xy([{ x: 0, y: 0 }]), null);
+ck("补站位：只有一个站位 → reason=too_few 且**不给坐标**（不编）",
+   adv1 && adv1.need && adv1.reason === "too_few" && adv1.x === null && adv1.y === null);
+ck("补站位：无站位 → null", P.suggestStation([], null) === null);
+
+/* 无解但几何不弱（距离环不相交）= 测量不自洽，不是摆位问题 → 不给建议 */
+const wide = [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 20, y: 35 }];
+ck("补站位：无解但条件数正常（距离环不相交）→ 不给摆位建议（别误导去搬站位）",
+   P.suggestStation(xy(wide), null) === null);
+
+/* 确定性：纯几何搜索，同样输入必须给出同样结果（页面每 2s 重算，不能抖） */
+const r1 = P.suggestStation(xy(col), { x: 0, y: 12 });
+const r2 = P.suggestStation(xy(col), { x: 0, y: 12 });
+ck("补站位：确定性（两次调用逐位相同）", JSON.stringify(r1) === JSON.stringify(r2));
+ck("补站位：坐标取到 0.1 m（现场可照读）",
+   Math.abs(r1.x * 10 - Math.round(r1.x * 10)) < 1e-9);
 
 console.log("");
 if (fails.length) {

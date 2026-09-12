@@ -47,7 +47,7 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
 | 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / 设备时钟 / **能力声明不一致**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
 | 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
-| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py` |
+| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** + **补站位建议（几何不行时给可执行坐标）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py`（43 条） |
 | 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据；长基线才给漂移，原因可见：基线不足/噪声）③**设备自报能力位 `cap.rtc`**（三态；已签声明防篡改；无 RTC ⇒ 一律服务器时刻且不喂估计器；声明有 RTC 却给不出可用时间 → `id_cap_mismatch` 告警） | `orpah_proto`（`effective_ts`/`cap_of`/`rtc_of`） / `clock.py`（`ClockTracker`） | `test_clock.py`（88 条）+ `test_server.py`（28 条）+ `test_alerts.py` + `demo_clock.py` + 首页「上报控制」能力下拉/ts 置 0 |
 | 抓包解析 / 双源对照（pcap → ORPAH 报文；与 UDP 侧计数对差） | `capture.py`（解析复用 `orpah_proto` 单一源） | `test_capture.py` |
 | 存储：SQLite（元数据）+ IoTDB（时序/事件） | `registry`/`cases`/`keystore`/`stations` + `tsdb.py` | `test_tsdb_audit.py` |

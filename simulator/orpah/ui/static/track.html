@@ -180,6 +180,7 @@
     <div><span class="k" data-i18n="tk_lab_ell">95% 置信：</span><span id="stEll">-</span></div>
     <div><span class="k" data-i18n="tk_lab_rad">搜索半径：</span><span id="stRad">-</span></div>
     <div><span class="k" data-i18n="tk_lab_used">参与定位：</span><span id="stUsed">-</span></div>
+    <div><span class="k" data-i18n="tk_lab_advice">建议补站位：</span><span id="stAdvice">-</span></div>
   </div>
   <p class="hint" id="hint3" data-i18n="tk_hint3">蓝方块=测点、绿线=真实轨迹、红线=估计轨迹、绿叉=真实位置、红叉=定位估计。</p>
 </section>
@@ -289,7 +290,7 @@ function stepOnce() {
    底图源列表 / 条款说明 / 基点与坐标换算 / **离线回落**都在 **map.js**（单一源，与回放页共用；
    那是合规相关的东西，抄两份迟早漂移）。本页只保留自己的图层管理。 */
 let lmap = null, lTruePath = null, lEstPath = null, lTrueMarker = null, lEstMarker = null, lRouters = [];
-let lRings = [], lEstLoc = null, lEllipse = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计 / 95% 置信椭圆
+let lRings = [], lEstLoc = null, lEllipse = null, lAdvice = null, mapSig = "";   // 真实模式地图图层：距离环 / 定位估计 / 95% 置信椭圆 / 建议补的站位
 
 /* 地图上的测点来源：模拟模式 = 测点表；真实模式 = 站位表。
    不区分模式的话，真实模式地图会画出模拟模式的默认测点（而且不会报错）。 */
@@ -327,6 +328,7 @@ function ensureMap() {
   lRings = [];
   lEstLoc = null;        // 懒创建（Path 没有 setOpacity，用 add/remove 控制显隐）
   lEllipse = null;       // 95% 置信椭圆（同上）
+  lAdvice = null;        // 建议补的站位（同上）
   refreshRouters();
 }
 function drawMap() {
@@ -334,6 +336,7 @@ function drawMap() {
   lTrueMarker.setOpacity(1); lEstMarker.setOpacity(1);
   if (lEstLoc) { lmap.removeLayer(lEstLoc); lEstLoc = null; }
   if (lEllipse) { lmap.removeLayer(lEllipse); lEllipse = null; }
+  if (lAdvice) { lmap.removeLayer(lAdvice); lAdvice = null; }
   lRings.forEach(r => r.remove()); lRings = [];
   if ($("showTrue").checked) lTruePath.setLatLngs(trueHist.map(p => toLatLng(p.x, p.y)));
   lEstPath.setLatLngs(estHist.map(p => toLatLng(p.x, p.y)));
@@ -656,6 +659,35 @@ function winText(s) {
   return fmtTime(s.t0) + " → " + (s.t1 ? fmtTime(s.t1) : T("tk_st_now"));
 }
 
+/* 建议补站位的文案（`adv` = pos.js `suggestStation` 的返回，或 null）。
+   四种情形分开说，不合并出一句模糊话：
+     · 有坐标 → 报坐标 + 距最近站位 + 改善幅度（∞ 显式显示，不写 0）；
+     · too_few → 先“凑够有观测的站位”（一个站位连方向都定不了）；
+     · null + 有估计点 → 几何够好，无需补；
+     · null + 无估计点 → 几何不弱，问题在测量（距离环不相交），别让人去搬站位。 */
+function fmtCond(v) { return v === null || v === undefined ? "?" : (isFinite(v) ? v.toFixed(2) : "∞"); }
+function renderAdvice(adv, est) {
+  const el = $("stAdvice");
+  if (!el) return;
+  if (!adv) {
+    el.textContent = est ? T("tk_adv_none") : T("tk_adv_notgeom");
+    el.className = est ? "v-ok" : "v-err";
+    return;
+  }
+  if (adv.reason === "too_few") {
+    el.textContent = T("tk_adv_few").replace("{n}", adv.have);
+    el.className = "v-err";
+    return;
+  }
+  const metric = adv.scoreBy === "gdop"
+    ? "GDOP " + fmtCond(adv.gdopBefore) + " → " + fmtCond(adv.gdopAfter)
+    : T("tk_cond_lbl") + " " + fmtCond(adv.condBefore) + " → " + fmtCond(adv.condAfter);
+  el.textContent = T("tk_adv_spot")
+    .replace("{x}", adv.x.toFixed(1)).replace("{y}", adv.y.toFixed(1))
+    .replace("{d}", adv.minDist.toFixed(1)).replace("{m}", metric);
+  el.className = (adv.reason === "collinear") ? "v-bad" : "v-err";
+}
+
 /* 不整表重建（loadReal 每 2s 轮询）：只在站位集合变化时重建行，
    否则就地改单元格与输入框（用户正在编辑的 input 不覆盖）。 */
 function renderStations() {
@@ -732,10 +764,16 @@ function renderStations() {
     setInp(".stx", s.x);
     setInp(".sty", s.y);
   });
-  drawLoc(obs, est, wls);
+  // 补站位建议（pos.js 的纯函数）：几何不行时给一句可执行的「往 (x, y) 再放一台」。
+  // **必须在 drawLoc 之前算**（它要传给画布画标记）—— 曾经写在 drawLoc 之后，
+  // `const adv` 的暂时性死区让整个 renderStations 抛 ReferenceError（页面全 "-"，实测抓到）。
+  // 注意 null 有两种含义，页面能分：几何够好（有估计点）/ 几何不弱但解不出来（测量不自洽）。
+  const adv = suggestStation(obs, est);
+  renderAdvice(adv, est);
+  drawLoc(obs, est, wls, adv);
   // 地图视图（真实模式）：标记变了就重画（含基点变化），并刷新距离环/估计
   if (lmap && mapSigOf() !== mapSig) refreshRouters();
-  if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est, wls);
+  if (dsMode === "real" && $("view").value === "map") drawMapLoc(obs, est, wls, adv);
   $("stUsed").textContent = T("tk_st_used_fmt")
     .replace("{n}", obs.length).replace("{t}", stations.length);
   // 定位结果 + 质量：没有质量指标时，退化输入（如恒定 RSSI）会给出看着正常、实际无意义的坐标
@@ -808,7 +846,7 @@ function renderStations() {
 }
 
 /* 站位 + 距离环 + 定位估计（真实模式专用画布，不碰模拟模式的 draw()） */
-function drawLoc(obs, est, wls) {
+function drawLoc(obs, est, wls, adv) {
   const c = $("canvasLoc"), ctx = c.getContext("2d");
   const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
   ctx.clearRect(0, 0, W, H);
@@ -854,11 +892,21 @@ function drawLoc(obs, est, wls) {
     }
     cross(ctx, cx + est.x * SCALE, cy - est.y * SCALE, "#f85149");
   }
+  // 建议补的站位：空心虚线方块（琥珀色）+ 标签；无坐标（too_few）时不画
+  if (adv && adv.x !== null && adv.y !== null) {
+    const ax = cx + adv.x * SCALE, ay = cy - adv.y * SCALE;
+    ctx.save();
+    ctx.strokeStyle = "#d29922"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+    ctx.strokeRect(ax - 6, ay - 6, 12, 12);
+    ctx.restore();
+    ctx.fillStyle = "#d29922"; ctx.font = "11px monospace";
+    ctx.fillText(T("tk_adv_mark"), ax + 9, ay + 4);
+  }
 }
 
 /* 真实模式地图视图：站位 + 距离环（半径 = 估计距离，米）+ 定位估计。
    同时清掉模拟轨迹/标记 —— 它们在地图上没有意义。 */
-function drawMapLoc(obs, est, wls) {
+function drawMapLoc(obs, est, wls, adv) {
   ensureMap();
   lTruePath.setLatLngs([]); lEstPath.setLatLngs([]);
   lTrueMarker.setOpacity(0); lEstMarker.setOpacity(0);
@@ -888,6 +936,19 @@ function drawMapLoc(obs, est, wls) {
     }
   } else if (lEstLoc) {
     lmap.removeLayer(lEstLoc); lEstLoc = null;
+  }
+  // 建议补的站位（地图视图）：空心虚线圆点，与画布上那个琥珀方块同一含义
+  if (adv && adv.x !== null && adv.y !== null) {
+    const ll = toLatLng(adv.x, adv.y);
+    if (!lAdvice) {
+      lAdvice = L.circleMarker(ll, {
+        color: "#d29922", radius: 9, weight: 2, dashArray: "4 3", fill: false,
+      }).addTo(lmap);
+    } else {
+      lAdvice.setLatLng(ll);
+    }
+  } else if (lAdvice) {
+    lmap.removeLayer(lAdvice); lAdvice = null;
   }
 }
 

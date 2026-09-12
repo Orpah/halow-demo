@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 20:55:48
-- git HEAD：`e62f2cb`
+- 时间：2026-09-12 21:23:47
+- git HEAD：`9e12602`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（18/18 套件通过）
 
@@ -10,19 +10,19 @@
 | 套件 | 脚本 | 结果 | 耗时 | 说明 |
 |---|---|---|---|---|
 | 运动/定位数据源 | `test_motion.py` | ✅ PASS | 0.1s | 通过 |
-| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.1s | 通过 |
+| 密钥生命周期 | `test_keys.py` | ✅ PASS | 0.2s | 通过 |
 | 防 spoof（离线逐条） | `test_spoof.py` | ✅ PASS | 0.1s | 通过 |
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.5s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
-| UI 服务器契约 | `test_server.py` | ✅ PASS | 0.6s | 通过 |
-| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.7s | 通过 |
+| UI 服务器契约 | `test_server.py` | ✅ PASS | 0.7s | 通过 |
+| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
 | 降级策略（§8.2 选级 / §8.3 服务端） | `test_levels.py` | ✅ PASS | 0.1s | 通过 |
 | 抓包解析 / 双源对照 | `test_capture.py` | ✅ PASS | 0.1s | 通过 |
 | 设备时钟漂移（长基线） | `demo_clock.py` | ✅ PASS | 0.1s | 通过 |
 | 定位内核（pos.js，node 跑原文） | `test_posjs.py` | ✅ PASS | 0.1s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
 | L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
 | L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
 | L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.1s | 通过 |
@@ -41,7 +41,7 @@
       OK   truth_at�������� �� �ձ���ҳ����ʾ�������á������� 0��
     ȫ��ͨ��
 
-### 密钥生命周期 — PASS（0.1s）
+### 密钥生命周期 — PASS（0.2s）
 
     == 1. ǩ�����ݵȣ� ==
     == 2. ��ǩ���� 1 ���� ==
@@ -91,7 +91,7 @@
       OK   并发：4 写 × 50 条 + 2 读线程 → 无异常且一条不丢
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.5s）
+### IoTDB 审计/时间窗 — PASS（0.7s）
 
     == 1. actor �ֶ� ==
     == 2. query_events �ض� actor ==
@@ -102,7 +102,7 @@
       OK   �Ϸ�ֵ��Ч
     ȫ��ͨ��
 
-### UI 服务器契约 — PASS（0.6s）
+### UI 服务器契约 — PASS（0.7s）
 
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=high accepted=True
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=high accepted=True
@@ -110,10 +110,10 @@
     [server] [id 3] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=high accepted=True
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=high accepted=True
     [server] [id 1] ORPAH-ID-REPORT <- 127.0.0.1:12345: sn=CN-WH01-9AF3C1D2 alg=ES256 level=0 trust=- accepted=False
-    Ran 28 tests in 0.447s
+    Ran 28 tests in 0.491s
     OK
 
-### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.0s）
+### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
 
     == 1. 黄金样本（校验位只算 ORG-UNIQUE，不含 CC）==
     == 2. SN 边界（格式：CC-ORG-UNIQUE[-CHECK]，Crockford Base32 去 I L O U）==
@@ -161,10 +161,10 @@
       OK   WLS：标准入参（{s,dist}）在精确距离下复原 (5,5)（证明读的是 o.s.x/o.s.y）
       OK   椭圆：特征值→半轴（√(5.991·4) / √(5.991·1)，长短轴比 2）
       OK   椭圆：退化协方差（近乎共线）→ degenerate=true（半径仍可给，形状不可信）
-      OK   cdfOf：空输入 → 各项 null（不许给 0 假装量过）
+      OK   补站位：坐标取到 0.1 m（现场可照读）
     定位内核（pos.js）全部通过
 
-### L1 端到端 — PASS（1.4s）
+### L1 端到端 — PASS（1.3s）
 
     === ORPAH L1 验收 ===
     结果: [PASS]
@@ -200,7 +200,7 @@
 
       无认证空口防 spoof 端到端演示
       被冒充设备 SN : CN-WH01-9AF3C1D2
-      攻击者 SN    : CN-WH01-RZVEMQHKY8-36（未登记 → 服务器不认识）
+      攻击者 SN    : CN-WH01-4B41JRZJT4-44（未登记 → 服务器不认识）
       链路          : Client→STA→空口→AP→Router→UDP:19847→Server
       用例数        : 13（含 1 条合法对照）
     [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…

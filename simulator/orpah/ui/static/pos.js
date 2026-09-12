@@ -9,7 +9,7 @@
 - 三边定位（≥3 点为线性最小二乘；2 点取两圆交点中离上次估计更近的那个）
 - 加权最小二乘（WLS，高斯-牛顿 + 步长折半线搜索）
 - 95% 置信椭圆 / 搜索半径（由协方差特征值给）
-- 定位质量：残差 RMS、GDOP、站位布局条件数、分级
+- 定位质量：残差 RMS、GDOP、站位布局条件数、分级、**补站位建议（几何不行时“往哪儿再放一台”）**
 - 观测归集：在某一时刻 t 各站位能看到什么（时间窗 + 不看未来）
 
 全局函数（classic script，页面直接按名字调用，与重构前一致）。
@@ -265,10 +265,26 @@ function cdfOf(errs) {
   };
 }
 
+/* GDOP：H 的行 = 估计点到各站位的单位向量，GDOP = sqrt(trace((HᵀH)⁻¹))。
+   站位数不足 / 近共线 / 都在同一侧 → HᵀH 降秩 → null（**不可判定**，不给大数糊过去）。
+   与某站位完全重合时 `L=0`，该站位的方向无定义 → 按 0 贡献（老行为，不要改）。
+   **单一实现**：`qualityOf` 与 `suggestStation` 都走这里，防两处 GDOP 漂移。 */
+function gdopOf(est, pts) {
+  if (!est || !pts || pts.length < 2) return null;
+  let a = 0, b = 0, c = 0;
+  for (const p of pts) {
+    const dx = p.x - est.x, dy = p.y - est.y;
+    const L = Math.hypot(dx, dy) || 1e-6;
+    const ux = dx / L, uy = dy / L;
+    a += ux * ux; b += ux * uy; c += uy * uy;
+  }
+  const det = a * c - b * b;
+  return Math.abs(det) > 1e-9 ? Math.sqrt((a + c) / det) : null;
+}
+
 /* 残差 + 几何强度
    残差 = 测量距离 − 估计点到该站位的距离；RMS 越小越可信。
-   GDOP = sqrt(trace((HᵀH)^-1))，H 为估计点到各站位的单位向量：
-   站位数不足、近共线、或都在同一侧时 HᵀH 降秩 → GDOP 极大/无解（估计点不可信）。
+   GDOP 见 `gdopOf`：站位数不足、近共线、或都在同一侧时 HᵀH 降秩 → GDOP 极大/无解（估计点不可信）。
    没有残差/几何指标时，恒定 RSSI 这类退化输入会给出一个看着很正常、实际无意义的坐标。 */
 function qualityOf(obs, est) {
   if (!est || obs.length < 2) return null;
@@ -281,16 +297,8 @@ function qualityOf(obs, est) {
     sum2 += r * r;
   });
   const rms = Math.sqrt(sum2 / obs.length);
-  let a = 0, b = 0, c = 0;
-  obs.forEach(o => {
-    const dx = o.s.x - est.x, dy = o.s.y - est.y;
-    const L = Math.hypot(dx, dy) || 1e-6;
-    const ux = dx / L, uy = dy / L;
-    a += ux * ux; b += ux * uy; c += uy * uy;
-  });
-  const det = a * c - b * b;
-  const gdop = Math.abs(det) > 1e-9 ? Math.sqrt((a + c) / det) : null;
-  return { rms, per, gdop, medDist: median(obs.map(o => o.dist)) };
+  return { rms, per, gdop: gdopOf(est, obs.map(o => o.s)),
+           medDist: median(obs.map(o => o.dist)) };
 }
 
 /* 站位布局条件数（与估计点无关）：经典最小二乘矩阵 A（行 = 2(xj-x0), 2(yj-y0)）
@@ -322,6 +330,87 @@ function resGrade(rms, medDist) {
   if (rms <= 0.2 * base) return "good";
   if (rms <= 0.6 * base) return "fair";
   return "bad";
+}
+
+/* ---------------- 补站位建议（几何不行时「往哪儿再放一台」） ----------------
+   起因：页面已经能如实报出「站位共线 → 无解」「GDOP 大 → 估计不可信」，但**没说怎么办**。
+   现场要的是一句可执行的话：往 (x, y) 再放一台。
+
+   **判据选谁**（关键）：有估计点 → 用**该点的 GDOP**；没有估计点 → 用**布局条件数**。
+   - 条件数只看站位坐标（与目标无关）→ 共线这种“根本解不出来、压根没有估计点”的场景也能给建议；
+   - 有估计点时 GDOP 才是真正衡量“这个位置解得多准”的量（条件数好、但站位全在目标一侧时 GDOP 仍差）。
+   返回里 `scoreBy` 如实标本次用的是哪个判据（页面/测试可核对，不藏着）。
+
+   候选点 = 站位包围盒**各边按布局尺度外扩 `SPOT_PAD`**（尺度 = 两轴较大跨度，
+   不是逐轴跨度 —— 共线布局有一轴跨度为 0，逐轴外扩会把候选压成“离直线 0.5 m”，等于没建议）；
+   与已有站位距离 < `minSep`（站位间最大跨度 × `SPOT_MIN_SEP`）的候选剔除 ——
+   两台贴在一起等于一台，几何上没有贡献。取 score 最小者（并列取网格序最小 → 结果确定）。
+
+   **只估不改**：不改 stations/观测，只给一个建议坐标（0.1 m 取整，便于现场照读）。
+   返回 null = 几何够好，无需建议（页面就说“无需补”，而不是无话可说）。
+   注：“距离环不相交”型无解（条件数正常）= 测量不自洽，不是站位摆放问题 → 本函数**不给**建议。 */
+const SPOT_PAD = 0.5;        // 候选区域：站位包围盒每边外扩（布局较大跨度 × 50%）
+const SPOT_N = 13;           // 每轴网格数（169 个候选，够用且即时）
+const SPOT_MIN_SEP = 0.25;   // 候选与最近站位的距离下限 = 站位间最大跨度 × 0.25
+const COND_OK = 5;           // 条件数 ≤ 5 视为几何够好（与 gdopGrade 的 good 档同量级）
+function suggestStation(obs, est) {
+  const n = obs ? obs.length : 0;
+  if (n === 0) return null;
+  if (n < 2) {
+    // 一个站位连方向都定不了 → 先把“有观测的站位”凑够，再谈摆哪儿
+    return { need: true, reason: "too_few", x: null, y: null, minDist: null,
+             condBefore: null, condAfter: null, gdopBefore: null, gdopAfter: null,
+             scoreBy: null, have: n };
+  }
+  const condBefore = layoutCond(obs);
+  const gdopBefore = est ? gdopOf(est, obs.map(o => o.s)) : null;
+  const weakGdop = gdopBefore !== null && gdopGrade(gdopBefore) !== "good";
+  const weakCond = !(condBefore <= COND_OK);      // condBefore=Infinity（共线）→ true
+  if (est ? (!weakGdop && !weakCond) : !weakCond) return null;
+  const reason = condBefore === Infinity ? "collinear" : "layout";
+
+  const xs = obs.map(o => o.s.x), ys = obs.map(o => o.s.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = maxX - minX, spanY = maxY - minY;
+  // 候选区域用**布局尺度 R**（两轴较大跨度）各向外扩 —— 共线/贴成一条线时有一轴跨度为 0，
+  // 逐轴外扩会把候选压成“离直线 0.5 m”，等于没建议（实测踩过：建议 y=-0.5）。
+  const R = Math.max(spanX, spanY, 1);
+  const pad = R * SPOT_PAD;
+  let maxSep = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) maxSep = Math.max(maxSep, Math.hypot(xs[i] - xs[j], ys[i] - ys[j]));
+  }
+  const minSep = Math.max(maxSep * SPOT_MIN_SEP, 0.5);
+  let best = null;
+  for (let gi = 0; gi < SPOT_N; gi++) {
+    for (let gj = 0; gj < SPOT_N; gj++) {
+      const cx = minX - pad + (spanX + 2 * pad) * gi / (SPOT_N - 1);
+      const cy = minY - pad + (spanY + 2 * pad) * gj / (SPOT_N - 1);
+      let dmin = Infinity;
+      for (let i = 0; i < n; i++) dmin = Math.min(dmin, Math.hypot(cx - xs[i], cy - ys[i]));
+      if (dmin < minSep) continue;
+      const pts = xs.map((x, i) => ({ x, y: ys[i] })).concat([{ x: cx, y: cy }]);
+      const condAfter = layoutCond(pts.map(p => ({ s: p })));
+      const gdopAfter = est ? gdopOf(est, pts) : null;
+      const score = est ? gdopAfter : condAfter;
+      if (score === null || !isFinite(score)) continue;
+      if (!best || score < best.score - 1e-12) {
+        best = { x: cx, y: cy, score, condAfter, gdopAfter, minDist: dmin };
+      }
+    }
+  }
+  if (!best) return null;
+  // 取整只用于“照读”，**不能把 null 变成 0**（无值就是无值，这是本仓的约定）
+  const r1 = v => (v === null || v === undefined ? null
+                   : (isFinite(v) ? Math.round(v * 100) / 100 : v));
+  return {
+    need: true, reason, have: n,
+    x: Math.round(best.x * 10) / 10, y: Math.round(best.y * 10) / 10,
+    minDist: r1(best.minDist), condBefore: r1(condBefore), condAfter: r1(best.condAfter),
+    gdopBefore: r1(gdopBefore), gdopAfter: r1(best.gdopAfter),
+    scoreBy: est ? "gdop" : "cond",
+  };
 }
 
 /* ---------------- 观测归集（单一实现：实时与回放共用） ----------------
