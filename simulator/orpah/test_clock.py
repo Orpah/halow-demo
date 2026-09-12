@@ -170,7 +170,7 @@ est = clk.estimate(noisy)
 ck("单点跳变（设备乱报一次）不影响中位数 offset=0",
    abs(est["offset"]) < 1e-9 and est["spread"] > 8000, str(est))
 ck("批量样本：offset_of 与 estimate 一致",
-   clk.offset_of(noisy)[0] == est["offset"])
+   clk.offset_of(noisy)[0] == est["offset"])     # 注：n<=8 时 tail==整窗，这条是同义反复；真不变式见下
 
 # 偏移**只看最近 OFFSET_WINDOW 条**（2026-09-13 实测后改）：换钟/拨表要能很快反映。
 # 实测教训：偏移也用整窗中位数时，现场拨偏 +120s 后一分钟内读数仍≈0（旧样本压着中位数）。
@@ -182,6 +182,13 @@ ck("偏移只用最近 8 条（n_off=8 / 整窗 n=21）",
    est["n_off"] == clk.OFFSET_WINDOW == 8 and est["n"] == 21, str(est))
 ck("对照：若强行用整窗中位数，读数会被拉到 0（证明就是窗口的锅）",
    clk.offset_of(mixed)[0] == 0.0 and clk.estimate(mixed, offset_window=64)["offset"] == 0.0)
+ck("不变式：estimate.offset == offset_of(最近 n_off 条)（跨函数一致，且≠整窗中位数）",
+   clk.offset_of(mixed[-est["n_off"]:])[0] == est["offset"] != clk.offset_of(mixed)[0])
+ck("n_off 随实际样本数收缩（不足 8 条时不会越界取空）",
+   (lambda e: e["n_off"] == 4 and abs(e["offset"] - 1) < 1e-9)(
+       clk.estimate([(1000 + i, 1000 + i + 1) for i in range(4)])))
+ck("offset_window=0 → 退化为整窗（显式关掉短窗，便于对照）",
+   clk.estimate(mixed, offset_window=0)["offset"] == clk.offset_of(mixed)[0])
 ck("偏移窗仍免疫单点跳变（最近 8 条里坏 1 条不动摇）",
    abs(clk.estimate(mixed + [(1021, 1021 + 120 + 9999)])["offset"] - 120) < 1e-9)
 
@@ -258,6 +265,42 @@ for i in range(10):
 ck("Tracker：环形窗有上限（window=3 → 只留 3 条样本）",
    trw.get("W")["n"] == 3, str(trw.get("W")["n"]))
 ck("Tracker：没见过的 SN → None", trw.get("nobody") is None)
+
+# 并发：`add()` 由上报线程写、`snapshot()` 由 HTTP 线程读（`clock.py` 文档里承诺线程安全）——
+# 不测的话「锁」只是注释。4 写线程 × 50 条 + 2 读线程，跑完必须一条不少、无异常。
+import threading                                                     # noqa: E402
+tc = clk.ClockTracker(window=256, offset_warn=30)
+_err = []
+_rounds, _writers = 50, 4
+
+
+def _writer(tid):
+    try:
+        for i in range(_rounds):
+            tc.add("C", 5000 + tid * 1000 + i + 3, 5000 + tid * 1000 + i)
+    except Exception as e:                                           # noqa: BLE001
+        _err.append(("writer", repr(e)))
+
+
+def _reader():
+    try:
+        for _ in range(60):
+            snap = tc.snapshot()
+            for e in snap.values():
+                assert e["offset"] is None or isinstance(e["offset"], float)
+    except Exception as e:                                           # noqa: BLE001
+        _err.append(("reader", repr(e)))
+
+
+_ths = [threading.Thread(target=_writer, args=(t,)) for t in range(_writers)]
+_ths += [threading.Thread(target=_reader) for _ in range(2)]
+for _t in _ths:
+    _t.start()
+for _t in _ths:
+    _t.join(timeout=10)
+ck("并发：4 写 × 50 条 + 2 读线程 → 无异常且一条不丢",
+   not _err and not any(t.is_alive() for t in _ths) and tc.get("C")["n"] == _rounds * _writers,
+   str(_err) + " n=" + str(tc.get("C")["n"]))
 
 print()
 if FAILS:
