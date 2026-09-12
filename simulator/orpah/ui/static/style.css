@@ -2,9 +2,15 @@
   --bg: #0d1117; --card: #161b22; --bd: #30363d; --txt: #c9d1d9;
   --mut: #8b949e; --acc: #58a6ff; --grn: #3fb950; --org: #d29922;
   --red: #f85149;
-  /* 按内容分色：L2 上行/转发 REPORT = --acc（蓝）、Orpah ID 签名上报 = --id（紫）、
-     发现（ORPAH-FOUND）= --org（黄）。三色贯穿拓扑各处，同一颜色 = 同一类内容。 */
-  --id: #a371f7;
+  /* 按内容分色（同一颜色 = 同一类内容，节点行与链路拆行一致）：
+     L2 上行/转发 REPORT = --acc（蓝）、Orpah ID 签名上报 = --id（橙，
+     与蓝是两个不同色觉通道 → 红/绿/蓝黄色盲下都不混）、发现（ORPAH-FOUND）
+     = --found（中性浅灰白：它是业务事件，不当“内容类型”上色）。
+     曾用过紫 #a371f7：与蓝在红/绿盲下 ΔE00 仅 10.2 / 5.6（几乎一色），已换。
+     实测（Machado CVD 模拟 + CIEDE2000）蓝↔橙 50.5–56.1、蓝↔浅灰白 21.3–24.7；
+     对深底对比度蓝 7.49、橙 8.40、浅灰白 12.26（均过 WCAG AA）。 */
+  --id: #e69f00;
+  --found: #c9d1d9;
 }
 * { box-sizing: border-box; }
 html, body { overflow-x: auto; }
@@ -93,7 +99,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .conn.ok { color: var(--grn); }
 .cnt { color: var(--acc); }
 .cnt-id { color: var(--id); }
-.cnt-found { color: var(--org); }
+.cnt-found { color: var(--found); }
 .link { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 96px; gap: 4px; }
 .link-flow {
   display: flex; align-items: center; gap: 4px; color: var(--acc);
@@ -109,7 +115,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .link-split { font-size: 10px; color: var(--mut); white-space: nowrap; }
 .link-split .s-l2 b { color: var(--acc); }
 .link-split .s-id b { color: var(--id); }
-.link-split .s-found b { color: var(--org); }
+.link-split .s-found b { color: var(--found); }
 
 /* ---- 报文流表 ---- */
 table { width: 100%; border-collapse: collapse; }
