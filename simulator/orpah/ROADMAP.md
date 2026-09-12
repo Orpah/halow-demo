@@ -613,6 +613,19 @@
 - ❌ **驳回：`_api_upload` 的 `finally: settimeout(None)` 会抛 `OSError` 盖掉 400 响应**。代码里
   **本来就**用 `try/except OSError: pass` 包住了（读的是同一份源码，评审漏看那两行）。顺手实测确认
   `close()` 后的 socket 调 `settimeout(None)` **确实抛 OSError** → 所以那层 except 不能删；已加断言锁住。
+- ❌ **再驳回（同一指控第 2 次，2026-09-13 下午）：「`finally` 中仍有风险，建议把 `settimeout` 移到
+  `try` 成功路径末尾」**。这次评审承认 `try/except OSError` 已有，只主张"仍有风险"。**真连接实测**
+  （`TEMP/probe_upload.py`，原始 socket 打 `:8901`，两种场景：① 一个字节都不发 ② 先发半个请求体再停住）：
+  - 两种场景都在 **10.0s** 后收到**完整** `400` 响应（`Content-Length` 带的 JSON 都在）→ 响应**没有被**
+    `finally` 盖掉，指控的现象不存在；
+  - 响应是 `HTTP/1.0`（`BaseHTTPRequestHandler.protocol_version` 默认值，本项目没改成 1.1）→ 服务端
+    **不复用连接**（实测同连接再发请求 → `ConnectionAbortedError` 10053 = 对端已关）→ 也不存在
+    "错位的请求体被当下一条请求解析"的问题。
+  - **为什么 `finally` 才是对的**（评审的建议反而更差）：`settimeout` 是**套接字属性**，一旦不清就留在
+    连接上；把它只写在 `try` 成功路径末尾，**超时分支就不会复位** —— 今天因 HTTP/1.0 随即关连接而无感，
+    但若将来把 `protocol_version` 改成 `HTTP/1.1`（keep-alive 复用连接），上一个请求残留的 10s 读超时
+    会把同一连接上的**后续请求**误杀。`finally` 保证"异常路径也复位"，是连接状态清理的正确位置。
+  - 结论：**不改代码**（本轮 0 改动；`test_server.test_upload_finally_guards_settimeout` 已锁"防护存在"）。
 - ✅ **修（措辞）**：上传读超时的报错原来写「无 Content-Length 且客户端未关流」，而 `settimeout`
   是**每次 recv 各算**（持续有数据就一直不超时）→ 改成「读取超时（无 Content-Length：需客户端关流
   结束上传；10 秒内没有收到数据即超时）」，把"怎么修 + 判据"都写出来。
