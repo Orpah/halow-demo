@@ -42,7 +42,7 @@ from orpah_proto import (ORPAH_UDP_PORT, MAC_BCAST, MSG_REQ_CONNECT,
                          MSG_ERROR, MSG_ID_REPORT,
                          parse_eth_frame, decode_msg, encode_msg,
                          build_access_info, build_eth_frame,
-                         build_lost_table_req, build_found,
+                         build_lost_table_req, build_found, new_rid,
                          ST_NOT_TRACKED)
 
 LOG = True
@@ -81,8 +81,12 @@ class RouterBridge:
         self._lost_event = threading.Event()
         # 是否已成功同步过走失表（此后依赖 Server 推送即可；重启后复位为未同步）
         self._synced = False
-        # 拉表应答 vs 推送区分：_pull_pending=True 期间收到的 LOST-TABLE = 本机拉表的应答
-        self._pull_pending = False
+        # 拉表应答 vs 推送区分（2026-09-12 改）：靠 **关联号 rid** 配对，不再用时间窗猜。
+        # 发出 REQ 时记下本次 rid；只有 rid 匹配的 LOST-TABLE 算“本机拉表的应答”，
+        # 其余（无 rid 的主动推送）计“收到走失表下发”。
+        # 原因：旧写法用“REQ 后 ≤1.5s 内到的 LOST-TABLE 算应答”，推送恰好落在窗口内
+        # 会被误算成应答（少计 1 次），反向也会多计 —— 属已知近似，本项把它消掉。
+        self._pull_rid = None
         # 收到的 Server 主动推送的走失表次数（下发计数，供 UI Router 卡片展示）
         self.lost_push_recv = 0
 
@@ -219,9 +223,13 @@ class RouterBridge:
                 "note": e.get("note", ""),
             }
         log(f"LOST-TABLE 更新（{len(entries)} 项）")
-        # 计数：Server 主动推送才算“收到走失表下发”；本机拉表应答不算
-        if self._pull_pending:
-            self._pull_pending = False
+        # 计数：Server 主动推送才算“收到走失表下发”；本机拉表的应答不算。
+        # 判据 = **rid 是否等于本次拉表的 rid**（无 rid ⇒ 主动推送；rid 不匹配 ⇒ 也是推送，
+        # 例：上一次超时的旧应答／别的 Router 的应答被广播给本机）。
+        rid = table.get("rid")
+        if rid and rid == self._pull_rid:
+            self._pull_rid = None            # 本次拉表已对上，清掉（避免重复命中）
+            log("（本机拉表应答：不计“收到走失表下发”）")
         else:
             self.lost_push_recv += 1
         self._lost_event.set()          # 通知等待中的 sync()
@@ -229,27 +237,31 @@ class RouterBridge:
     def sync(self, timeout=2.0):
         """主动向 Server 拉取当前走失表并等回包（同步）。
 
-        发 ORPAH-LOST-TABLE-REQ；Server 回 LOST-TABLE 由 _udp_loop →
-        _apply_lost_table 处理并置 _lost_event。发送失败/超时返回 False
-        （缓存保持原样，下次 REQ-CONNECT 缓存未命中会再触发）。
+        发 ORPAH-LOST-TABLE-REQ（带**关联号 rid**）；Server 的应答原样回显 rid，
+        由 _udp_loop → _apply_lost_table 处理并置 _lost_event。
+        发送失败/超时返回 False（缓存保持原样，下次 REQ-CONNECT 会再触发）。
+
+        注：等待期间若 Server 恰好主动推来一张表（无 rid），**也算拿到权威全量表**
+        （置位 + `_synced`），只是它按“推送”计数；本次 rid 保留着，等应答真到了
+        再按“应答”配对（若始终没到，下一次 sync 会覆盖它 —— 极端并发下最多 1 次计数偏差，
+        已在此写明，不再是隐含的时间窗猜测）。
         """
         self._lost_event.clear()
         if not self.udp:
             return False
-        self._lost_event.clear()
-        self._pull_pending = True          # 标记“正在等拉表应答”
+        rid = new_rid()
+        self._pull_rid = rid
         try:
-            self.udp.sendto(encode_msg(build_lost_table_req()),
+            self.udp.sendto(encode_msg(build_lost_table_req(rid=rid)),
                             self.server_addr)
         except OSError as e:
-            self._pull_pending = False
+            self._pull_rid = None
             log(f"拉表请求发送失败: {e}")
             return False
         ok = self._lost_event.wait(timeout)
         if ok:
             self._synced = True          # 已拿到权威全量表，此后依赖推送即可
         else:
-            self._pull_pending = False
             log("拉表等待 Server 回包超时（下次 REQ-CONNECT 会再试）")
         return ok
 

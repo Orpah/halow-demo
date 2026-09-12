@@ -181,8 +181,10 @@ class OrpahServer:
             self.pull_count += 1
             log(f"收到 LOST-TABLE-REQ <- {addr[0]}:{addr[1]} "
                 f"({'新 Router' if is_new else '已有 Router'})"
-                f" -> 回当前走失表（{len(self.lost)} 项）")
-            self._push_lost(to=[addr])
+                f" -> 回当前走失表（{len(self.lost)} 项）"
+                + (f" rid={msg['rid']}" if msg.get("rid") else "（无 rid）"))
+            # 应答：**原样回显 rid** → Router 才能区分应答与主动推送（见 router._apply_lost_table）
+            self._push_lost(to=[addr], rid=msg.get("rid"))
         elif mtype == MSG_FOUND:
             # R→S 业务告警：某 Router 发现走失 sn（每次命中都上报）
             self._note_router(addr)
@@ -308,17 +310,23 @@ class OrpahServer:
             if self.lost:                      # 已有走失记录 → 立即补发全量表
                 self._push_lost(to=[addr])
 
-    def _push_lost(self, to=None):
-        """把当前走失表下发（默认给所有见过/上报过的 Router；to 指定单台）。"""
+    def _push_lost(self, to=None, rid=None):
+        """把当前走失表下发（默认给所有见过/上报过的 Router；to 指定单台）。
+
+        `rid`：**仅应答主动拉表时**传（原样回显请求里的关联号）→ Router 以此区分
+        「我拉表的应答」与「Server 主动推送」。**主动推送不带 rid**（推送才是
+        “收到走失表下发”事件，应答不是；口径见 `router._apply_lost_table`）。
+        """
         entries = [{"sn": k, "tracked": bool(v["tracked"]), "note": v.get("note", "")}
                    for k, v in self.lost.items()]
         with self._lock:
             addrs = sorted(self.routers) if to is None else list(to)
-        table = build_lost_table(entries)
         for a in addrs:
-            self._reply(a, table)
+            # 每台一份：rid 是“这一台这次拉的”，不能共用同一个对象
+            self._reply(a, build_lost_table(entries, rid=rid))
         if addrs:
-            log(f"下发 LOST-TABLE（{len(entries)} 项）-> {len(addrs)} 台 Router")
+            log(f"下发 LOST-TABLE（{len(entries)} 项）-> {len(addrs)} 台 Router"
+                + (f" rid={rid}" if rid else ""))
 
     def _reply(self, addr, msg):
         """向指定 Router 回一条报文（UDP）。"""

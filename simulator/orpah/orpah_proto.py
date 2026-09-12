@@ -22,6 +22,7 @@ L2 = 全消息流（SPEC §9）：REQ-CONNECT / ACCESS-INFO / REPORT /
 载荷与 Client→STA 的以太网帧 payload 是同一 JSON bytes（桥/网透传不改写）。
 """
 import json
+import os
 import re
 import time
 
@@ -224,26 +225,44 @@ def build_error(code, sn=None, msg_text=None, ts=None):
     return m
 
 
-def build_lost_table(entries, version=None, ts=None):
+def new_rid():
+    """生成一个**拉表关联号**（随机 token，6 字节 hex）。
+
+    用途（2026-09-12）：`ORPAH-LOST-TABLE-REQ` 带上它，Server 的应答**原样回显**;
+    Router 靠它区分「我拉表的应答」与「Server 主动推送」—— 两者是不同事件
+    （前者不占“收到走失表下发”计数，后者占）。
+    为什么必须显式配对：原来用“发出 REQ 后 ≤1.5s 内收到的 LOST-TABLE 算应答”的
+    **时间窗猜测**，推送恰好落在窗口内会被误算（少计 1 次），反之也会多计。
+    幂等/重试：同一 rid 可重发（Server 每次都会回全量表）。
+    """
+    return os.urandom(6).hex()
+
+
+def build_lost_table(entries, version=None, ts=None, rid=None):
     """S→R ORPAH-LOST-TABLE：走失表下发/更新。
 
     entries：[{sn, tracked, note?}]；tracked=False 表示撤销走失。
     version：表版本（单调递增，可选）。
+    rid：**仅应答主动拉表时**带上（原样回显请求里的 rid）；Server 主动推送不带 ——
+         Router 以此区分“拉表应答”与“主动推送”。
     """
     m = _base(MSG_LOST_TABLE, None, ts, entries=list(entries))
     if version is not None:
         m["version"] = int(version)
+    if rid:
+        m["rid"] = str(rid)
     return m
 
 
-def build_lost_table_req(ts=None):
+def build_lost_table_req(ts=None, rid=None):
     """R→S ORPAH-LOST-TABLE-REQ：Router 请求 Server 下发当前走失表全量。
 
     用途（真机前续 / F-03）：Router 重启后本地缓存为空、或 REQ-CONNECT 时
     缓存未命中——即使 Server 近期无走失表变更（不会主动推），Router 也能主动
-    拉取追平。Server 收到后回 build_lost_table(当前表)。
+    拉取追平。Server 收到后回 build_lost_table(当前表, rid=<原样回显>)。
+    rid：关联号（见 new_rid）；不带也能工作（旧对端兼容），但就退回到“时间窗猜测”。
     """
-    return _base(MSG_LOST_TABLE_REQ, None, ts)
+    return _base(MSG_LOST_TABLE_REQ, None, ts, **({"rid": str(rid)} if rid else {}))
 
 
 def build_found(sn, ts=None):

@@ -90,6 +90,26 @@ class TestLostTableReq(unittest.TestCase):
         self.assertEqual(msg["type"], op.MSG_LOST_TABLE)
         self.assertEqual(len(msg["entries"]), 1)
 
+    def test_lost_table_reply_echoes_rid(self):
+        """拉表关联号（v0.7.1）：**应答原样回显 rid**，主动推送不带。"""
+        srv = make_srv()
+        srv.sock.sent.clear()
+        srv._handle(op.build_lost_table_req(rid="RID-XYZ"), ADDR)
+        msg = op.decode_msg(srv.sock.sent[0][0])
+        self.assertEqual(msg.get("rid"), "RID-XYZ")
+        # 主动推送（mark 触发）不带 rid —— Router 靠这个区分「应答」与「推送」
+        srv.sock.sent.clear()
+        srv.mark_tracked("CN-WH01-9AF3C1D2", note="push")   # 默认 push=True
+        pushed = [op.decode_msg(d) for d, _ in srv.sock.sent]
+        self.assertTrue(pushed, "mark 应触发一次下发")
+        self.assertTrue(all("rid" not in m for m in pushed), str(pushed))
+        # 无 rid 的请求（旧对端兼容）：应答也不带 rid，但必须照常回表
+        srv.sock.sent.clear()
+        srv._handle(op.build_lost_table_req(), ADDR)
+        msg = op.decode_msg(srv.sock.sent[0][0])
+        self.assertNotIn("rid", msg)
+        self.assertEqual(msg["type"], op.MSG_LOST_TABLE)
+
 
 class TestReport(unittest.TestCase):
     def test_report_valid_replies_tracking_status(self):

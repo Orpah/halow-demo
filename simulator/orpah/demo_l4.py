@@ -47,7 +47,8 @@ from server import OrpahServer              # noqa: E402
 from router import RouterBridge             # noqa: E402
 from client import ClientHost               # noqa: E402
 from waiting import wait_until, wait_new    # noqa: E402  等待工具（只这一份实现）
-from orpah_proto import MSG_ACCESS_INFO     # noqa: E402
+from orpah_proto import (MSG_ACCESS_INFO, MSG_LOST_TABLE_REQ,   # noqa: E402
+                         build_lost_table, build_lost_table_req, new_rid)
 
 # 端口独立（demo_l1/9401..、demo_l2/95xx、demo_l3/96xx、ui/9401..）
 CONSOLE_A, LINK_A, HOST_A = 9701, 9711, 9721   # AP（Router 侧）
@@ -137,6 +138,43 @@ def main():
     print(f"④ untrack 后缓存 tracked={router.lost_cache.get(str(sn))} · "
           f"REQ 应答 tracked={last_access(access)} · 未多拉={no_extra_pull}")
 
+    # ---- 7) 关联号 rid（2026-09-12）：拉表应答 vs Server 主动推送 ----
+    # 旧写法用“发出 REQ 后 ≤1.5s 内收到的 LOST-TABLE 算应答”的**时间窗猜测**：
+    # 推送恰好落在窗口内会被误算成应答（少计 1 次），反之也会多计。
+    # 现在 REQ 带 rid、Server 应答原样回显 → 配对是确定的。
+    print("\n--- 关联号 rid：拉表应答 vs Server 主动推送 ---")
+    rid_checks = {
+        "REQ 带 rid（type 正确）":
+            build_lost_table_req(rid="RID-1").get("rid") == "RID-1"
+            and build_lost_table_req(rid="RID-1").get("type") == MSG_LOST_TABLE_REQ,
+        "应答原样回显 rid": build_lost_table([], rid="RID-1").get("rid") == "RID-1",
+        "主动推送不带 rid": "rid" not in build_lost_table([]),
+        "new_rid 随机且为 12 位 hex":
+            new_rid() != new_rid() and len(new_rid()) == 12,
+    }
+    # 端到端：sync() 拿到的是**应答** → 不得计入“收到走失表下发”；
+    # 而此前的 untrack 变更推送**已经**计过（>0）—— 一升一不升才说明配对对了。
+    push_before = router.lost_push_recv
+    sync_ok2 = router.sync(timeout=2.0)
+    time.sleep(0.4)
+    rid_checks["此前 Server 主动推送已计入（untrack 那次）"] = push_before >= 1
+    rid_checks["sync() 拿到应答且不计入“收到推送”"] = (sync_ok2
+                                                  and router.lost_push_recv == push_before)
+    # 回归锁：直接喂三类表到计数逻辑（应答计 0 / 推送计 1 / rid 不匹配也算推送 → 2）
+    probe = RouterBridge(ap_port=HOST_A, server_port=UDP_SRV)   # 不 start：只喂 _apply_lost_table
+    probe._pull_rid = "RID-2"
+    probe._apply_lost_table(build_lost_table([], rid="RID-2"))      # 本机拉表应答
+    n_reply = probe.lost_push_recv
+    probe._apply_lost_table(build_lost_table([]))                    # 主动推送
+    n_push = probe.lost_push_recv
+    probe._pull_rid = "RID-2"
+    probe._apply_lost_table(build_lost_table([], rid="RID-3"))      # 别人的/过期的应答
+    n_other = probe.lost_push_recv
+    rid_checks["计数口径：应答不计 / 推送计 / rid 不匹配计（0→1→2）"] = \
+        (n_reply, n_push, n_other) == (0, 1, 2)
+    for name, passed in rid_checks.items():
+        print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
+
     # ---- 汇总 ----
     print(f"\n=== ORPAH Router 主动拉表 验收 ===")
     checks = {
@@ -145,6 +183,7 @@ def main():
         "③ 重启后 REQ 同步拉表、首问即权威": ok_miss and pulled_now,
         "④ 变更推送仍生效且 REQ 不再多拉": pushed and ok_untrack and no_extra_pull,
     }
+    checks.update(rid_checks)
     for name, passed in checks.items():
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
     ok = all(checks.values())
