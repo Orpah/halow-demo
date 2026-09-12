@@ -1,7 +1,7 @@
 # ORPAH 批量合规测试报告
 
-- 时间：2026-09-12 15:36:05
-- git HEAD：`38d1027`
+- 时间：2026-09-12 15:41:07
+- git HEAD：`5dc057e`
 - 解释器：3.13.14 @ C:\Python313\python.exe
 - 结论：**全部通过**（14/14 套件通过）
 
@@ -15,14 +15,14 @@
 | 告警规则（含处置态） | `test_alerts.py` | ✅ PASS | 0.1s | 通过 |
 | 指标面板纯计算 | `test_metrics.py` | ✅ PASS | 0.1s | 通过 |
 | 时钟可信（ts=0 无 RTC） | `test_clock.py` | ✅ PASS | 0.4s | 通过 |
-| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.6s | 通过 |
+| IoTDB 审计/时间窗 | `test_tsdb_audit.py` | ✅ PASS | 0.5s | 通过 |
 | UI 服务器契约 | `test_server.py` | ✅ PASS | 0.1s | 通过 |
-| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.0s | 通过 |
-| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.4s | 通过 |
+| 批量合规用例（黄金样本/SN 边界/报文） | `checks_batch.py` | ✅ PASS | 0.1s | 通过 |
+| L1 端到端 | `demo_l1.py` | ✅ PASS | 1.3s | 通过 |
 | L2 消息流 | `demo_l2.py` | ✅ PASS | 2.2s | 通过 |
-| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.3s | 通过 |
-| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.5s | 通过 |
-| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.6s | 通过 |
+| L3 多 Router 漫游/去重 | `demo_l3.py` | ✅ PASS | 4.2s | 通过 |
+| L3b 主动拉表 | `demo_l4.py` | ✅ PASS | 1.6s | 通过 |
+| 防 spoof 空口端到端 | `demo_spoof.py` | ✅ PASS | 1.5s | 通过 |
 
 ## 关键输出
 
@@ -84,7 +84,7 @@
       OK   留痕：ts_src=device（时间来自设备）
     时钟可信测试全部通过
 
-### IoTDB 审计/时间窗 — PASS（0.6s）
+### IoTDB 审计/时间窗 — PASS（0.5s）
 
     == 1. actor �ֶ� ==
     == 2. query_events �ض� actor ==
@@ -106,7 +106,7 @@
     Ran 16 tests in 0.009s
     OK
 
-### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.0s）
+### 批量合规用例（黄金样本/SN 边界/报文） — PASS（0.1s）
 
     == 1. 黄金样本（校验位只算 ORG-UNIQUE，不含 CC）==
     == 2. SN 边界（格式：CC-ORG-UNIQUE[-CHECK]，Crockford Base32 去 I L O U）==
@@ -115,7 +115,7 @@
       OK   parse_eth_frame：ethertype 不符 → None
     批量用例：全部通过
 
-### L1 端到端 — PASS（1.4s）
+### L1 端到端 — PASS（1.3s）
 
     === ORPAH L1 验收 ===
     结果: [PASS]
@@ -129,7 +129,7 @@
     分支一(未命中 NOT-TRACKED): PASS
     分支二(命中 TRACKED): PASS
 
-### L3 多 Router 漫游/去重 — PASS（4.3s）
+### L3 多 Router 漫游/去重 — PASS（4.2s）
 
     --- 阶段A：sn=CN-WH01-9AF3C1D2 在 R1 网络（2 条，未 mark）---
     --- 阶段B：sn=CN-WH01-9AF3C1D2 漫游到 R2 网络（seq 续 3）---
@@ -138,7 +138,7 @@
     --- 阶段E：去重测试（重发已接受的 seq=4）---
     --- 阶段F：SN 校验（非法 sn → FORMAT-ERR）---
 
-### L3b 主动拉表 — PASS（1.5s）
+### L3b 主动拉表 — PASS（1.6s）
 
     --- 模拟 Router 重启（清空本地缓存 + 未同步）---
     --- Server untrack sn=CN-WH01-9AF3C1D2（变更推送，Router 无需再拉）---
@@ -147,11 +147,11 @@
       [PASS] ② 首次 REQ 答 tracked=True（启动拉表就绪）
       [PASS] ③ 重启后 REQ 同步拉表、首问即权威
 
-### 防 spoof 空口端到端 — PASS（1.6s）
+### 防 spoof 空口端到端 — PASS（1.5s）
 
       无认证空口防 spoof 端到端演示
       被冒充设备 SN : CN-WH01-9AF3C1D2
-      攻击者 SN    : CN-WH01-2TFH2A65KM-61（未登记 → 服务器不认识）
+      攻击者 SN    : CN-WH01-T3EA25XS7A-86（未登记 → 服务器不认识）
       链路          : Client→STA→空口→AP→Router→UDP:19847→Server
       用例数        : 12（含 1 条合法对照）
     [server] 监听 127.0.0.1:19847 (UDP)，等待 ORPAH 报文…
