@@ -1,9 +1,13 @@
-# ORPAH-over-HaLow L1/L2 Demo（纯 PC，无硬件）
+# ORPAH-over-HaLow 演示（纯 PC，无硬件）
 
 > 在 halow-demo 内、基于 PC 模拟器（`host/sim.py`）实现的 ORPAH-over-HaLow 原型。
-> L1 = 数据通路最小骨架（SPEC §9 L1）；L2 = 全消息流 + 走失表 + 跟踪状态（§9 L2，
-> 已含双向 Server→Client 下行）；L3 = 多 Router 漫游/去重 + SN 码号校验
-> （SPEC F-04/F-07/F-01）。成熟后再抽离独立 `orpah-demo` 仓库。
+> **链路/协议**：L1 数据通路最小骨架（SPEC §9 L1）、L2 全消息流 + 走失表 + 跟踪状态
+> （已含双向 Server→Client 下行）、L3 多 Router 漫游/去重 + SN 码号校验（F-04/F-07/F-01）、
+> L3b Router 主动拉表、L3c 发现走失上报（ORPAH-FOUND）。
+> **其上**：Orpah ID 身份/签名层、设备清册与走失案件、告警、指标面板、RSSI 定位与回放、
+> SQLite + IoTDB 双存储。
+> 只想先看懂系统：直接跳到《能力总览》《页面一览》《走一遍完整剧本》。
+> 成熟后再抽离独立 `orpah-demo` 仓库。
 
 ## 一图流（L1 数据通路）
 
@@ -22,6 +26,90 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | Router | TH-RJ45：AP + RJ45 网口上行 | `router.py` + AP 模拟器（host 口 = 网口上行） |
 | Server | 云端/本地 Python | `server.py`（真实 UDP socket + 权威走失库） |
 | 链路 | 802.11ah 空口 | 模拟器「虚拟空口」（TCP，帧格式同固件 sim_link） |
+
+---
+
+## 能力总览（2026-09-12）
+
+> 「能力」按协议/功能分层（不是代码目录），每项给出一句话实现位置 + 一个验收入口 ——
+> 出问题时先跑那一项。
+
+| 能力 | 实现 | 验收 / 自检 |
+|---|---|---|
+| L1 数据通路（以太网帧 `0x88B5` → UDP 19447） | `client.py` / `router.py` / `server.py` / `host_bus.py` | `demo_l1.py` |
+| L2 全消息流 + 走失表 + 跟踪状态（双向） | `orpah_proto.py` | `demo_l2.py` |
+| L3 多 Router 漫游/去重 + SN 码号 | `server.py`（`seen` 窗口） | `demo_l3.py` |
+| L3b Router 主动拉表 `ORPAH-LOST-TABLE-REQ` | `router.sync()` | `demo_l4.py` |
+| L3c 发现走失上报 `ORPAH-FOUND` | `router._announce_found` | `demo_l3.py` + 首页「发现记录」 |
+| Orpah ID：码号/CHECK/签名/防重放/密钥多代轮换吊销 | `orpah_id.py` / `keystore.py` | `demo_id.py`、`test_keys.py` |
+| 无认证空口防 spoof（12 种攻击端到端） | `spoof.py` | `demo_spoof.py`、`test_spoof.py` |
+| 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
+| 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率） | `alerts.py` | `test_alerts.py` |
+| 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
+| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py` |
+| 时钟可信：无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口） | `orpah_proto.effective_ts` | `test_clock.py` |
+| 存储：SQLite（元数据）+ IoTDB（时序/事件） | `registry`/`cases`/`keystore`/`stations` + `tsdb.py` | `test_tsdb_audit.py` |
+
+## 页面一览（`ui/static/`，11 页）
+
+全部页面共用 `tools/ui/static/ui_i18n.js`（zh/en 单一源，右上角按钮切换，`?lang=en` 可直开）。
+
+| 页面 | 作用 | 主要接口 | 存储 |
+|---|---|---|---|
+| `index.html` | 三节点拓扑 + ORPAH-REPORT 报文流 + L2 消息流 + Orpah ID 卡片 + 发现记录 + 走失表 + 事件历史 + 上报控制/防 spoof 注入；顶部 ⚠ 告警计数 | `/api/status`、`/api/events`(SSE)、`/api/ctl`、`/api/alerts`、`/api/ts/events` | 计数只在内存（**重启归零**，是设计）；事件历史在 IoTDB |
+| `registry.html` 设备清册 | 人员↔设备台账、状态、照片、`?sn=` 高亮定位 | `/api/registry`、`/api/upload` | SQLite `persons`/`devices` + `uploads/` |
+| `case.html` 走失案件 | 立案（寻人启事要素）/ 接手 / 找回结案 / 撤销 | `/api/cases`、`/api/registry` | SQLite `cases`/`case_events` |
+| `track.html` 定位与轨迹 | 模拟·真实双模式；站位表（打点/绑定）；WLS 定位 + 95% 椭圆；画布⇄地图 | `/api/ts/query`、`/api/stations`、`/api/config` | IoTDB（设备流 + 各路由器观测）+ SQLite `stations` |
+| `rssi.html` | 路径损耗教学计算器（2/3/多点定位） | `/api/config` | 无状态 |
+| `replay.html` 回放 | 时间窗回放、逐帧定位、平滑、有效时段分色、事件时间线、GPX/GeoJSON 导出 | `/api/replay`、`/api/stations`、`/api/registry`、`/api/config` | **只读** IoTDB |
+| `metrics.html` 指标面板 | 四项指标 + 各案件处置时长 | `/api/metrics`、`/api/status` | 只读（IoTDB + SQLite） |
+| `keys.html` 密钥管理 | 生成→分发→轮换→吊销→退役（多代并存） | `/api/keys` | SQLite `keys`/`key_revocations` + IoTDB 审计 |
+| `sig.html` 签名工具 | ES256/HS256 签名与验签演示 | `/api/sig` | 无状态（临时密钥对） |
+| `checksum.html` / `damm32.html` | SN 校验位算法（Mod97/Luhn32/Damm32、拟群表、穷举） | `/api/checksum` | 无状态（算法只调 `damm32.py`/`luhn32.py`/`mod97.py`） |
+
+**HTTP 接口清单**（字段与规则一律见 `API.md`，这里只回答“有哪几个”）——
+GET：`/api/status`、`/api/registry`、`/api/cases`、`/api/stations`、`/api/keys`、`/api/config`、
+`/api/alerts`、`/api/metrics`、`/api/replay`、`/api/checksum`、`/api/ts/query`、`/api/ts/events`、`/api/events`(SSE)；
+POST：`/api/ctl`（暂停/改 SN·间隔/走失表 mark·untrack/密钥吊销/重放与伪造 ID 上报/防 spoof）、
+`/api/upload`、`/api/registry`、`/api/cases`、`/api/stations`、`/api/keys`、`/api/sig`。
+
+## 前端共享件（单一源，改一处多页生效）
+
+| 文件 | 作用 | 谁用 |
+|---|---|---|
+| `ui/static/pos.js` | 定位纯函数：RSSI↔距离、三边、WLS、椭圆、质量（GDOP/残差）、观测归集、卡尔曼 | `track.html`、`replay.html` |
+| `ui/static/map.js` | 底图源列表与条款、本地坐标→经纬度、离线回落 | `track.html`、`replay.html` |
+| `tools/ui/static/ui_i18n.js` | **共享 i18n 字典**（zh/en 单一源） | orpah 11 页 + halow-demo 主 UI |
+| `orpah/ui/static/style.css` | 样式与配色变量（告警红 / 上行蓝 / ID 橙 / 发现灰，色弱校验过） | orpah 各页 |
+
+> ⚠ **模型参数（路径损耗 A/n、噪声）以服务端为准**：`motion.py` 是**唯一源** → `GET /api/config` →
+> `track`/`rssi`/`replay` 开页取默认值（输入框仍可手改）。页面 HTML 里的 `value=` 只是**离线兜底**；
+> `test_motion.py` §8 有「单源守卫」断言兜底值 == 常量、且页面确实去取接口。
+
+## 走一遍完整剧本（入网 → 移动 → 走失 → 发现 → 定位 → 找回 → 结案）
+
+前提：`python ui_server.py`（:8901）。下表的按钮/文案均为**页面实测**（2026-09-12）。
+
+| # | 页面 | 操作 | 应看到 |
+|---|---|---|---|
+| 1 | 首页 | 打开即自动周期上报；「上报控制」卡可改 `ctlSn`（SN）/ `ctlEvery`（间隔秒）后按「应用」；`暂停上报` 可停 | 报文流三列 ✓（客户端注入·路由器上行·服务器收到）、三端计数同步增长 |
+| 2 | 设备清册 | 登记人员与设备（SN 走 `CC-ORG-UNIQUE[-CHECK]`） | 台账出现该人/设备；可上传照片 |
+| 3 | 定位与轨迹 | 数据源切「真实上报」→「定位站位」表出现 3 台路由器观测 | `参与定位 3/3 个站位有观测`、三个距离环 + 红叉估计 + 黄椭圆；**点在移动**（演示数据由 `motion.py` 按闭合路线生成） |
+| 4 | 走失案件 | 填寻人要素 → `标记走失 / 立案`（以**人**为单位） | 该人名下设备全部→丢失、并进走失表；案件列表出现该案 |
+| 5 | 首页 | 「走失表（服务器权威）」卡填 `lostSn` → `标记为走失`（只按 **SN** 加进走失表，**不立案** —— 与第 4 步的区别就在这） | `服务器发布记录` +1、路由器卡「收到走失表」+1 |
+| 6 | 首页 | 等下一个上报周期（人走近路由器时） | 「发现记录（走失命中）」出现「发现 SN」、路由器/服务器卡「发现 N 次」+1；若已有案件 → 案件转「已发现」 |
+| 7 | 走失案件 | `标记已接手` → 找回后 `找回（结案）`（误报则 `撤销（误报）`） | 状态→已找回/已撤销；设备回「启用」；审计事件落 IoTDB（首页「事件历史」卡可见） |
+| 8 | 回放 | 选 SN + 时间窗（快捷 `30` 分钟）→ `▶ 播放` | 轨迹/距离环/椭圆逐帧推进；进度条 **绿(≥2 台可定位)/橙(仅 1 台)/灰(无观测)**、`跳过无效段`；`导出轨迹` GPX/GeoJSON（缺口断开成段） |
+| 9 | 指标面板 | 打开（窗口 15 分钟–24 小时 + SN） | 验签失败率与算法分布、平均 RSSI、各案件处置时长（时长不可用会标 `invalid`，不给负数） |
+| 10 | 首页 | `暂停上报` 后等一会儿 | 「告警」卡出现「设备 X 无上报 · 持续 …」+ 顶部 ⚠ 计数（阈值见 `alerts.py` 的 `ORPAH_ALERT_*` 环境变量） |
+| 11 | 首页 | `注入伪造上报` / `跑全部攻击`（Orpah ID 卡） | 「期望 X · 实际 Y」对照（`signature_invalid` / `replay_detected` / `unknown_device`…），验签失败率随之上升并触发告警 |
+
+**自检（黄金样本一键）**：`python run_checks.py` 会把上面的算法/协议断言全跑一遍 ——
+含黄金样本 SN（`damm32=B` / `luhn32=E` / `mod97=21`）、SN 边界 28 条、报文/以太网帧边界、
+密钥生命周期、防 spoof 清单、告警规则、指标计算、时钟归一化、IoTDB 时间窗、UI 契约
+（用例表见 `checks_batch.py`，各模块自检见 `test_*.py`）。
+
+---
 
 ## L1 做什么
 
@@ -187,28 +275,42 @@ python orpah/client.py --sta-port 9422 --sn CN-WH01-9AF3C1D2 --every 3
 ```
 simulator/
 ├── host/
-│   └── sim.py            # PC 模拟器：新增「host 数据口」(--host <port>)
-│                         #   语义 = SPI MACBUS DATA_TX/DATA_RX；帧格式同空口
-│                         #   AA 55 TYPE LEN CRC payload；收帧进 rx_queue 的同时推给 host
+│   └── sim.py            # PC 模拟器（AP/STA）：host 数据口 --host <port>，语义 = SPI MACBUS
+│                         #   DATA_TX/DATA_RX；帧 AA 55 TYPE LEN CRC payload；另有 24 项回归 run_tests.py
 └── orpah/
-    ├── orpah_proto.py    # ORPAH 常量、L1/L2 报文编解码（REQ-CONNECT/ACCESS-INFO/
-    │                     #   REPORT/TRACKING-STATUS/ERROR/LOST-TABLE）、以太网帧封装
-    ├── host_bus.py       # host 数据口驱动（只依赖 TCP+帧格式，不 import sim）
-    ├── client.py         # Client host：双向（REQ-CONNECT→REPORT + 收下行回执）
-    ├── router.py         # Router 桥：双向（上行转发 + 下行注入；走失缓存）
-    ├── server.py         # Server：权威走失库 + UDP 应答/TRACKING-STATUS/LOST-TABLE
-    ├── waiting.py        # 共享等待工具：wait_until / wait_new（按截止时间，不猜循环次数）
-    ├── ui_server.py      # Web UI：内嵌整条链路 + HTTP/SSE（方式 1）
-    ├── ui/static/        # 前端 index.html / style.css / app.js
-    ├── demo_l1.py        # L1 端到端验收（内嵌 2 模拟器，命令行）
-    ├── demo_l2.py        # L2 全消息流验收（双向 + 走失两分支，命令行）
-    ├── demo_l3.py        # L3 多 Router 漫游/去重 + SN 校验验收（2×Router）
-    ├── demo_l4.py        # L3b Router 主动拉表验收（启动/缓存未命中拉取）
-    ├── demo_spoof.py     # 防 spoof 真·端到端（攻击注入空口，Server 侧断言）
-    ├── demo_hw1.py       # 【未真机验证】阶段二真机自检：板卡代次/族、关联、跨空口 UDP、raw 0x88B5 透传
-    ├── run_checks.py     # 批量合规测试台：一键跑全部套件 + 出报告（checks_report.md）
-    ├── checks_batch.py   # 表驱动批量用例（黄金样本 / SN 边界 / parse_sn / 报文编解码）
-    ├── checks_report.md  # 最近一次测试台报告（入库，同 host/test_results.txt 惯例）
+    ├── orpah_proto.py    # 【协议】报文全集编解码 + 以太网帧(0x88B5) + SN 校验 + effective_ts（时钟归一化）
+    ├── host_bus.py       # 【链路】host 数据口驱动（只依赖 TCP+帧格式，不 import sim）
+    ├── client.py         # 【链路】Client host：REQ-CONNECT→REPORT + 收下行回执
+    ├── router.py         # 【链路】Router 桥：上行转发/下行注入、走失缓存、主动拉表 sync()、FOUND 上报
+    ├── server.py         # 【链路】Server：权威走失库、(sn,seq) 去重、TRACKING-STATUS/LOST-TABLE/FOUND
+    ├── waiting.py        # 【工具】共享等待：wait_until / wait_new（按截止时间，不猜循环次数）
+    ├── orpah_id.py       # 【身份】Crockford32 / SN+CHECK / JCS / ES256·HS256 / 验签 / 多代密钥状态机
+    ├── keystore.py       # 【身份】密钥库写穿透（SQLite keys/key_revocations；私钥不入库）
+    ├── damm32.py         # 【身份】SN 校验位算法**单一源**（与 luhn32.py / mod97.py 同；前后端都调它）
+    ├── luhn32.py         # 【身份】同上（Luhn mod 32）
+    ├── mod97.py          # 【身份】同上（Mod 97 两位）
+    ├── spoof.py          # 【安全】攻击构造**单一源**（12 种 + 合法对照），脚本与页面共用
+    ├── registry.py       # 【业务】人员↔设备台账（SQLite persons/devices，写穿透 + 首启播种）
+    ├── cases.py          # 【业务】案件状态机（立案→发现→找回/撤销→结案；handler 与 status 正交）
+    ├── alerts.py         # 【业务】告警规则（无存储、按快照重算；阈值走 ORPAH_ALERT_* 环境变量）
+    ├── metrics.py        # 【业务】指标纯计算（验签失败率/算法分布/平均 RSSI/处置时长）
+    ├── stations.py       # 【定位】站位 = 已知坐标观测点（绑定 > 时间窗中位数 > 路由器序列）
+    ├── motion.py         # 【定位】演示用「移动的人」+ 路径损耗/噪声（A/n **唯一源** → /api/config）
+    ├── tsdb.py           # 【存储】IoTDB 接入（设备流/各路由器观测/事件；未就绪优雅降级）
+    ├── ui_server.py      # 【UI】Web 服务：内嵌整条链路 + HTTP/SSE（方式 1）
+    ├── ui/static/        # 【UI】11 个页面 + pos.js / map.js / app.js / style.css / vendor/leaflet
+    ├── demo_l1.py        # 【验收】L1 数据通路（内嵌 2 模拟器，命令行）
+    ├── demo_l2.py        # 【验收】L2 全消息流（双向 + 走失两分支）
+    ├── demo_l3.py        # 【验收】L3 多 Router 漫游/去重 + SN 校验（2×Router）
+    ├── demo_l4.py        # 【验收】L3b Router 主动拉表（启动 / 缓存未命中拉取）
+    ├── demo_spoof.py     # 【验收】防 spoof 真·端到端（攻击注入空口，Server 侧断言）
+    ├── demo_id.py        # 【验收】Orpah ID 22 用例（四级降级签名 + 篡改/重放/超窗/坏 CHECK/撤销）
+    ├── demo_hw1.py       # 【验收·未真机验证】阶段二真机自检：代次/族、关联、跨空口 UDP、raw 0x88B5
+    ├── run_checks.py     # 【测试台】9 个离线套件一键跑 + 出报告（--e2e 再加 5 个 demo）
+    ├── test_*.py         # 【测试台】各模块自检：motion / keys / spoof / alerts / metrics / clock /
+    │                     #   tsdb_audit / server（共 8 个，全部并入 run_checks.py）
+    ├── checks_batch.py   # 【测试台】表驱动批量用例（黄金样本 / SN 边界 / parse_sn / 报文编解码）
+    ├── checks_report.md  # 【测试台】最近一次报告（入库，同 host/test_results.txt 惯例）
     └── docs/
         └── real-hw-stage2.md   # 上机手册 + 五组验证清单（不预设通路；烧录由用户执行）
 ```
@@ -262,3 +364,5 @@ L2 报文类型：`ORPAH-REQ-CONNECT`{sn,mac?,hw?}、`ORPAH-ACCESS-INFO`{sn,trac
   迁移（host 数据口语义已对齐 SPI MACBUS，可平滑替换底层；烧录由用户执行）。
 - F-03 走失表子集下发/过期、F-05 防伪造/限频、F-06 隐私、F-08 RSSI 粗定位。
 - 免电池客户端（TX-AH + CH32V203）低功耗策略。
+
+> 完整的待办与优先级见 `ROADMAP.md`（本文档只管“有什么、怎么跑”）。
