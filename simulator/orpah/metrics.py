@@ -27,6 +27,16 @@ ROADMAP §五「指标面板」的四个指标，输入一律是**已经取好�
 `verify.total` 数的是 `root.orpah.events` 里的 **id_report/id_reject 事件**。合理差异的来源：
 服务端按 seq 去重时丢掉的重复 REPORT 不会写设备点（但那一轮的 ID 上报事件照写），
 且事件时间戳会被单调化钳成严格递增（同设备同毫秒会互相覆盖，见 API.md）。实测差约 1~2%。
+
+⚠ **时间单位：两个域，本模块只拿 Case 域算时长**（2026-09-12 review 提出要写明）
+
+    Case 域（created / closed_at / events.t）  = **秒**（与 cases.py / registry / alerts.py 同一约定：
+                                                全部来自 `int(time.time())`，见 cases.py 四处默认 ts）
+    IoTDB 域（events.t / reports.t）             = **毫秒**（测点时间，回放/时间窗用）
+
+本模块的时长计算（第 4 项指标）**只用 Case 域**；IoTDB 那一侧只取 `rssi` 值、不拿它的 `t` 做减法。
+所以这里不会出现“秒 - 毫秒”静默差 1000 倍；真要改约定的单位，得同时改 `cases.py`、`registry.touch`
+与 `alerts.py`（三处同一个秒约定），而 `test_metrics.py` 真实对象那条用例会把偏差吐出来。
 """
 import re
 
@@ -86,23 +96,29 @@ def rssi_stats(reports):
 
 
 def _first_ts(case, type_):
-    for ev in getattr(case, "events", None) or []:
-        if ev.get("type") == type_:
-            return ev.get("t")
-    return None
+    """该类事件里**时间最早**的一个（不是“列表里第一个”）。
+
+    为什么取 min 而不是直接返回第一个匹配项：`Case.events` 是**追加**写的，而写入时用的 ts 可以由
+    调用方指定（例如 `assign(..., ts=…)` 回填/导入/回放）。一旦有回填，列表就不再按时间有序 ——
+    那时“列表第一个 found”会得到比真实“首次发现”更晚的时刻（时长算小）。
+    """
+    ts = [ev.get("t") for ev in (getattr(case, "events", None) or [])
+          if ev.get("type") == type_ and ev.get("t") is not None]
+    return min(ts) if ts else None
 
 
 def case_stats(cases, now=None):
-    """走失处置时长：立案→首次发现 / 立案→结案。
+    """走失处置时长：立案→首次发现 / 立案→结案（**单位秒**，见模块头的时间单位说明）。
 
     只把**已结束**的案件计入 avg/min/max；未结案的给 elapsed（若给了 now）。
-    时长单位秒；逐案明细按立案时间升序。
+    逐案明细按立案时间升序；`invalid` = 因缺 `created` 而跳过的条数（脏数据不猜、但也不静默）。
     """
     rows, to_found, to_close = [], [], []
-    open_n = 0
+    open_n = invalid = 0
     for c in cases or []:
         created = getattr(c, "created", None)
-        if created is None:
+        if created is None:            # 脏数据：不能编一个时长，但要报个数出来
+            invalid += 1
             continue
         found_at = _first_ts(c, "found")
         closed_at = getattr(c, "closed_at", None)
@@ -127,6 +143,7 @@ def case_stats(cases, now=None):
     rows.sort(key=lambda r: r["created"])
     return {
         "total": len(rows), "open": open_n, "ended": len(rows) - open_n,
+        "invalid": invalid,
         "to_found": _stats(to_found), "to_close": _stats(to_close),
         "rows": rows,
     }

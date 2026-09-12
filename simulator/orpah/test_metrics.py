@@ -13,6 +13,9 @@ from types import SimpleNamespace
 import metrics as mt
 
 FAILS = []
+# 时间单位约定（与 metrics.py 模块头一致）：**Case 域是秒**（cases.py / registry / alerts.py 同一约定，
+# 都来自 int(time.time())）；IoTDB 域的 t 是毫秒，但本模块只用它的 rssi 值。
+# 下面所有 created/closed_at/events.t 都用秒。
 NOW = 1_800_000_000
 
 
@@ -107,6 +110,25 @@ check("案件：没有发现事件（撤销结案）→ to_found 无样本、to_
       st["to_found"]["n"] == 0 and st["to_found"]["avg"] is None
       and st["to_close"]["avg"] == 5.0)
 
+# 事件乱序（回填/导入/回放时 ts 可由调用方指定）→ 必须取**时间最早**的 found，
+# 而不是列表里第一个（取错会把时长算小）。这条是 _first_ts 的回归锁。
+c4 = case("C004", created=NOW - 1000, closed_at=NOW - 100, status="closed",
+          events=[{"t": NOW - 100, "type": "found"},      # 后写入但时间最晚
+                  {"t": NOW - 900, "type": "found"},      # 后写入且时间最早 ← 应取它
+                  {"t": NOW - 1000, "type": "mark"}])
+st = mt.case_stats([c4], now=NOW)
+check("案件：乱序事件里取“时间最早的发现”（而非列表第一个）",
+      st["to_found"]["avg"] == 100.0 and st["rows"][0]["to_found_sec"] == 100)
+check("案件：乱序不影响结案时长", st["to_close"]["avg"] == 900.0)
+
+# 脏数据（缺 created）→ 跳过、不编时长，但报出条数（不静默）
+st = mt.case_stats([case("C001", created=NOW - 10),
+                    SimpleNamespace(case_id="C099", person_id="", status="x",
+                                    created=None, closed_at=None, events=[])], now=NOW)
+check("案件：缺 created 的行被跳过并计入 invalid",
+      st["total"] == 1 and st["invalid"] == 1)
+check("案件：无脏数据时 invalid=0", mt.case_stats([c1], now=NOW)["invalid"] == 0)
+
 # ---- 4) 汇总 / 空输入 ------------------------------------------------------
 d = mt.summarize(events=[], reports=[], cases=[], now=NOW,
                  window={"minutes": 60}, tsdb=False)
@@ -131,6 +153,21 @@ real = mt.case_stats(cm.open_cases(), now=NOW)
 row = [x for x in real["rows"] if x["case_id"] == c.case_id][0]
 check("真实对象：立案→发现 400s（用真 CaseManager 的 events）",
       row["to_found_sec"] == 400 and real["to_found"]["avg"] == 400.0)
+check("真实对象：invalid=0（真对象不会缺 created）", real["invalid"] == 0)
+
+# **单位约定的端到端锁**：不传 ts（用 cases.py 的默认值 int(time.time())）走一遍，
+# 断言算出的时长是“几秒”而不是“几万秒”。若哪天 cases.py 改成毫秒、而这里没跟着换算，
+# 这条会直接吐出来（而不是静默放大 1000 倍）。
+cm2 = cs.CaseManager(":memory:")
+r3 = reg.Registry(":memory:")
+pid3 = r3.add_person("单位锁")
+r3.register("CN-WH02-CCCCCCCC", person_id=pid3)
+c3, _, _ = cm2.mark(pid3, r3)                     # 默认 ts = int(time.time())
+cm2.on_found("CN-WH02-CCCCCCCC", r3, detail="report")
+st3 = mt.case_stats(cm2.open_cases(), now=int(__import__("time").time()))
+sec = st3["rows"][0]["to_found_sec"]
+check(f"单位锁：默认 ts 算出的“立案→发现”是 {sec}s（应为 0~5s，不是 1000 倍）",
+      sec is not None and 0 <= sec <= 5)
 
 print()
 if FAILS:

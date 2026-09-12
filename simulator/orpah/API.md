@@ -172,8 +172,14 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 - **案件不走窗口**：一个案子跨小时，按窗口切会把「立案→发现/结案」算错 —— 处置时长是全量口径。
 - **无样本 → `null`，不是 0**：`fail_ratio` / `rssi.avg` 在没有样本时为 `null`
   （0% 失败率与 0 dBm 都是真实值，拿来冒充"没有样本"会误导）。
+  ⚠ **消费约定**：判断"有没有数据"请用 `verify.total === 0` / `rssi.n === 0`，
+  **不要**用 `fail_ratio` 的真值 —— `null` 与 `0` 在 JS 里都是 falsy，用真值判断会把
+  "还没数据"与"0% 失败（好事）"当成同一件事（`metrics.html` 用的是 `null` 判断，显示「—」）。
 - **未结案的案件不进 `to_found` / `to_close` 的均值**（否则均值随等待时间漂移）；
   未结案在 `cases.open` 里单列，逐案 `elapsed_sec` 只在未结案时给（读者自己判断"已经等了多久"）。
+- `cases.invalid` = 因缺 `created` 被跳过的条数（脏数据不猜时长，但不静默：页面会在有值时提示）。
+- **时间单位**：案件相关的 `created` / `closed_at` / `events.t` / 各项时长都是**秒**
+  （与 `cases.py` / `registry` / `alerts.py` 同一约定）；`window.t0/t1` 与 `reports.t` 是**毫秒**。
 - `verify.by_alg` 是从审计 `detail` 里的 `alg=` **解析**出来的（审计没有结构化列），
   解析不到归 `unknown`，不猜。
 - `tsdb=false` 表示 IoTDB 未连：事件流/上报流为空，只有案件指标有意义（`metrics.html` 会提示）。

@@ -26,6 +26,7 @@
   .kv b { color: var(--acc); }
   .kv .u { color: var(--mut); }
   .hint.err { color: var(--red); }
+  .kv.err { color: var(--red); }
   /* 算法分布：横条（宽度按占比） */
   .bars { margin-top: 8px; }
   .bar { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }
@@ -85,6 +86,7 @@
     <div class="kv" id="cFound"></div>
     <div class="kv" id="cClose"></div>
     <div class="kv" id="cOpen"></div>
+    <div class="kv err" id="cInvalid" hidden></div>
     <table class="m" id="cTable"></table>
   </div>
   <div class="mcard">
@@ -151,6 +153,9 @@ function render(d) {
     .replace("{n}", (c.to_close && c.to_close.n) || 0);
   $("cOpen").innerHTML = T("mt_c_open")
     .replace("{o}", `<b>${c.open ?? 0}</b>`).replace("{t}", `<b>${c.total ?? 0}</b>`);
+  // 脏数据（缺 created 被跳过）：不猜时长，但也不能静默少报案件数
+  $("cInvalid").hidden = !c.invalid;
+  if (c.invalid) $("cInvalid").textContent = T("mt_c_invalid").replace("{n}", c.invalid);
   const head = `<tr><th>${T("case_th_id")}</th><th>${T("th_person")}</th>` +
                `<th>${T("mt_th_found")}</th><th>${T("mt_th_close")}</th>` +
                `<th>${T("mt_th_elapsed")}</th></tr>`;
