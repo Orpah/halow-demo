@@ -610,6 +610,11 @@
   三处调用点全部换掉；语义保持（非法→回退默认值，`from` 负数仍可用；`to` 非法仍显式 `bad_param`）。
   回归：`test_server.TestUiQueryArgs` 4 条（行为表 + **AST 守卫「源码里不再有 `*.isdigit()` 调用」**）+
   浏览器复测四条 URL 全部 200、正常路径（负 from / step / minutes）不变。
+  **同一处第 2 次被提（2026-09-13 下午）**：报告又建议改成 `replace("-", "").isdigit()` 或正则 `^-?\d+$`。
+  实测两点：① **建议 A 是无效修法** —— `"--123".replace("-", "")` 仍是 `"123"` → `isdigit()` 仍为 True
+  → `int("--123")` 照样抛，等于没修；② 建议 B（正则）能用，但会给"是不是整数"引入**第二套判据**，
+  与 `int()` 不一致（`+5` / `" 42 "` / `1_000` / Unicode 数字 `٣` 都是 `int()` 能解析而 `^-?\d+$` 判否）。
+  现实现 `_int_arg` 的定义就是**「`int()` 能解析什么就接受什么」**（唯一判据），故**维持不改**。
 - ❌ **驳回：`_api_upload` 的 `finally: settimeout(None)` 会抛 `OSError` 盖掉 400 响应**。代码里
   **本来就**用 `try/except OSError: pass` 包住了（读的是同一份源码，评审漏看那两行）。顺手实测确认
   `close()` 后的 socket 调 `settimeout(None)` **确实抛 OSError** → 所以那层 except 不能删；已加断言锁住。
