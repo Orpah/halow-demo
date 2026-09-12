@@ -19,6 +19,7 @@ sim.py — TXW8301 模拟器 PC 版（无硬件）
   telnet 127.0.0.1 9001   ->  AT+MODE=AP ...
 """
 import argparse
+import math
 import queue
 import socket
 import threading
@@ -101,7 +102,7 @@ def tcp_port_in_use(port):
     （Linux 不允许），于是「自己的模拟器」与「别人正在跑的 demo」会**静默共处**：
     客户端连上去可能落到另一个进程，表现为莫名其妙的假数据/假失败（本仓真踩过：
     test_sim.py 的 9401/9402 与 orpah-over-halow 的 ui_server 撞了，串口空口那条
-    数据用例恒红，而“已连接”却是真的——只不过连的是别人的模拟器）。
+    数据用例恒红，而"已连接"却是真的——只不过连的是别人的模拟器）。
     启动时探一下、占用了就喊一声，比事后排靠谱得多。
     """
     if not port:
@@ -115,6 +116,20 @@ def tcp_port_in_use(port):
 
 def mac_str(b):
     return ":".join("%02x" % x for x in b)
+
+
+def path_loss_db(distance_m, freq_mhz, n=2.0):
+    """对数距离路径损耗（参考距离 1 m）：
+
+        PL(dB) = 20·lg(f_MHz) − 27.55 + 10·n·lg(d_m)
+
+    f=908MHz / d=1m / n=2 → 31.6 dB（标准自由空间 1m 参考损耗）。
+    n=2 自由空间；室内 2.7~4。本函数据只服务于模拟器的**距离模型**：
+    接收端看到的信号 = 对端发射功率 − 本函数（见 Wifi._rssi_from）。
+    """
+    if distance_m <= 0:
+        return 0.0
+    return 20.0 * math.log10(freq_mhz) - 27.55 + 10.0 * n * math.log10(distance_m)
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +153,11 @@ class SimCfg:
         self.r_ssid = ""
         self.r_psk = ""
         self.rssi = -30
+        # 距离模型（AT+DIST=<米>）：>0 时 RSSI 由「对端发射功率 − 路径损耗」算出，
+        # AT+TXPOWER 因而真的影响对端看到的信号；0 = 不建模，用上面注入的 rssi
+        # （默认 0，即行为与以前完全一致）。
+        self.distance = 0.0
+        self.pathloss_n = 2.0       # 路径损耗指数：2=自由空间，2.7~4=室内
         self.group = bytes(6)
         self.aid = 0
 
@@ -151,7 +171,8 @@ class SimCfg:
             "tx_mcs": self.tx_mcs, "heart_int": self.heart_int,
             "ack_tmo": self.ack_tmo, "roam": self.roam, "ps_mode": self.ps_mode,
             "mac": mac_str(self.mac), "ssid": self.ssid, "psk": self.psk,
-            "rssi": self.rssi,
+            "rssi": self.rssi, "distance": self.distance,
+            "pathloss_n": self.pathloss_n,
         }
 
 
@@ -504,16 +525,42 @@ class Wifi:
         self.cfg = core.cfg
         self.conn = CONN_IDLE
         self.pairing = False
-        self.sta = []               # [(mac_bytes, rssi)]
+        self.sta = []               # [(mac_bytes, rssi_dbm)]：AP 关联表（RSSI 为 dBm 负值）
         self.tx_pkts = 0
         self.rx_pkts = 0
-        self.last_ap = None         # (ssid, freq, bw, rssi)
+        self.last_ap = None         # (ssid, freq, bw, rssi_dbm)
+        self.rssi_dbm = None        # 距离模型算出的对端信号；None = 用注入值 cfg.rssi
         self.rx_queue = []          # 待 host 读取的帧
         self.evt_queue = []
         self._next_beacon = 0
         self._next_retry = 0
         self._next_keepalive = 0
         self._last_peer = 0
+
+    # ---------------- 信号（RSSI） -------------
+    def _injected_dbm(self):
+        """手动注入的 RSSI（dBm 负值）。兼容旧写法：传正值当作幅度取负。"""
+        v = self.cfg.rssi
+        return -abs(v) if v > 0 else v
+
+    def _rssi_from(self, peer_tx_dbm):
+        """按距离模型算对端信号（dBm）。未建模 / 对端没自报功率 → None（回退注入值）。"""
+        c = self.cfg
+        if c.distance > 0 and peer_tx_dbm:
+            f = max(1.0, c.chan_list[0] / 10.0)          # chan_list 单位 0.1MHz
+            rx = peer_tx_dbm - path_loss_db(c.distance, f, c.pathloss_n)
+            return max(-120, min(0, int(round(rx))))
+        return None
+
+    def _observed_rssi(self):
+        """本机听到的对端信号（扫描/已连接都适用）。"""
+        return self.rssi_dbm if self.rssi_dbm is not None else self._injected_dbm()
+
+    def _uplink_rssi(self):
+        """上行链路信号：未连接/无 STA = 0（与 UI 的“无链路不亮信号条”一致）。"""
+        if self.conn != CONN_CONNECTED:
+            return 0
+        return self._observed_rssi()
 
     # ---------------- 查询 ----------------
     def mode(self):
@@ -525,12 +572,34 @@ class Wifi:
     def sta_count(self):
         return len(self.sta)
 
-    def get_rssi(self, index=0):
-        if self.cfg.mode == MODE_AP:
+    def find_sta(self, mac):
+        for m, r in self.sta:
+            if m == mac:
+                return (m, r)
+        return None
+
+    def get_rssi(self, index=None, mac=None):
+        """RSSI（dBm，负值；0 = 无链路 / 无该 STA）。
+
+        - `mac` 给定：取该 STA 的信号（没关联到 → 0）；
+        - `index` 给定（0 基，来自 `AT+RSSI=<n>` 的 n-1）：AP 取第 n 个 STA，
+          STA/APSTA 无 STA 则回退到上行链路值；
+        - 都不给：AP 取第一个 STA（无则 0），STA/APSTA 取上行链路值 —— 与以前一致。
+
+        AP 侧信号来自「STA 自报的发射功率 − 路径损耗」（每次关联/保活刷新）；
+        距离模型未启用（`AT+DIST` 为 0）时退回注入值，行为与以前一致。
+        """
+        c = self.cfg
+        if mac is not None:
+            hit = self.find_sta(mac)
+            return hit[1] if hit else 0
+        if index is not None:
             if 0 <= index < len(self.sta):
                 return self.sta[index][1]
-            return 0
-        return self.cfg.rssi if self.conn == CONN_CONNECTED else 0
+            return 0 if c.mode == MODE_AP else self._uplink_rssi()
+        if c.mode == MODE_AP:
+            return self.sta[0][1] if self.sta else 0
+        return self._uplink_rssi()
 
     def emit(self, text):
         self.core.out("event", text)
@@ -550,12 +619,15 @@ class Wifi:
             freq = (p[1 + ssid_len] << 8) | p[2 + ssid_len]
             bw = p[3 + ssid_len]
             enc = p[4 + ssid_len]
+            # beacon 末尾可选带 AP 的发射功率（1B）：STA 据此 + 距离算自己听到的信号
+            ap_tx = p[5 + ssid_len] if len(p) > 5 + ssid_len else None
             if not (c.ssid == "" or c.ssid.lower() == ssid.lower()):
                 return
             if not c.chan_in_list(freq) or bw != c.bss_bw:
                 return
             self._last_peer = self.core.now()
-            self.last_ap = (ssid, freq, bw, c.rssi)
+            self.rssi_dbm = self._rssi_from(ap_tx)
+            self.last_ap = (ssid, freq, bw, self._observed_rssi())
             if self.conn in (CONN_IDLE, CONN_DISCONNECTED):
                 self.conn = CONN_SCANNING
             if self.conn == CONN_SCANNING:
@@ -582,6 +654,11 @@ class Wifi:
                 return
             req_ssid = p[1:1 + ssid_len].decode("utf-8", "replace")
             sta_mac = p[1 + ssid_len:1 + ssid_len + 6]
+            # ASSOC_REQ 末尾可选带该 STA 的发射功率（1B）：AP 据此 + 距离算出它听到的信号
+            sta_tx = p[1 + ssid_len + 6] if len(p) > 1 + ssid_len + 6 else None
+            rssi = self._rssi_from(sta_tx)
+            if rssi is None:
+                rssi = self._injected_dbm()
             if not (c.ssid == "" or req_ssid == "" or
                     req_ssid.lower() == c.ssid.lower()):
                 return
@@ -591,13 +668,17 @@ class Wifi:
                 payload = bytes([len(c.ssid)]) + c.ssid.encode() + \
                     bytes([len(psk_b)]) + psk_b
                 self.core.link.send(LINK_TYPE_PAIR_PSK, payload)
-            # 加入 STA 表
-            if sta_mac not in [s[0] for s in self.sta] and len(self.sta) < MAX_STA:
-                self.sta.append((sta_mac, 0 - c.rssi))
+            # 加入/更新 STA 表（保活重发也走这里 → 距离模型下信号会持续刷新）
+            hit = self.find_sta(sta_mac)
+            if hit is None and len(self.sta) < MAX_STA:
+                self.sta.append((sta_mac, rssi))
                 self.emit("+STA_CONNECTED")
+            elif hit is not None:
+                self.sta[self.sta.index(hit)] = (sta_mac, rssi)
             self.conn = CONN_CONNECTED
             self._last_peer = self.core.now()
-            self.core.link.send(LINK_TYPE_ASSOC_RESP, bytes([0, 0 - c.rssi]))
+            self.core.link.send(LINK_TYPE_ASSOC_RESP,
+                                bytes([0, rssi & 0xFF]))
 
         elif t == LINK_TYPE_PAIR_PSK:
             if len(p) < 3:
@@ -647,6 +728,7 @@ class Wifi:
             if now >= self._next_beacon:
                 b = bytes([len(c.ssid)]) + c.ssid.encode()
                 b += bytes([c.chan_list[0] >> 8, c.chan_list[0] & 0xFF, c.bss_bw, c.keymgmt])
+                b += bytes([c.txpower & 0xFF])      # 末字节：本 AP 发射功率（供对端算 RSSI）
                 self.core.link.send(LINK_TYPE_BEACON, b)
                 self._next_beacon = now + 0.5
             if self.sta and now - self._last_peer > 8:
@@ -655,7 +737,7 @@ class Wifi:
                 self.emit("+STA_DISCONNECTED")
         if c.mode in (MODE_STA, MODE_APSTA) and self.conn == CONN_ASSOCIATING:
             if now >= self._next_retry:
-                req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac
+                req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
                 self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
                 self._next_retry = now + 0.5
         if c.mode in (MODE_STA, MODE_APSTA) and self.conn == CONN_CONNECTED:
@@ -664,7 +746,7 @@ class Wifi:
                 self.emit("+DISCONNECTED")
             # 保活：周期重发关联请求，避免被 AP 当作静默 STA 丢弃
             if now >= self._next_keepalive:
-                req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac
+                req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
                 self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
                 self._next_keepalive = now + 2.0
 
@@ -702,6 +784,7 @@ class Wifi:
         self.sta = []
         self.tx_pkts = self.rx_pkts = 0
         self.last_ap = None
+        self.rssi_dbm = None
         self.rx_queue = []
         self.evt_queue = []
         self._next_beacon = 0
@@ -849,12 +932,78 @@ class At:
         self.ok()
 
     def h_rssi(self, a):
-        idx = 0
+        """AT+RSSI[=<n>|<MAC>]：查信号强度（dBm 负值；0 = 无链路/无该 STA）。
+
+        - `<n>`（从 1 起）：AP 取第 n 个关联 STA；STA/APSTA 取本机上行链路；
+        - `<MAC>`：按 MAC 取某个 STA（文档一直写着这形式，以前没实现）；
+        - 开了距离模型（`AT+DIST`）时，值是「对端自报发射功率 − 路径损耗」算出来的。
+        """
+        if a and a != "?" and ":" in a:
+            mac = parse_mac(a)
+            if mac is None:
+                self.err()
+                return
+            self.resp("RSSI", str(self.core.wifi.get_rssi(mac=mac)))
+            return
+        idx = None
         if a and a != "?":
-            idx = atoi(a)
-            if idx > 0:
-                idx -= 1
-        self.resp("RSSI", str(self.core.wifi.get_rssi(idx)))
+            n = atoi(a)
+            if n > 0:
+                idx = n - 1
+        self.resp("RSSI", str(self.core.wifi.get_rssi(index=idx)))
+
+    def h_stalist(self, a):
+        """AT+STALIST —— **本模拟器扩展**：AP 的关联 STA 表（单行，便于轮询解析）。
+
+            STALIST:2,82:59:13:64:70:90=-55,aa:bb:cc:dd:ee:ff=-61   # 个数,MAC=RSSI,…
+            STALIST:0                                                # 空表
+
+        真机没有这个命令（会回 ERROR）；PC 模拟器的 UI 直接读进程内状态，不需要它。
+        """
+        st = self.core.wifi.sta
+        if not st:
+            self.resp("STALIST", "0")
+            return
+        body = ",".join("%s=%d" % (mac_str(m), r) for m, r in st)
+        self.resp("STALIST", "%d,%s" % (len(st), body))
+
+    def h_dist(self, a):
+        """AT+DIST=<米> —— **本模拟器扩展**：距离模型（>0 开，0 关 = 用注入的 RSSI）。
+
+        开启后 RSSI = 对端自报的发射功率 − 路径损耗(f, d, n)，即 `AT+TXPOWER` 真的
+        会改变对端看到的信号强度（以前它只是“存起来的参数”）。
+        """
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("DIST", "%g" % c.distance)
+            return
+        try:
+            v = float(a)
+        except ValueError:
+            self.err()
+            return
+        if not 0.0 <= v <= 100000.0:
+            self.err()
+            return
+        c.distance = v
+        self.ok()
+
+    def h_pathloss(self, a):
+        """AT+PATHLOSS=<n> —— 本模拟器扩展：路径损耗指数（2=自由空间，2.7~4=室内）。"""
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("PATHLOSS", "%g" % c.pathloss_n)
+            return
+        try:
+            v = float(a)
+        except ValueError:
+            self.err()
+            return
+        if not 1.0 <= v <= 8.0:
+            self.err()
+            return
+        c.pathloss_n = v
+        self.ok()
 
     def h_conn_state(self, a):
         self.resp("CONN_STATE", self.core.wifi.conn_str())
@@ -867,6 +1016,8 @@ class At:
         self.out(f"CHAN_LIST:{','.join(str(x) for x in c.chan_list)}")
         self.out("KEYMGMT:" + ("WPA-PSK" if c.keymgmt == KEY_WPA_PSK else "NONE"))
         self.out(f"TXPOWER:{c.txpower}")
+        self.out(f"DIST:{c.distance:g}")            # 距离模型：米（0 = 不建模）
+        self.out(f"PATHLOSS:{c.pathloss_n:g}")      # 路径损耗指数
         self.out(f"TX_MCS:{c.tx_mcs}")
         self.out(f"HEART_INT:{c.heart_int}")
         self.out(f"ACKTMO:{c.ack_tmo}")
@@ -1089,11 +1240,14 @@ class At:
 
 
 # 命令表（存方法名，运行时 getattr 绑定 self）
+# 注：`AT+STALIST` / `AT+DIST` / `AT+PATHLOSS` / `AT+SYSDBG` / `AT+TXDATA` 是
+# **本模拟器扩展**（真实模块没有，收到会回 ERROR）；文档在 docs/AT_commands.md 里单列。
 At.TABLE = {
     "AT+MODE": "h_mode", "AT+SSID": "h_ssid", "AT+KEYMGMT": "h_keymgmt",
     "AT+PSK": "h_psk", "AT+PAIR": "h_pair", "AT+BSS_BW": "h_bss_bw",
     "AT+FREQ_RANGE": "h_freq_range", "AT+CHAN_LIST": "h_chan_list",
     "AT+RSSI": "h_rssi", "AT+CONN_STATE": "h_conn_state",
+    "AT+STALIST": "h_stalist", "AT+DIST": "h_dist", "AT+PATHLOSS": "h_pathloss",
     "AT+WNBCFG": "h_wnbcfg", "AT+SCAN_AP": "h_scan_ap",
     "AT+BSSLIST": "h_bsslist", "AT+MAC_ADDR": "h_mac_addr",
     "AT+VERSION": "h_version", "AT+TXPOWER": "h_txpower",

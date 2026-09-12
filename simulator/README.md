@@ -46,7 +46,7 @@ simulator/
 │   └── Simulator/             # TXW8301 模拟核心（AT / 状态机 / 链路）
 ├── host/
 │   ├── sim.py                 # PC 版模拟器（纯软件，无硬件，TCP 控制台+虚拟空口+host 数据口）
-│   ├── test_sim.py / run_tests.py  # 回归测试（AT/连接/转发/配对/串口空口/host 数据口，27 项）
+│   ├── test_sim.py / run_tests.py  # 回归测试（AT/连接/转发/配对/串口空口/host 数据口/RSSI 模型，36 项）
 └── tools/
     ├── sim_config.py          # 上位机工具（UART/SPI 访问模拟器，类 thalow_config.py）
     ├── ui/                    # Web 仪表盘（server.py + 前端，双机视图/控制台/帧监视/配置）
@@ -72,6 +72,9 @@ simulator/
   `AT+LOADDEF`、`AT+SYSDBG`、`AT+TXDATA`。
 - **模拟无线状态机**：AP / STA / APSTA / GROUP；扫描→关联→连接；配对（PAIR）；
   可配置的模拟 RSSI；连接 / 配对事件主动上报。
+- **空口参数面板**（UI）：发射功率、**距离模型**（路径损耗指数 → RSSI 随距离/功率变化）、
+  关联 STA 表（MAC + 实时 RSSI）；对应 `AT+TXPOWER` / `AT+DIST` / `AT+PATHLOSS` / `AT+STALIST`
+  （后三条是**模拟器扩展**，见 [docs/AT_commands.md](docs/AT_commands.md) §8）。
 - **虚拟空口**：两片模拟器用 UART2 交叉链路互联，二层透明转发以太网帧，
   等价于真实模块的 RJ45↔HaLow 桥（数据通路在 SPI 侧）。
 - **指示灯**：CONN 连接灯 + 4 颗 RSSI 信号灯（信号越好亮灯越多，同参考板）。
@@ -110,7 +113,7 @@ python server.py --host-sim        # 进程内启动 AP+STA 两台 PC 模拟器�
   也用于交叉验证固件逻辑（曾发现 3 处固件 bug：beacon 长度、查询解析、配对格式）。
 - 帧监视：点"帧监视: 开"后，在设备 A 控制台发 `AT+TXDATA=20` + 20 字节原始数据，
   即可在帧监视器看到 A `TX` / B `RX` 两条记录（无硬件演示数据通路）。
-- 回归测试：`python host/run_tests.py`（**27/27 通过**；结果同时写进 `host/test_results.txt`）。
+- 回归测试：`python host/run_tests.py`（**36/36 通过**；结果同时写进 `host/test_results.txt`）。
 - 一键自检：`python run_checks.py`（套件 = 模拟器回归 + 界面文案字典 + 静态检查 py/js/json/tasks，
   报告写 `simulator/checks_report.md`）。
 - **给上层程序用的数据面**（不是 AT 敲帧）：`--host <port>` 开一个 host 数据口，

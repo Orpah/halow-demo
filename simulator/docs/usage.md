@@ -87,6 +87,8 @@ python tools/ui/server.py --a COM3:txah --b COM4:txah
 - **TXPOWER / 断链自愈 / 休眠（2026-09-07 实测）**：
   - `AT+TXPOWER=1..20` 生效（`TXPOWER?` 读回），但**近距离 RSSI 看不出功率差**（桌面级信号饱和），
     验证功率↔距离需拉开几米；`AT+ACK_TO=` 仅 >1km 通信才需要。
+    > 模拟器里不用真拉距离就能验证：`AT+DIST=<米>` 开距离模型（见 `docs/AT_commands.md` §8），
+    > RSSI 就变成「对端发射功率 − 路径损耗」——降功率/加距离都能看到 dB 级变化。
   - 断链自愈：AP 复位期间 STA 正确转 `SCANNING`，~15s 内自动重连（UI 断/连两向状态都准确）。
   - `AT+DSLEEP=1`（连接态）= 保活休眠：链路保持、AT 仍可用；AP 端 `AT+WAKEUP=<sta_mac>` 远程唤醒
     命令被接受。深度休眠（非连接态）未测——可能睡到需物理重插 USB。
@@ -315,7 +317,7 @@ python tools/sim_config.py COM4 status
 |------|-------------|
 | 串口无 `OK` | 波特率不对（应为 115200）/ 线没接 / BOOT0 状态异常 |
 | 两板连不上 | 确认 SSID、BSS_BW、CHAN_LIST 一致；虚拟空口 TX↔RX 交叉且共地 |
-| `AT+RSSI` 恒定 | 模拟 RSSI 默认固定，可在 `sim_cfg` 调整或注入 |
+| `AT+RSSI` 恒定 | 默认是注入的固定值（模拟器 `sim_cfg.rssi`，默认 -30）。要看距离/功率的影响就用 `AT+DIST=<米>` 开距离模型（模拟器扩展，`docs/AT_commands.md` §8） |
 | CONN 灯不亮 | 检查 PC13 接线与 `board.h` 中 `CONN_LED_ACTIVE_LOW` |
 | SPI 无应答 | 检查模式 0、CS/IRQ 电平、`AT_CMD` 需以 `\r\n` 结尾 |
 

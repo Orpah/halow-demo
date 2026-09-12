@@ -41,9 +41,14 @@ function linkText(raw) {
 
 const state = {
   A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0,
+       source: "", target: "",
+       // 发射功率 / 距离模型 / 关联 STA（null = 该设备报不出来，界面显示 “-”）
+       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [] },
   B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
-       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0 },
+       ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0,
+       source: "", target: "",
+       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [] },
 };
 const consoles = { A: [], B: [] };
 let frames = [];
@@ -58,6 +63,7 @@ const AT_CMDS = [
   { cmd: "AT+PAIR=" }, { cmd: "AT+BSS_BW=" },
   { cmd: "AT+FREQ_RANGE=" }, { cmd: "AT+CHAN_LIST=" },
   { cmd: "AT+RSSI" }, { cmd: "AT+CONN_STATE" }, { cmd: "AT+WNBCFG" },
+  { cmd: "AT+STALIST" }, { cmd: "AT+DIST=" }, { cmd: "AT+PATHLOSS=" },
   { cmd: "AT+SCAN_AP" }, { cmd: "AT+BSSLIST" },
   { cmd: "AT+TXPOWER=" }, { cmd: "AT+ACKTMO=" }, { cmd: "AT+TX_MCS=" },
   { cmd: "AT+HEART_INT=" }, { cmd: "AT+UNPAIR=" }, { cmd: "AT+LOADDEF=" },
@@ -265,6 +271,16 @@ function updateStatus(d) {
   $(`tx${d}`).textContent = s.tx ?? 0;
   $(`rx${d}`).textContent = s.rx ?? 0;
   $(`up${d}`).textContent = (s.uptime ?? 0) + "s";
+  // 发射功率（+ 距离模型的米数）/ 关联 STA 数：真机报不出来的字段显示 “-”（不编值）
+  $(`txpow${d}`).textContent = (s.txpower === null || s.txpower === undefined)
+    ? "-" : (s.txpower + " dBm" + (s.dist ? " @ " + s.dist + "m" : ""));
+  $(`sta${d}`).textContent = (s.stacnt === null || s.stacnt === undefined) ? "-" : s.stacnt;
+  const sl = $(`staList${d}`);
+  if (sl) {
+    const rows = (s.stas || []).map((x) => `${x.mac} ${x.rssi}dBm`);
+    sl.textContent = rows.join("  ·  ");
+    sl.title = rows.join("\n");
+  }
   // RSSI 条（4 格）+ dBm 数值（v2=TX-AH 是 dBm；其它只显数字，不硬加单位防误导）
   let v = Math.max(0, Math.min(4, s.rssi ? rssiBars(s.rssi) : 0));
   if (s.rssi && v < 1) v = 1;   // 有信号(已关联)至少 1 格：弱链路(-80 以下)也别显示成“无信号”
@@ -434,7 +450,24 @@ function applyConfig() {
     }
   }
   cmds.push(`AT+CHAN_LIST=${chan}`, `AT+BSS_BW=${bw}`);
+  const tx = $("cfgTx") ? $("cfgTx").value : "";
+  if (tx) cmds.push(`AT+TXPOWER=${tx}`);     // 真机也支持（TX-AH V2 同样有 TXPOWER）
   cmds.forEach((c) => sendCmd(d, c));
+  // 距离模型是本模拟器扩展，而且是**链路属性**（每个方向各自算：RSSI = 对端发射功率 − 本机设的距离损耗）
+  // → 同时下发给两台 PC 模拟器；真机没有这两条命令（会回 ERROR），所以只对模拟器发。
+  const dist = $("cfgDist") ? $("cfgDist").value.trim() : "";
+  if (dist !== "") {
+    const sims = ["A", "B"].filter((x) => state[x].source === "pc");
+    if (!sims.length) {
+      alert(T("tui_cfg_pl_hint"));
+      return;
+    }
+    const pl = $("cfgPl") ? $("cfgPl").value : "";
+    sims.forEach((x) => {
+      sendCmd(x, `AT+DIST=${dist}`);
+      if (pl) sendCmd(x, `AT+PATHLOSS=${pl}`);
+    });
+  }
 }
 
 /* ---------------- AT 命令输入提示 ---------------- */

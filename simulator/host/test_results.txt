@@ -23,6 +23,7 @@
   [PASS] T AT+RSSI -> +RSSI:
   [PASS] T AT+RSSI? 兼容
   [PASS] T AT+VERSION=? 兼容
+  [PASS] T 无 STA 时 STALIST:0
 == 6. 串口空口（PC <-> 真实 CH32V203 板 UART2） ==
   [PASS] 串口空口 B(STA) CONNECTED
   [PASS] 串口空口 A(AP) CONNECTED
@@ -32,8 +33,17 @@
   [PASS] A host 注入 -> 空口 -> B host 收到  (len=27)
   [PASS] B host 注入 -> 空口 -> A host 收到  (len=27)
   [PASS] 短帧/坏 CRC/非 DATA 帧被丢弃，好帧仍按序到达  (len=23)
-== 8. 收尾 ==
+== 8. RSSI 距离模型 + STA 关联表（模拟器扩展 AT+DIST/AT+PATHLOSS/AT+STALIST） ==
+  [PASS] 默认距离模型关（DIST:0）
+  [PASS] 默认 RSSI = 注入值 -30
+  [PASS] 10m 距离模型：B 收到 ≈ -32 dBm（不再是注入的 -30）  (rssi=-32)
+  [PASS] AP 发射功率降低 14dB → B 收到信号同步降低（≈ -46 dBm）  (rssi=-46（原 -32）)
+  [PASS] A 的 STA 表里有 B 的 MAC
+  [PASS] A 侧看到的 STA 信号随其发射功率变化（≈ -46 dBm）  (rssi=-46)
+  [PASS] 按 MAC 查 RSSI 与按索引一致
+  [PASS] 关距离模型后 B 回到注入值 -30
+== 9. 收尾 ==
 
-结果: 27/27 通过
+结果: 36/36 通过
 
 --- stderr ---

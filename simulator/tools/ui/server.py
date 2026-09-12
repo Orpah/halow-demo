@@ -79,7 +79,9 @@ STOP = threading.Event()
 
 # 状态轮询命令
 POLL_STATUS = ["AT+CONN_STATE", "AT+RSSI"]
-POLL_SLOW = ["AT+MODE?", "AT+SSID?", "AT+CHAN_LIST?", "AT+BSS_BW?"]
+POLL_SLOW = ["AT+MODE?", "AT+SSID?", "AT+CHAN_LIST?", "AT+BSS_BW?",
+             "AT+TXPOWER?",          # 发射功率（真机 TX-AH 同样有，不支持则 ERROR 被忽略）
+             "AT+DIST?"]             # 距离模型（模拟器扩展；真机 ERROR）
 
 # 真实串口设备的实时性判定 / 断开自愈（2026-09-07 加）：
 #   板子断电/死机/休眠丢流后不再回任何字节 → 状态冻结在旧 CONNECTED（无超时）。
@@ -256,17 +258,39 @@ class HostSims:
         return core
 
 
+def _sim_probe(core):
+    """PC 模拟器的内省探针：把内部计数 / STA 表 / 空口参数搬给 UI（不走 AT）。
+
+    与真机路径（串口 AT 轮询）结果填进同一组 state 字段，前端不分家。
+    """
+    def probe():
+        import sim as hsim              # sys.path 由 HostSims._hsim() 保证已加
+        w = core.wifi
+        return {
+            "tx": w.tx_pkts, "rx": w.rx_pkts,
+            "stacnt": w.sta_count(),
+            "stas": [{"mac": hsim.mac_str(m), "rssi": r} for m, r in w.sta],
+            "txpower": core.cfg.txpower,
+            "dist": core.cfg.distance,
+            "pathloss": core.cfg.pathloss_n,
+        }
+    return probe
+
+
 class Device:
     """一台模拟器：传输层(串口/TCP) + 状态轮询 + 行分类推送。"""
 
     def __init__(self, name, transport, port, source="serial", target="sim",
-                 link_desc=""):
+                 link_desc="", probe=None):
         self.name = name
         self.transport = transport
         self.port = port               # 简短端口描述（TCP :9011 / 串口 COM5 / COM3）
         self.source = source            # pc / serial
         self.target = target            # sim / tj45
         self.link_desc = link_desc      # 空口描述
+        # 内省通道（仅进程内 PC 模拟器）：直读模拟器内部状态，不经 AT。
+        # 真机只能在串口上问 AT（一次一条 + 方言/时序坑），没有这个口子。
+        self.probe = probe
         self.label = f"{device_type(source, target)} · {port}"
         self.state = {
             "name": name, "port": port, "type": device_type(source, target),
@@ -278,6 +302,10 @@ class Device:
             "chan": "", "bw": 0,        # 工作频点列表(×10 单位) / 带宽 MHz（CHAN_LIST/BSS_BW 轮询）
             "power": "off" if source == "serial" else "on",   # 开机/关机（真机首次收到字节前显示关机）
             "version": "", "tx": 0, "rx": 0, "uptime": 0,
+            # 空口参数面板用（None = 该设备报不出来 → 界面显示 “-”，不编值）：
+            #   txpower 发射功率 dBm；dist/pathloss 距离模型（模拟器扩展）；stacnt/stas 关联 STA
+            "txpower": None, "dist": 0.0, "pathloss": None,
+            "stacnt": None, "stas": [],
         }
         self.t0 = time.time()
         self.buf = b""
@@ -689,6 +717,28 @@ class Device:
                 self.push("status", state=dict(self.state))
                 echo(line)
                 return
+            if k == "TXPOWER":
+                m = re.search(r"-?\d+", v)
+                if m:
+                    self.state["txpower"] = int(m.group(0))
+                self.push("status", state=dict(self.state))
+                echo(line)
+                return
+            if k in ("DIST", "PATHLOSS"):      # 模拟器扩展（真机回 ERROR，不会进这里）
+                try:
+                    self.state["dist" if k == "DIST" else "pathloss"] = float(v)
+                except ValueError:
+                    pass
+                self.push("status", state=dict(self.state))
+                echo(line)
+                return
+            if k == "STALIST":
+                n, stas = self._parse_stalist(v)
+                self.state["stacnt"] = n
+                self.state["stas"] = stas
+                self.push("status", state=dict(self.state))
+                echo(line)
+                return
         # 事件：+CONNECTED / +PAIR SUCCESS 等（无冒号或非状态键）
         if had_plus:
             self.push("event", text=line, dir="rx")
@@ -733,6 +783,44 @@ class Device:
             while b"\n" in self.buf:
                 line, self.buf = self.buf.split(b"\n", 1)
                 self.handle_line(line.decode("utf-8", "replace"))
+
+    @staticmethod
+    def _parse_stalist(v):
+        """`STALIST:<n>,<mac>=<rssi>,…` → (n, [{'mac':…,'rssi':…}])（空表 = `STALIST:0`）。"""
+        parts = [x.strip() for x in v.split(",") if x.strip()]
+        stas = []
+        for it in parts[1:]:
+            mac, _, r = it.partition("=")
+            try:
+                stas.append({"mac": mac, "rssi": int(r)})
+            except ValueError:
+                continue
+        try:
+            n = int(parts[0]) if parts else 0
+        except ValueError:
+            n = len(stas)
+        return n, stas
+
+    def _apply_probe(self):
+        """内省通道（仅进程内 PC 模拟器）：把模拟器内部状态搬进 state。
+
+        为什么不统一走 AT：真机只能在串口上一条一条问（还有方言/时序坑），而 PC 模拟器
+        是**同进程对象** —— 直读字段最准、不占串口、不刷控制台。两者结果填进**同一组**
+        state 字段，前端不需要分支。
+        """
+        if not self.probe:
+            return
+        try:
+            extra = self.probe() or {}
+        except Exception:              # noqa: BLE001 —— 内省失败不该拖埪轮询
+            return
+        changed = False
+        for k, val in extra.items():
+            if self.state.get(k) != val:
+                self.state[k] = val
+                changed = True
+        if changed:
+            self.push("status", state=dict(self.state))
 
     def poll_loop(self):
         last_slow = 0
@@ -811,6 +899,7 @@ class Device:
                         time.sleep(1.3)
                 time.sleep(0.4)
             else:
+                self._apply_probe()                          # PC 模拟器：直读内部计数/STA 表
                 self._poll_until = time.time() + 1.5        # 进入轮询响应窗口（状态行不进控制台）
                 for c in self.poll_status:
                     self.send(c)
@@ -1014,12 +1103,13 @@ def main():
                     other = DEVICES.get("A" if name == "B" else "B")
                     if other and getattr(other, "source", None) == "pc":
                         peer = ("127.0.0.1", PC_PORTS["A"][1])
-                hosts.add(name, role, console_p, link_p, peer, target,
-                          link_serial=link_serial)
+                core = hosts.add(name, role, console_p, link_p, peer, target,
+                                 link_serial=link_serial)
                 link_hint = (f"{L('lk_serial')} {link_serial}" if link_serial
                              else f"TCP :{link_p}")
                 dev = Device(name, TcpTransport("127.0.0.1", console_p), link_hint,
-                             source="pc", target=target, link_desc=link_hint)
+                             source="pc", target=target, link_desc=link_hint,
+                             probe=_sim_probe(core))
             else:
                 # 真机串口的物理互联介质：native(CH32V203 模拟器板)=UART2 交叉线，
                 # 其余(tah/hc01，T-Halow/TX-AH/HT-HC01)=真实射频 RF

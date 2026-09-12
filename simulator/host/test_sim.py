@@ -9,6 +9,7 @@ test_sim.py — PC 版模拟器自测
 运行：python test_sim.py   （无硬件、无第三方依赖）
 """
 import os
+import re
 import socket
 import sys
 import threading
@@ -31,6 +32,12 @@ PASS = []
 def check(name, cond, detail=""):
     PASS.append(cond)
     print(f"  [{'PASS' if cond else 'FAIL'}] {name}" + (f"  ({detail})" if detail else ""))
+
+
+def last_rssi(buf):
+    """从控制台缓冲里取最后一个 RSSI 值（dBm）。"""
+    ms = re.findall(r"RSSI:(-?\d+)", buf)
+    return int(ms[-1]) if ms else None
 
 
 class HostClient:
@@ -223,6 +230,9 @@ def main():
     t.send("AT+VERSION=?")                # 真实板文档写法
     t.pump(0.4)
     check("T AT+VERSION=? 兼容", "+VERSION:" in t.buf)
+    t.send("AT+STALIST")                  # 模拟器扩展命令在 tah 方言下也带 + 前缀、无 OK
+    t.pump(0.4)
+    check("T 无 STA 时 STALIST:0", "+STALIST:0" in t.buf)
     t.close = None
     t.s.close()
 
@@ -316,7 +326,62 @@ def main():
     hA.close()
     hB.close()
 
-    print("== 8. 收尾 ==")
+    print("== 8. RSSI 距离模型 + STA 关联表（模拟器扩展 AT+DIST/AT+PATHLOSS/AT+STALIST） ==")
+    # 默认关距离模型（distance=0）→ RSSI 就是注入值，行为与以前一致
+    a.send("AT+DIST?")
+    a.pump(0.4)
+    check("默认距离模型关（DIST:0）", "DIST:0" in a.buf)
+    b.send("AT+RSSI")
+    b.pump(0.6)
+    check("默认 RSSI = 注入值 -30", last_rssi(b.buf) == -30)
+    # 开距离模型：10 m @908MHz、n=2 → PL≈51.6dB；AP 发 20dBm → B 应收 ≈ -32 dBm
+    #（f=908MHz: 20lg908=59.16；PL=59.16-27.55+20lg10=51.61）
+    # 距离是**链路属性**：每个方向各自算（本机拿对端自报的功率 − 本机设的距离），
+    # 所以两端都要设（UI 的配置面板会把 AT+DIST 同时下发给 A/B）。
+    for cli in (a, b):
+        cli.send("AT+DIST=10")
+    a.send("AT+TXPOWER=20")
+    a.pump(0.4)
+    b.pump(0.3)
+    time.sleep(1.3)                        # 等下一个 beacon（0.5s 一次）
+    r10 = (b.send("AT+RSSI"), b.pump(0.6), last_rssi(b.buf))[2]
+    check("10m 距离模型：B 收到 ≈ -32 dBm（不再是注入的 -30）",
+          r10 is not None and abs(r10 + 31.6) <= 1.5, f"rssi={r10}")
+    # 发射功率真的影响对端（以前 AT+TXPOWER 只是存起来）：降 14dB → RSSI 也应降 ~14dB
+    a.send("AT+TXPOWER=6")
+    a.pump(0.3)
+    time.sleep(1.3)
+    b.send("AT+RSSI")
+    b.pump(0.6)
+    r6 = last_rssi(b.buf)
+    check("AP 发射功率降低 14dB → B 收到信号同步降低（≈ -46 dBm）",
+          r6 is not None and abs(r6 + 45.6) <= 1.5, f"rssi={r6}（原 {r10}）")
+    # AP 侧关联表：按索引 / 按 MAC 查同一个 STA，且随该 STA 的发射功率变化
+    a.send("AT+STALIST")
+    a.pump(0.6)
+    check("A 的 STA 表里有 B 的 MAC",
+          ("STALIST:1," + sim.mac_str(coreB.cfg.mac) + "=") in a.buf)
+    b.send("AT+TXPOWER=6")
+    b.send("AT+MODE=STA")                 # 重新关联（清状态 → 立即带新功率重发 ASSOC_REQ）
+    b.pump(0.4)
+    time.sleep(1.6)
+    a.send("AT+RSSI=1")
+    a.pump(0.6)
+    ap_rssi = last_rssi(a.buf)
+    check("A 侧看到的 STA 信号随其发射功率变化（≈ -46 dBm）",
+          ap_rssi is not None and abs(ap_rssi + 45.6) <= 1.5, f"rssi={ap_rssi}")
+    a.send(f"AT+RSSI={sim.mac_str(coreB.cfg.mac)}")
+    a.pump(0.6)
+    check("按 MAC 查 RSSI 与按索引一致", last_rssi(a.buf) == ap_rssi)
+    for cli in (a, b):                     # 关也是两端的事
+        cli.send("AT+DIST=0")
+    b.pump(0.4)
+    time.sleep(0.3)                        # 等一次 beacon 刷新
+    b.send("AT+RSSI")
+    b.pump(0.6)
+    check("关距离模型后 B 回到注入值 -30", last_rssi(b.buf) == -30)
+
+    print("== 9. 收尾 ==")
     stop.set()
     a.s.close()
     b.s.close()

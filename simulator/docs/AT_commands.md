@@ -69,10 +69,16 @@ AT+PAIR=0
 ### `AT+RSSI`  ✔
 ```
 AT+RSSI?           → RSSI:-47\r\nOK
-AT+RSSI=1          → 按索引查询
-AT+RSSI=f4:de:09:68:6c:20  → 按 MAC 查询
+AT+RSSI=1          → 按索引（从 1 起）查某个关联 STA（AP）
+AT+RSSI=-47        → 手动注入固定值（同时**关闭**距离模型）
+AT+RSSI=f4:de:09:68:6c:20  → 按 MAC 查（本模拟器扩展）
 ```
-模拟 RSSI 由 `sim_cfg` 提供（默认 -30，可配），配对/连接后保持。
+- 单位 = **dBm（负值）**；`0` = 无链路 / 无该 STA。
+- 值从哪来：默认是注入值（`sim_cfg.rssi`，默认 `-30`）；开了**距离模型**
+  （`AT+DIST=<米>`，见 §8）后 = 对端自报的发射功率 − 路径损耗。
+  → 即 `AT+TXPOWER` 现在**真的**会改变对端看到的信号强度（以前它只是“存起来的参数”）。
+- AP 侧：`AT+RSSI=1` 取第 1 个关联 STA 的信号，该值随对端保活（每 2s）持续刷新。
+- 兼容：传正值当幅度取负（旧写法 `AT+RSSI=30` → `-30`）。
 
 ### `AT+CONN_STATE`  ✔
 ```
@@ -81,7 +87,8 @@ AT+CONN_STATE      → CONN_STATE:CONNECTED\r\nOK
 取值：`IDLE` / `SCANNING` / `ASSOCIATING` / `CONNECTED` / `DISCONNECTED`。
 
 ### `AT+WNBCFG`  ✔
-查看设备参数（类似真实固件的 syscfg dump）。
+查看设备参数（类似真实固件的 syscfg dump）。本模拟器还会打出 `TXPOWER` / `DIST` /
+`PATHLOSS`（空口参数面板读的就是这几个值）。
 
 ### `AT+SCAN_AP`  ✔（模拟扫描）
 ```
@@ -103,7 +110,7 @@ AT+SCAN_AP=2       → 模拟扫描 N 秒，随后用 AT+BSSLIST 读取
 
 | 命令 | 说明 | 状态 |
 |------|------|------|
-| `AT+TXPOWER=[6~20]` | 发射功率(dBm) | △ 保存参数 |
+| `AT+TXPOWER=[6~20]` | 发射功率(dBm) | ✔ 影响对端 RSSI（需 `AT+DIST`>0，见 §8） |
 | `AT+ACKTMO=[us]` | ACK 超时 | △ 保存参数 |
 | `AT+TX_MCS=[0~7/255]` | TX MCS，255=自动 | △ 保存参数 |
 | `AT+HEART_INT=[ms]` | 心跳间隔 | △ 保存参数（AP 同步给 STA） |
@@ -158,3 +165,31 @@ at+txdata=24                 // 14字节以太网头 + 10字节数据
 `AT+SCAN_AP` 之外的射频测试命令（`AT+TX_CW`、`AT+QA_START`、`AT+TX_CONT`、
 `AT+REG_RD/WT`、`AT+ADC_DUMP` 等）统一返回 `ERROR`，避免 host 误以为已执行。
 如需扩展，在 `sim_at.c` 命令表追加即可。
+
+---
+
+## 8. 模拟器扩展命令（真实模块没有）
+
+为「无射频调参」而加：真机收到会回 `ERROR`。UI 的配置面板会用到它们。
+
+### `AT+STALIST`  ✔
+AP 的关联 STA 表，**单行**输出（便于轮询解析；空表 = `STALIST:0`）：
+```
+AT+STALIST   → STALIST:2,82:59:13:64:70:90=-55,aa:bb:cc:dd:ee:ff=-61\r\nOK
+```
+> 真机的 STA 信息在固件的周期调试块里（`STA1: <mac>`），本模拟器把它做成了可查询的 AT。
+> PC 模拟器的 UI 直接读进程内状态（不走 AT）——两条路径填同一组字段。
+
+### `AT+DIST=<米>` / `AT+PATHLOSS=<n>`  ✔
+距离模型：`RSSI = 对端自报的发射功率 − PL`，其中
+
+$$
+PL(dB) = 20\lg(f_{MHz}) - 27.55 + 10n\lg(d_m)
+$$
+
+- `AT+DIST=0`（默认）= **不建模**，RSSI 用注入值 → 行为与以前完全一致；
+- `n` = 路径损耗指数：**2 = 自由空间**，2.7~4 = 室内；范围 1~8；
+- 例：f=908MHz、d=10m、n=2 → PL≈51.6dB；AP 发 20dBm → 对端收到 ≈ **-32 dBm**；
+- ⚠ 距离是**链路属性**，而且每个方向各自算（本机拿「对端自报的功率」− 「本机设的距离」）
+  → 想让两端都按 10m 算，就**两端都设**（UI 的配置面板会把 `AT+DIST`/`AT+PATHLOSS`
+  同时下发给两台模拟器）。
