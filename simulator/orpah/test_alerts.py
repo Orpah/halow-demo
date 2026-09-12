@@ -24,9 +24,11 @@ def regis(*devs):
     return SimpleNamespace(devices={d.sn: d for d in devs})
 
 
-def case(cid, status=cs.CASE_OPEN, created=NOW, person_id="P001"):
+def case(cid, status=cs.CASE_OPEN, created=NOW, person_id="P001", handler=""):
+    # handler 是「处置态」维度（2026-09-12 新增）：真 Case 有，假 Case 也必须给 ——
+    # 假对象**少**给属性会让测试直接崩（多给属性则会掩盖真实的 AttributeError，见 case_mgr 注释）
     return SimpleNamespace(case_id=cid, person_id=person_id,
-                           status=status, created=created)
+                           status=status, created=created, handler=handler)
 
 
 def case_mgr(*cs_):
@@ -72,6 +74,23 @@ check("走失超时：只报 open 的案件", [x["case_id"] for x in a] == ["C00
 check("走失超时：等级 crit", a[0]["level"] == "crit")
 check("走失超时：case_key 可去重", a[0]["key"] == "case_overtime:C001")
 
+# 处置态（2026-09-12 用户定 A 方案）：超时 **且无人接手** 才告警 ——
+# 否则只要案件还开着就永远 crit，红点恒亮被淹没（分不出“刚超时没人管”与“已在找人”）
+a = alr.evaluate(regis(),
+                 case_mgr(case("C001", created=NOW - 300),                       # 无人接手 → 告警
+                          case("C002", created=NOW - 300, handler="张警官")),  # 已接手 → 不告警
+                 deque(), now=NOW)
+check("处置态：已接手的超时案件不告警", [x["case_id"] for x in a] == ["C001"])
+
+# 接手 → 红点消失（同一案件前后对比）
+a = alr.evaluate(regis(), case_mgr(case("C001", created=NOW - 300, handler="张警官")),
+                 deque(), now=NOW)
+check("处置态：接手后该条告警消失", kinds(a) == [])
+# 取消接手 → 告警回来（handler 清空即回到未处置）
+a = alr.evaluate(regis(), case_mgr(case("C001", created=NOW - 300, handler="")),
+                 deque(), now=NOW)
+check("处置态：取消接手后告警回来", kinds(a) == ["case_overtime"])
+
 # ---- 规则 3：签名失败率 ----------------------------------------------------
 a = alr.evaluate(regis(), case_mgr(), deque([rep(False)] * 3 + [rep(True)] * 2), now=NOW)
 check("签名失败率：3/5 被拒 → 告警", "sig_fail_rate" in kinds(a))
@@ -106,6 +125,13 @@ check("真实对象：长未上报 + 走失超时都能报",
       sorted(kinds(real)) == ["case_overtime", "no_report"])
 check("真实对象：长未上报报的是没入案的那台",
       [x["sn"] for x in real if x["kind"] == "no_report"] == ["CN-WH02-BBBBBBBB"])
+# 真实对象上验证处置态：真的调 cases.assign（不是假装改字段）
+cid_real = list(c2.cases)[0]
+real_take = c2.assign(cid_real, "王警官")
+check("真实对象：assign 成功", real_take[1] is None and c2.cases[cid_real].handler == "王警官")
+real2 = alr.evaluate(r2, c2, deque(), now=NOW)
+check("真实对象：接手后 case_overtime 消失（只剩长未上报）",
+      kinds(real2) == ["no_report"])
 
 # ---- 阈值环境变量（进程内改了要重启才生效，这里用 reload 模拟重启）----------
 import importlib                  # noqa: E402

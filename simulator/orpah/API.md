@@ -54,13 +54,21 @@
 missing_at, missing_place, possible_to, clothing, contact_phone, police,
 police_case_no, police_station, belongings, vehicle, outcome, closed_at`
 
-**Event**：`{t(Unix秒), type∈{mark,found,close}, sn, detail}`
+**处置态（2026-09-12）：`handler`（接手人，自由文本，空 = 未接手）、`handled_at`（接手时刻，秒）、
+`handling`（派生布尔 = 还开着【open/found】且有接手人）。** 它不是 `status` 的一个取值 ——
+「谁在办」与「走到哪一步」正交（已发现但没人管、已接手但还没找到都是合法组合），
+做成状态就要改 `active_case`/`open_cases` 等所有判定。接手人只用自由文本（与审计 `actor` 同一层，
+**不建 operators 表、不做登录**）。
+
+**Event**：`{t(Unix秒), type∈{mark,found,close,assign}, sn, detail}`；
+`assign` 的 `detail` = 接手人（空串 = 取消接手）。
 
 ### POST `/api/cases`
 
 | action | 字段 | 说明 |
 |---|---|---|
 | `mark` | `person_id` + 走失字段（可空） | 名下非报废设备全部 `lost` + 写 `mark` 事件；已有 open/found 案件返回 `{"ok":true,"dup":true}` |
+| `assign` | `case_id`, `handler`（空串 = 取消接手）, [actor] | 设/清接手人 + 写 `assign` 事件（`detail`=接手人）+ 写 IoTDB `case_assign` 审计事件（`actor` 缺省取接手人）；已结案 → `{"ok":false,"err_code":"case_closed"}`，案件不存在 → `err_code="no_case"` |
 | `close` | `case_id`, `outcome∈{closed,revoked}` | 设备回 `active` + 写 `close` 事件 + 置 `closed_at` |
 
 **状态机**：`open → found → closed`，`open → revoked`，`found → closed/revoked`；`closed/revoked` 只读。
@@ -295,6 +303,14 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 **无状态**：每次请求都用当前快照（设备清册 + 走失案件 + 最近签名上报）重算，
 不存告警表、没有确认/关闭流程 → 条件消失则告警自动消失，无需状态机。
+
+**处置态（2026-09-12 用户定 A 方案）**：`case_overtime` 额外要求案件**无人接手**
+（`Case.handler` 为空）才报 —— 原来只要案件还 `open` 就永远 crit，红点**恒亮被淹没**
+（看不出新旧，也分不出「刚超时没人管」与「已在找人」）。
+点「标记已接手」（`POST /api/cases {action:"assign"}`）→ 本条告警消失，案件转入「处置中」继续跟
+（时长照常累计、案件页可见）；「取消接手」→ 告警回来。
+**告警文案也跟着改了**（`alert_case_overtime` 加了“且无人接手”），否则会让人以为已接手还在报警。
+未做：时长上限（B 方案，认领后仍超 24h 再提醒）、分级升级（C 方案）—— 见 `ROADMAP.md` §三。
 
 规则（阈值可用**环境变量**覆盖，改了要重启；默认值是演示压缩时间，真实部署要调大）：
 

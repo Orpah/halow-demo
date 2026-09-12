@@ -29,6 +29,8 @@
   .c-found { color: var(--org); border-color: var(--org); }
   .c-closed { color: var(--grn); border-color: var(--grn); }
   .c-revoked { color: var(--mut); border-color: var(--mut); }
+  /* 处置态（与状态正交的一维）：已接手/处置中 —— 用中性色，别跟“走失中”的红抢注意力 */
+  .c-handling { color: var(--acc); border-color: var(--acc); margin-left: 6px; }
   .person-name { font-weight: 600; }
   .btn.sm { padding: 2px 8px; font-size: 12px; margin: 1px 0; }
   .btn.danger { color: var(--red); border-color: var(--red); }
@@ -134,6 +136,7 @@
       <option value="closed" data-i18n="case_st_closed">已找回</option>
       <option value="revoked" data-i18n="case_st_revoked">已撤销</option>
     </select>
+    <label><input type="checkbox" id="cOnlyUnhandled"> <span data-i18n="case_only_unhandled">只看未接手</span></label>
   </div>
   <table class="case">
     <thead><tr>
@@ -154,7 +157,8 @@ const CASE_LBL = {
   open: T("case_st_open"), found: T("case_st_found"),
   closed: T("case_st_closed"), revoked: T("case_st_revoked"),
 };
-const EV_LBL = { mark: T("ev_mark"), found: T("ev_found"), close: T("ev_close") };
+const EV_LBL = { mark: T("ev_mark"), found: T("ev_found"), close: T("ev_close"),
+                 assign: T("ev_assign") };
 const GL = { "男": T("g_m"), "女": T("g_f") };
 const genderLabel = (v) => GL[v] || v;
 const yrs = (a) => a ? T("case_years").replace("{n}", a) : "";
@@ -263,6 +267,13 @@ function eventLine(e) {
     const how = e.detail === "revoked" ? T("case_out_revoked") : T("case_out_recovered");
     return `${fmtT(e.t)} · ${label}（${how}，${dev.replace("{sn}", esc(e.sn))}）`;
   }
+  if (e.type === "assign") {
+    // detail 空 = 取消接手（放回未处置）；文案不能写成“接手（未接手）”
+    const lbl2 = e.detail ? label : T("case_btn_unassign");
+    const who = e.detail ? T("case_handler_fmt").replace("{name}", esc(e.detail))
+                         : T("case_handler_none");
+    return `${fmtT(e.t)} · ${lbl2}（${who}）`;
+  }
   return `${fmtT(e.t)} · ${label} ${esc(e.sn || "")}`;
 }
 
@@ -294,8 +305,11 @@ function render() {
   const q = ($("cq").value || "").trim().toLowerCase();
   const fs = $("cStatus").value;
   const all = casesData.cases || [];
+  const onlyUnhandled = $("cOnlyUnhandled").checked;
   const cs = all.filter(c => {
     if (fs && c.status !== fs) return false;
+    // 只看未接手：只对还开着的案件有意义（已结案的接手人只是历史）
+    if (onlyUnhandled && !((c.status === "open" || c.status === "found") && !c.handler)) return false;
     if (q) {
       const cid = (c.case_id || "").toLowerCase();
       const name = (c.person_name || "").toLowerCase();
@@ -318,16 +332,27 @@ function render() {
     }
     let ops = `<button class="btn sm" data-act="detail">${esc(detailExpanded.has(c.case_id) ? T("case_btn_detail_hide") : T("case_btn_detail"))}</button>`;
     if (c.status === "open" || c.status === "found") {
+      // 处置态：无人接手 → 可接手；已有接手人 → 可改派 / 取消接手
+      ops += c.handler
+        ? `<button class="btn sm" data-act="assign" data-mode="change">${esc(T("case_btn_assign"))}</button>
+           <button class="btn sm" data-act="assign" data-mode="release">${esc(T("case_btn_unassign"))}</button>`
+        : `<button class="btn sm ok" data-act="assign" data-mode="take">${esc(T("case_btn_assign"))}</button>`;
       ops += `<button class="btn sm ok" data-act="close" data-outcome="closed">${esc(T("case_btn_close_found"))}</button>
               <button class="btn sm danger" data-act="close" data-outcome="revoked">${esc(T("case_btn_close_revoke"))}</button>`;
     } else {
       ops += `<span class="ev-line">${esc(c.outcome === "revoked" ? T("case_out_revoked") : T("case_out_recovered"))} · ${fmtT(c.closed_at)}</span>`;
     }
     const devs = (c.devices || []).map(s => esc(s)).join("<br>") || "—";
+    const handling = c.handling
+      ? `<span class="badge c-handling">${esc(T("case_handling"))}</span>` : "";
+    const who = (c.status === "open" || c.status === "found")
+      ? `<div class="ev-line">${esc(c.handler
+            ? T("case_handler_fmt").replace("{name}", c.handler)
+            : T("case_handler_none"))}</div>` : "";
     const main = `<tr data-cid="${esc(c.case_id)}">
       <td class="mono">${esc(c.case_id)}</td>
       <td class="person-name">${esc(c.person_name)}</td>
-      <td><span class="badge c-${esc(c.status)}">${esc(CASE_LBL[c.status] || c.status)}</span></td>
+      <td><span class="badge c-${esc(c.status)}">${esc(CASE_LBL[c.status] || c.status)}</span>${handling}${who}</td>
       <td class="mono devs">${devs}</td>
       <td class="ev-line">${evHtml}</td>
       <td>${ops}</td>
@@ -345,6 +370,32 @@ function render() {
       const label = outcome === "revoked" ? T("case_lbl_revoke") : T("case_lbl_found");
       if (!confirm(T("case_confirm_close").replace("{label}", label))) return;
       await api({ action: "close", case_id: cid, outcome });
+      load();
+    };
+  });
+  tbody.querySelectorAll("button[data-act='assign']").forEach(b => {
+    b.onclick = async () => {
+      const cid = b.closest("tr").dataset.cid;
+      const mode = b.dataset.mode;
+      // 接手人 = 上方「操作者」里的自由文本（不做登录/角色，见 ROADMAP §三）
+      const who = (OrpahI18n.actor() || "").trim();
+      if (mode !== "release" && !who) {
+        const hint = $("markHint");
+        hint.textContent = T("case_hint_actor");
+        hint.className = "hint err";
+        return;
+      }
+      const handler = mode === "release" ? "" : who;
+      if (mode !== "release" &&
+          !confirm(T("case_confirm_assign").replace("{name}", handler))) return;
+      const r = await api({ action: "assign", case_id: cid, handler });
+      if (r && r.ok === false) {
+        const hint = $("markHint");
+        hint.textContent = T("case_err_" + (r.err_code || "no_case"));
+        hint.className = "hint err";
+      } else {
+        $("markHint").textContent = "";
+      }
       load();
     };
   });
@@ -413,6 +464,7 @@ $("btnMark").onclick = async () => {
 
 $("cq").oninput = () => render();
 $("cStatus").onchange = () => render();
+$("cOnlyUnhandled").onchange = () => render();
 $("personQ").oninput = () => renderPersonResults();
 
 OrpahI18n.apply();

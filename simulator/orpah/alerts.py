@@ -25,8 +25,12 @@ alerts.py — 告警规则引擎（供页面红点消费）
 
 已实现（第一批 3 条）：
     no_report       启用中的设备超过 no_report_sec 无上报
-    case_overtime   案件立案超过 case_overtime_sec 仍未发现（只算 open；已 found 不算）
+    case_overtime   案件立案超过 case_overtime_sec 仍未发现**且无人接手**（只算 open；已 found 不算）
     sig_fail_rate   最近 sig_window 条签名上报里被拒比例 > sig_fail_ratio
+
+**处置态（2026-09-12 用户定 A 方案）**：`case_overtime` 额外要求「无人接手」（`case.handler` 空）——
+案件一旦有人接手就转入“处置中”跟踪、不再占红点；否否则只要案件还开着就永远 crit，
+红点恒亮被淹没（看不出新旧，也分不出“刚超时没人管”与“已在找人”）。
 
 第二批可加：RSSI 突变、校验位连续失败（需要历史序列，本模块暂不做）。
 """
@@ -92,9 +96,14 @@ def evaluate(registry, cases, id_reports, now=None, **th):
                               "alert_no_report", rec.last_seen,
                               sn=rec.sn, gap=gap))
 
-    # 2) 走失超时：只有「还没被发现」的 open 案件算超时
+    # 2) 走失超时：只有「还没被发现**且无人接手**」的 open 案件算超时。
+    #    为什么要加「无人接手」（2026-09-12 用户定 A 方案）：原来只要案件还 open 就永远 crit，
+    #    红点恒亮被淹没（看不出新旧），且「刚超时没人管」与「已在找人」分不出来。
+    #    现在点了「已接手」→ 本条告警消失（案件转“处置中”继续跟，时长仍累计）。
     for c in cases.open_cases():
         if c.status != cs.CASE_OPEN:      # 常量在 cases 模块上，不在 CaseManager 实例上
+            continue
+        if c.handler:                     # 已有人接手 → 不算告警
             continue
         gap = now - int(c.created)
         if gap > case_ov:

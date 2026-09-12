@@ -102,6 +102,15 @@
     ② **缺口必须断开**（> `ROUTER_MAX_AGE_MS` 或滤波器 `reset` → GPX 多 `<trkseg>` / GeoJSON 多
     `LineString` Feature），跨缺口的直线不是真走出来的路；③ 经纬度**只走 `map.js` 的 `toLatLng`**
     （与地图落点同一个换算），GeoJSON 坐标是 `[lng, lat]`。纯前端，无新接口。
+  - **告警处置态（2026-09-12，§三 A 方案）**：`case_overtime` **只在「无人接手」时**才报 ——
+    `Case.handler` 是与 `status` **正交**的一维（不是新状态；「处置中」是页面派生显示），
+    接手人=自由文本（复用审计 `actor`，**不建 operators 表/不做登录**）。改 `cases` 表列名/语义时记住：
+    `CREATE TABLE IF NOT EXISTS` **不给老表补列** → `_init_db` 里用 `PRAGMA table_info` + `ALTER TABLE`
+    兜迁移（否则老 `orpah.db` 写库报 `no such column`）。`test_alerts.py` 里的假 `Case` 必须带 `handler`
+    （缺属性→测试直接崩；多给属性→掩盖真 AttributeError，两种都踩过）。
+  - **查审计事件别读错字段**：`GET /api/ts/events` 返回的键是 **`rows`**（不是 `events`）；
+    另注意它按 `etype`/`sn` 在**本地**过滤（值过滤不进 WHERE，见 §0 IoTDB 条），
+    所以“某类事件为空”先确认字段名，再确认是不是真没写进去。
   - **地图代码分两层**：`ui/static/map.js` = **底图源列表 / 条款说明 / 本地坐标↔经纬度换算 /
     底图图层 + 离线回落**的**单一源**（track.html 与 replay.html 共用，两页 `ensureMap()` 都调
     `addBaseLayer(lmap)`）—— 那是**合规相关**的东西

@@ -928,6 +928,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if dup:
                         resp["existing_case_id"] = c.case_id
                     self._send(200, json.dumps(resp).encode())
+            elif action == "assign":
+                # 处置态（2026-09-12 用户定 A 方案）：接手人只用自由文本（复用审计 actor），
+                # 不建 operators 表、不做登录；handler 为空 = 取消接手（误点可撤回）。
+                c, err = APP.cases.assign(req.get("case_id", ""),
+                                          req.get("handler", ""))
+                if err:
+                    self._send(200, json.dumps({"ok": False, "err_code": err}).encode())
+                else:
+                    actor = req.get("actor", "") or c.handler
+                    APP.tsdb.write_event("case_assign",
+                                         detail=f"{c.case_id}:{c.handler}",
+                                         actor=actor)
+                    self._send(200, json.dumps({"ok": True, "case_id": c.case_id,
+                                                "handler": c.handler}).encode())
             elif action == "close":
                 outcome_val = req.get("outcome", "")
                 if outcome_val not in ("closed", "revoked"):

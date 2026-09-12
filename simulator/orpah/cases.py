@@ -8,6 +8,15 @@ cases.py — 走失案件闭环（以人为单位，非单 SN）
   → 发现 found   任一台设备被 Router 命中走失表（ORPAH-FOUND）→ 该人「已发现」
   → 结案 close   找回（closed，设备恢复启用）/ 撤销误报（revoked，设备恢复启用）
 
+**处置态（2026-09-12，与状态正交的一维）**：`handler`（接手人，自由文本）+ `handled_at`。
+为什么不做成新 status：① 「谁在办」与「走到哪一步」是两件事 —— 已发现但没人管、
+已接手但还没找到，都是合法组合；② 做成状态就要改 `active_case`/`open_cases` 等
+所有判定（状态机多一个分支、到处漏改）。页面上的「处置中」= open/found **且** handler 非空，
+是**派生显示**，不是状态。
+为什么接手人是自由文本：与审计 `actor` 同一层（L1 审计标签），**不建 operators 表、不做登录**
+（否则滑向“组织/角色/权限”，超出 demo 边界，见 ROADMAP §〇/§三）。改派=再调一次 `assign`，
+历史在 `case_events` 里（type=`assign`），不丢。
+
 SQLite 持久化；不依赖 server。由 ui_server 负责与权威走失表（server.mark_tracked/
 untrack）联动，并注入 Router 发现事件（ORPAH-FOUND）。
 """
@@ -39,7 +48,7 @@ class Case:
     def __init__(self, case_id, person_id, ts,
                  missing_at="", missing_place="", possible_to="", clothing="",
                  contact_phone="", police="", police_case_no="", police_station="",
-                 belongings="", vehicle=""):
+                 belongings="", vehicle="", handler="", handled_at=None):
         self.case_id = case_id
         self.person_id = person_id
         self.status = CASE_OPEN
@@ -47,6 +56,8 @@ class Case:
         self.updated = ts
         self.closed_at = None
         self.outcome = None          # "found" / "revoked"（结案方式）
+        self.handler = handler       # 接手人（自由文本；空 = 无人接手）
+        self.handled_at = handled_at  # 接手时刻（秒）
         self.events = []             # [{t, type, sn, detail}]
         self.found_sns = set()       # 已记录「发现」的设备 SN（按 case+sn 去重）
         # 走失信息（现实寻人启事要素）
@@ -89,7 +100,8 @@ class CaseManager:
                 possible_to TEXT DEFAULT '', clothing TEXT DEFAULT '',
                 contact_phone TEXT DEFAULT '', police TEXT DEFAULT '',
                 police_case_no TEXT DEFAULT '', police_station TEXT DEFAULT '',
-                belongings TEXT DEFAULT '', vehicle TEXT DEFAULT ''
+                belongings TEXT DEFAULT '', vehicle TEXT DEFAULT '',
+                handler TEXT DEFAULT '', handled_at INTEGER
             );
             CREATE TABLE IF NOT EXISTS case_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT NOT NULL,
@@ -97,6 +109,14 @@ class CaseManager:
                 sn TEXT DEFAULT '', detail TEXT DEFAULT ''
             );
             """)
+            # 老库迁移：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列 ——
+            # 2026-09-12 之前建的 orpah.db 没有 handler/handled_at，不补列的话
+            # 下一次 _persist_case 会报 "no such column: handler"（看着像代码坏了）。
+            have = {r[1] for r in self.db.execute("PRAGMA table_info(cases)")}
+            for col, decl in (("handler", "TEXT DEFAULT ''"),
+                              ("handled_at", "INTEGER")):
+                if col not in have:
+                    self.db.execute(f"ALTER TABLE cases ADD COLUMN {col} {decl}")
             self.db.commit()
 
     def _load(self):
@@ -105,7 +125,7 @@ class CaseManager:
                      r["missing_at"], r["missing_place"], r["possible_to"],
                      r["clothing"], r["contact_phone"], r["police"],
                      r["police_case_no"], r["police_station"], r["belongings"],
-                     r["vehicle"])
+                     r["vehicle"], r["handler"] or "", r["handled_at"])
             c.status = r["status"]
             c.updated = r["updated"]
             c.closed_at = r["closed_at"]
@@ -130,12 +150,13 @@ class CaseManager:
                 "INSERT OR REPLACE INTO cases (case_id, person_id, status,"
                 " outcome, created, updated, closed_at, missing_at, missing_place,"
                 " possible_to, clothing, contact_phone, police, police_case_no,"
-                " police_station, belongings, vehicle)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " police_station, belongings, vehicle, handler, handled_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (c.case_id, c.person_id, c.status, c.outcome, c.created,
                  c.updated, c.closed_at, c.missing_at, c.missing_place,
                  c.possible_to, c.clothing, c.contact_phone, c.police,
-                 c.police_case_no, c.police_station, c.belongings, c.vehicle))
+                 c.police_case_no, c.police_station, c.belongings, c.vehicle,
+                 c.handler or "", c.handled_at))
             self.db.commit()
 
     def _add_event(self, c, ev):
@@ -216,6 +237,27 @@ class CaseManager:
         self._persist_case(c)
         return c, newly
 
+    def assign(self, case_id, handler, ts=None):
+        """接手/改派：记「谁在办」。handler 为空 → 视为取消接手（放回未处置）。
+
+        为什么允许取消：演示里误点常有；取消也写事件，历史不丢。
+        返回 (case, err)：err 为 None 表示成功，否则是机器码（前端本地化）。
+        业务规则：**已结案的不能再接手**（否则红点/筛选都会看到已结案件处于“处置中”）。
+        """
+        c = self.cases.get(case_id)
+        if c is None:
+            return None, "no_case"
+        if c.status not in (CASE_OPEN, CASE_FOUND):
+            return c, "case_closed"
+        handler = (handler or "").strip()
+        ts = ts if ts is not None else int(time.time())
+        c.handler = handler
+        c.handled_at = ts if handler else None
+        c.updated = ts
+        self._note(c, ts, "assign", detail=handler)
+        self._persist_case(c)
+        return c, None
+
     def close(self, case_id, registry, outcome, ts=None):
         """结案：outcome ∈ {CASE_CLOSED, CASE_REVOKED}。名下设备 → 启用。
 
@@ -251,6 +293,10 @@ class CaseManager:
                 "updated": c.updated,
                 "closed_at": c.closed_at,
                 "outcome": c.outcome,
+                "handler": c.handler or "",
+                "handled_at": c.handled_at,
+                # 派生显示：还开着（open/found）且已有人接手 = 「处置中」（不是独立状态）
+                "handling": bool(c.handler) and c.status in (CASE_OPEN, CASE_FOUND),
                 "devices": [d.sn for d in devs],
                 "events": list(c.events),
                 "missing_at": c.missing_at,
