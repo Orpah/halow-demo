@@ -62,8 +62,10 @@ make clean
 - LED/按键/拨码交互见 `docs/usage.md`。
 
 ## 移植 / 扩展
-
 - **换主频**：`board.h` 中 `SYSTEM_CLOCK_HZ`，并在 `SystemInit` 配置 PLL。
 - **掉电保存配置**：实现 `sim_cfg_save()`（写最后一页 Flash，1KB @ 0x0800FC00）。
 - **改引脚**：`board.h` 与 `docs/hardware.md` 保持一致。
 - **接入真实 TXW8301**：把 SPI 从机驱动换成真实 MACBUS_SPI host 驱动，AT 引擎可直接复用。
+
+> 上面这几项的**结案**（做 / 不做附理由 / 留待真机的触发条件）统一记在
+> [`../docs/backlog.md`](../docs/backlog.md)。新增待办请写那里，不要只写在本节里。

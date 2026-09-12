@@ -21,6 +21,7 @@ sim.py — TXW8301 模拟器 PC 版（无硬件）
 import argparse
 import math
 import queue
+import random
 import socket
 import threading
 import time
@@ -52,6 +53,12 @@ LINK_TYPE_DEAUTH = 0x06
 VERSION = "TXW8301-SIM-pc-v0.1.0"
 MAX_FRAME = 1700
 MAX_STA = 8
+
+# RAW 接入周期 = beacon 周期（槽位以**上一个 beacon** 为基准对齐，两边各自算，
+# 不需要共享时钟：AP 在发 beacon 时记一下，STA 在收到时记一下）
+RAW_PERIOD = 0.5
+# RAW/TWT 排队上限（超出就丢，避免无界堆积）
+TX_QUEUE_MAX = 64
 
 
 def crc8(data):
@@ -158,6 +165,20 @@ class SimCfg:
         # （默认 0，即行为与以前完全一致）。
         self.distance = 0.0
         self.pathloss_n = 2.0       # 路径损耗指数：2=自由空间，2.7~4=室内
+        # ── 行为模型（均为**模拟器扩展**，默认全关 → 不改原有行为）──────────────
+        # 丢包注入（只作用**数据帧**，控制帧不受影响）：整数百分比 0..100
+        self.loss_p = 0.0
+        # 关联失败概率（整数百分比 0..100）：命中→本次关联请求不发（模拟丢/被拒）
+        self.assoc_fail_p = 0.0
+        # 确定性随机种子：同一个种子 → 同样的丢包/失败序列（演示与测试可复现）
+        self.seed = 0
+        # RAW（Restricted Access Window）：0=关；n>0 = 把 beacon 周期均分成 n 个槽位，
+        # 每个关联 STA 分到一个槽，**只在自己的槽内发数据**（不在窗口内的排队等下一轮）
+        self.raw_slots = 0
+        # TWT（Target Wake Time）：0=关；>0 = 该 STA 每 twt_interval_ms 只醒 twt_window_ms
+        # （睡着时：自己要发的数据排队，收到的下行数据帧丢掉）
+        self.twt_interval_ms = 0
+        self.twt_window_ms = 50
         self.group = bytes(6)
         self.aid = 0
 
@@ -172,7 +193,9 @@ class SimCfg:
             "ack_tmo": self.ack_tmo, "roam": self.roam, "ps_mode": self.ps_mode,
             "mac": mac_str(self.mac), "ssid": self.ssid, "psk": self.psk,
             "rssi": self.rssi, "distance": self.distance,
-            "pathloss_n": self.pathloss_n,
+            "pathloss_n": self.pathloss_n, "loss_p": self.loss_p,
+            "assoc_fail_p": self.assoc_fail_p, "raw_slots": self.raw_slots,
+            "twt_interval_ms": self.twt_interval_ms,
         }
 
 
@@ -532,6 +555,19 @@ class Wifi:
         self.rssi_dbm = None        # 距离模型算出的对端信号；None = 用注入值 cfg.rssi
         self.rx_queue = []          # 待 host 读取的帧
         self.evt_queue = []
+        # RAW/TWT 窗口模型用：最近一次 beacon 的时刻（AP=发出时、STA=收到时）
+        self._last_beacon_t = 0.0
+        self.slot = None            # RAW：本 STA 被分到的槽位（ASSOC_RESP 下发）
+        self.raw_slots_ap = 0       # RAW：AP 下发的槽位数（STA 从 ASSOC_RESP 学；自己不用配）
+        self.raw_slots = {}         # AP 侧：mac -> 槽位
+        self.tx_queue = []          # 窗口外排队等发送的数据帧（不是丢，是等）
+        # 计数（统计/排障用；均为累计值）
+        self.loss_drops = 0
+        self.assoc_fails = 0
+        self.raw_defer = 0
+        self.twt_defer = 0
+        self.twt_sleep_drops = 0
+        self._rng = random.Random(core.cfg.seed)
         self._next_beacon = 0
         self._next_retry = 0
         self._next_keepalive = 0
@@ -561,6 +597,53 @@ class Wifi:
         if self.conn != CONN_CONNECTED:
             return 0
         return self._observed_rssi()
+
+    # ---------------- 行为模型：丢包 / RAW 接入窗口 / TWT 唤醒窗口 ----------------
+    def _roll(self, p_percent):
+        """确定性随机（种子化）：同一个 `cfg.seed` + 同样的调用序列 → 同样的结果。"""
+        return self._rng.random() < (p_percent / 100.0)
+
+    def raw_window_open(self):
+        """RAW：现在是不是「本 STA 的接入窗口」。
+
+        谁定调度：**AP**（真机也是如此）—— 所以 `AT+RAW` 只在 AP 上有意义，
+        STA 从 ASSOC_RESP 学「槽位数 + 自己的槽位」。下图是 STA 侧窗口：
+
+        - 本机不是 STA（是 AP/APSTA，或没连上、没被分配槽位，或 AP 没开 RAW）→ 恒开；
+        - 基准 = 上一个 beacon（两边各自记一下，不需共享时钟）：
+          把 beacon 周期 `RAW_PERIOD` 均分成 n 槽，第 k 槽 = [k·d, (k+1)·d)。
+
+        本模型**只约束数据帧**（控制帧不受影响）—— 见 docs/architecture.md §8 的边界说明。
+        """
+        c = self.cfg
+        if c.mode in (MODE_AP, MODE_APSTA):
+            return True                        # AP 侧不受 RAW 约束（只约束 STA 上行）
+        if self.raw_slots_ap <= 0 or self.slot is None or self.conn != CONN_CONNECTED:
+            return True
+        phase = self.core.now() - self._last_beacon_t
+        if phase < 0 or phase >= RAW_PERIOD:
+            return False                       # 已经过了本轮窗口，等下一个 beacon
+        d = RAW_PERIOD / self.raw_slots_ap
+        return self.slot * d <= phase < (self.slot + 1) * d
+
+    def twt_awake(self):
+        """TWT：现在醒着吗。未开（twt_interval_ms<=0）/未连接 → 恒醒。
+
+        近似模型：每 `twt_interval_ms` 醒 `twt_window_ms`，窗口与上一个 beacon 对齐。
+        """
+        c = self.cfg
+        if c.twt_interval_ms <= 0 or self.conn != CONN_CONNECTED:
+            return True
+        iv = c.twt_interval_ms / 1000.0
+        phase = (self.core.now() - self._last_beacon_t) % iv
+        return phase < (c.twt_window_ms / 1000.0)
+
+    def stats(self):
+        """一行统计（供 SYSDBG / UI 内省用）。"""
+        return (f"tx={self.tx_pkts} rx={self.rx_pkts} stacnt={self.sta_count()} "
+                f"state={self.conn_str()} loss={self.loss_drops} "
+                f"assoc_fail={self.assoc_fails} raw_defer={self.raw_defer} "
+                f"twt_defer={self.twt_defer} twt_drop={self.twt_sleep_drops}")
 
     # ---------------- 查询 ----------------
     def mode(self):
@@ -626,6 +709,7 @@ class Wifi:
             if not c.chan_in_list(freq) or bw != c.bss_bw:
                 return
             self._last_peer = self.core.now()
+            self._last_beacon_t = self.core.now()      # RAW/TWT 窗口的时间基准
             self.rssi_dbm = self._rssi_from(ap_tx)
             self.last_ap = (ssid, freq, bw, self._observed_rssi())
             if self.conn in (CONN_IDLE, CONN_DISCONNECTED):
@@ -641,6 +725,10 @@ class Wifi:
                 return
             if self.conn != CONN_CONNECTED:      # 去重
                 self.emit("+CONNECTED")
+            # 第 3/4 字节（可选）= AP 分给本 STA 的 RAW 槽位 / 槽位数（0xFF / 0 = 未开）
+            if len(p) > 3:
+                self.raw_slots_ap = p[3]
+                self.slot = None if (p[3] == 0 or p[2] == 0xFF) else p[2]
             self.conn = CONN_CONNECTED
             self._last_peer = self.core.now()
 
@@ -675,10 +763,16 @@ class Wifi:
                 self.emit("+STA_CONNECTED")
             elif hit is not None:
                 self.sta[self.sta.index(hit)] = (sta_mac, rssi)
+            # RAW：给**已入表**的 STA 分一个槽位（轮转）；已分过的不动
+            slot = 0xFF
+            if c.raw_slots > 0 and sta_mac in [s[0] for s in self.sta]:
+                if sta_mac not in self.raw_slots:
+                    self.raw_slots[sta_mac] = len(self.raw_slots) % c.raw_slots
+                slot = self.raw_slots[sta_mac]
             self.conn = CONN_CONNECTED
             self._last_peer = self.core.now()
             self.core.link.send(LINK_TYPE_ASSOC_RESP,
-                                bytes([0, rssi & 0xFF]))
+                                bytes([0, rssi & 0xFF, slot, min(c.raw_slots, 255)]))
 
         elif t == LINK_TYPE_PAIR_PSK:
             if len(p) < 3:
@@ -705,6 +799,10 @@ class Wifi:
         elif t == LINK_TYPE_DATA:
             if len(p) < 14:
                 return
+            # TWT：睡着时听不到下行数据帧（模型：只约束数据帧，控制帧不受影响）
+            if not self.twt_awake():
+                self.twt_sleep_drops += 1
+                return
             dst = p[:6]
             me = c.mac
             is_bcast = dst == bytes([0xFF] * 6)
@@ -730,15 +828,21 @@ class Wifi:
                 b += bytes([c.chan_list[0] >> 8, c.chan_list[0] & 0xFF, c.bss_bw, c.keymgmt])
                 b += bytes([c.txpower & 0xFF])      # 末字节：本 AP 发射功率（供对端算 RSSI）
                 self.core.link.send(LINK_TYPE_BEACON, b)
+                self._last_beacon_t = now           # RAW/TWT 窗口的时间基准（与 STA 侧对齐）
                 self._next_beacon = now + 0.5
             if self.sta and now - self._last_peer > 8:
                 self.sta = []
+                self.raw_slots = {}
                 self.conn = CONN_IDLE
                 self.emit("+STA_DISCONNECTED")
         if c.mode in (MODE_STA, MODE_APSTA) and self.conn == CONN_ASSOCIATING:
             if now >= self._next_retry:
-                req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
-                self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
+                # 关联失败概率：命中则不发出请求（模拟丢/被拒），状态机继续重试
+                if c.assoc_fail_p > 0 and self._roll(c.assoc_fail_p):
+                    self.assoc_fails += 1
+                else:
+                    req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
+                    self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
                 self._next_retry = now + 0.5
         if c.mode in (MODE_STA, MODE_APSTA) and self.conn == CONN_CONNECTED:
             if now - self._last_peer > 3:
@@ -749,9 +853,19 @@ class Wifi:
                 req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
                 self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
                 self._next_keepalive = now + 2.0
+        # RAW/TWT：窗口一开就把排队的帧发出去（窗口外只是**等**，不是丢）
+        if self.tx_queue and self.raw_window_open() and self.twt_awake():
+            while self.tx_queue:
+                self.core.link.send(LINK_TYPE_DATA, self.tx_queue.pop(0))
+                self.tx_pkts += 1
 
     # ---------------- 数据通路 ----------------
     def send_data(self, frame):
+        """发一个数据帧（host 注入 / AT+TXDATA）→ 空口。
+
+        返回 0 = 已受理（含因 RAW/TWT 窗口而**排队**的情况），-1 = 未受理（丢/条件不满足）。
+        顺序：基本条件 → 丢包注入 → 窗口（排队）→ 发出。
+        """
         c = self.cfg
         if len(frame) < 14 or len(frame) > MAX_FRAME:
             return -1
@@ -759,6 +873,19 @@ class Wifi:
             return -1
         if c.mode == MODE_AP and not self.sta:
             return -1
+        # 丢包注入（只作用数据帧，且**确定性**：同一个 seed → 同样的丢包序列）
+        if c.loss_p > 0 and self._roll(c.loss_p):
+            self.loss_drops += 1
+            return -1
+        # RAW 接入窗口 / TWT 唤醒窗口：不在窗口内 → 排队等窗口开（不是丢）
+        if not (self.raw_window_open() and self.twt_awake()):
+            if not self.raw_window_open():
+                self.raw_defer += 1
+            else:
+                self.twt_defer += 1
+            if len(self.tx_queue) < TX_QUEUE_MAX:
+                self.tx_queue.append(bytes(frame))
+            return 0
         self.core.link.send(LINK_TYPE_DATA, frame)
         self.tx_pkts += 1
         return 0
@@ -782,9 +909,17 @@ class Wifi:
         self.conn = CONN_IDLE
         self.pairing = False
         self.sta = []
+        self.raw_slots = {}
+        self.tx_queue = []
+        self.slot = None
+        self.raw_slots_ap = 0
         self.tx_pkts = self.rx_pkts = 0
+        self.loss_drops = self.assoc_fails = 0
+        self.raw_defer = self.twt_defer = self.twt_sleep_drops = 0
+        self._rng = random.Random(self.cfg.seed)      # 同一个 seed：序列可复现
         self.last_ap = None
         self.rssi_dbm = None
+        self._last_beacon_t = 0.0
         self.rx_queue = []
         self.evt_queue = []
         self._next_beacon = 0
@@ -1005,6 +1140,90 @@ class At:
         c.pathloss_n = v
         self.ok()
 
+    def h_loss(self, a):
+        """AT+LOSS=<百分比 0..100> —— 本模拟器扩展：数据帧丢包注入（控制帧不受影响）。
+
+        确定性：同一个 `cfg.seed` + 同样的调用序列 → 同样的丢包序列（演示/测试可复现）。
+        """
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("LOSS", "%g" % c.loss_p)
+            return
+        try:
+            v = float(a)
+        except ValueError:
+            self.err()
+            return
+        if not 0.0 <= v <= 100.0:
+            self.err()
+            return
+        c.loss_p = v
+        self.ok()
+
+    def h_assoc_fail(self, a):
+        """AT+ASSOC_FAIL=<百分比 0..100> —— 本模拟器扩展：关联请求失败概率。
+
+        命中则本次 ASSOC_REQ **不发出去**（模拟丢/被拒），STA 继续 0.5s 重试；
+        AP 侧看不到它 → 界面上就是一直 SCANNING。
+        """
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("ASSOC_FAIL", "%g" % c.assoc_fail_p)
+            return
+        try:
+            v = float(a)
+        except ValueError:
+            self.err()
+            return
+        if not 0.0 <= v <= 100.0:
+            self.err()
+            return
+        c.assoc_fail_p = v
+        self.ok()
+
+    def h_raw(self, a):
+        """AT+RAW=<槽位数 0..16> —— 本模拟器扩展：RAW 接入窗口（0 = 关）。
+
+        >0 时 AP 把 beacon 周期（0.5s）均分成 n 个槽，每个关联 STA 分一个槽
+        （轮转，ASSOC_RESP 第 3 字节下发），STA **只在自己的槽内发数据帧**；
+        窗口外的数据帧排队等下一个 beacon（不是丢）。
+        """
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("RAW", "%d" % c.raw_slots)
+            return
+        v = atoi(a)
+        if not 0 <= v <= 16:
+            self.err()
+            return
+        c.raw_slots = v
+        self.core.wifi.raw_slots = {}      # 重新分配槽位
+        self.ok()
+
+    def h_twt(self, a):
+        """AT+TWT=<间隔ms>[,<窗口ms>] —— 本模拟器扩展：TWT 目标唤醒时间（0 = 关）。
+
+        STA 侧近似模型：每 `间隔ms` 只醒 `窗口ms`（默认 50）；睡着时自己要发的数据
+        排队、收到的下行数据帧丢掉（计数 `twt_drop`）。窗口与上一个 beacon 对齐。
+        """
+        c = self.core.cfg
+        if a == "?" or (self.tah and a == ""):
+            self.resp("TWT", "%d,%d" % (c.twt_interval_ms, c.twt_window_ms))
+            return
+        iv, _, win = a.partition(",")
+        v = atoi(iv)
+        if not 0 <= v <= 3600000:
+            self.err()
+            return
+        c.twt_interval_ms = v
+        if win:
+            w = atoi(win)
+            if not 1 <= w <= 60000 or w > v:
+                self.err()
+                return
+            c.twt_window_ms = w
+        self.ok()
+
     def h_conn_state(self, a):
         self.resp("CONN_STATE", self.core.wifi.conn_str())
 
@@ -1018,6 +1237,10 @@ class At:
         self.out(f"TXPOWER:{c.txpower}")
         self.out(f"DIST:{c.distance:g}")            # 距离模型：米（0 = 不建模）
         self.out(f"PATHLOSS:{c.pathloss_n:g}")      # 路径损耗指数
+        self.out(f"LOSS:{c.loss_p:g}")              # 数据帧丢包百分比
+        self.out(f"ASSOC_FAIL:{c.assoc_fail_p:g}")  # 关联失败百分比
+        self.out(f"RAW:{c.raw_slots}")              # RAW 槽位数（0=关）
+        self.out(f"TWT:{c.twt_interval_ms},{c.twt_window_ms}")   # TWT 间隔,窗口(ms)
         self.out(f"TX_MCS:{c.tx_mcs}")
         self.out(f"HEART_INT:{c.heart_int}")
         self.out(f"ACKTMO:{c.ack_tmo}")
@@ -1248,6 +1471,8 @@ At.TABLE = {
     "AT+FREQ_RANGE": "h_freq_range", "AT+CHAN_LIST": "h_chan_list",
     "AT+RSSI": "h_rssi", "AT+CONN_STATE": "h_conn_state",
     "AT+STALIST": "h_stalist", "AT+DIST": "h_dist", "AT+PATHLOSS": "h_pathloss",
+    "AT+LOSS": "h_loss", "AT+ASSOC_FAIL": "h_assoc_fail",
+    "AT+RAW": "h_raw", "AT+TWT": "h_twt",
     "AT+WNBCFG": "h_wnbcfg", "AT+SCAN_AP": "h_scan_ap",
     "AT+BSSLIST": "h_bsslist", "AT+MAC_ADDR": "h_mac_addr",
     "AT+VERSION": "h_version", "AT+TXPOWER": "h_txpower",
@@ -1343,9 +1568,7 @@ class Core:
                 if (self.at.dbg_lmac or self.at.dbg_wnb) and now - self._last_stats >= 1:
                     self._last_stats = now
                     if self.at.dbg_wnb:
-                        self.out("console",
-                                 f"WNB: tx={self.wifi.tx_pkts} rx={self.wifi.rx_pkts} "
-                                 f"stacnt={self.wifi.sta_count()} state={self.wifi.conn_str()}")
+                        self.out("console", "WNB: " + self.wifi.stats())
                     if self.at.dbg_lmac:
                         self.out("console",
                                  f"LMAC: link_tx={self.link.tx_pkts} link_rx={self.link.rx_pkts}")

@@ -121,6 +121,14 @@
     </label>
     <button class="btn primary" id="btnApply" data-i18n="tui_cfg_apply">应用配置</button>
   </div>
+  <div class="config-row">
+    <span class="hint" data-i18n="tui_cfg_pl_hint">模拟器扩展（真机无此命令）</span>
+    <label data-i18n-title="tui_cfg_pl_hint" title="模拟器扩展（真机无此命令）"><span data-i18n="tui_cfg_loss">丢包(%)</span> <input id="cfgLoss" value="0" size="3"></label>
+    <label data-i18n-title="tui_cfg_pl_hint" title="模拟器扩展（真机无此命令）"><span data-i18n="tui_cfg_afail">关联失败(%)</span> <input id="cfgAFail" value="0" size="3"></label>
+    <label data-i18n-title="tui_cfg_pl_hint" title="模拟器扩展（真机无此命令）"><span data-i18n="tui_cfg_raw">RAW 槽位</span> <input id="cfgRaw" value="0" size="3"></label>
+    <label data-i18n-title="tui_cfg_pl_hint" title="模拟器扩展（真机无此命令）"><span data-i18n="tui_cfg_twt">TWT 间隔(ms)</span> <input id="cfgTwt" value="0" size="5"></label>
+    <span class="hint" data-i18n="tui_cfg_simrow">丢包/关联失败下发给两台；RAW 只对 AP 有意义，TWT 只对 STA 有意义 → 这两个下发给“设备”里选的那台</span>
+  </div>
 </section>
 
 <!-- ============ 启动命令说明 ============ -->

@@ -43,12 +43,14 @@ const state = {
   A: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
        ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0,
        source: "", target: "",
-       // 发射功率 / 距离模型 / 关联 STA（null = 该设备报不出来，界面显示 “-”）
-       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [] },
+       // 发射功率 / 距离模型 / 关联 STA / 行为模型参数（null = 该设备报不出来，界面显示 “-”）
+       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [],
+       loss: 0, assoc_fail: 0, raw: 0, twt: 0 },
   B: { ok: false, conn: "OFFLINE", mode: "--", type: "--", port: "--", version: "", v2: false,
        ssid: "-", rssi: 0, tx: 0, rx: 0, uptime: 0, power: "on", chan: "", bw: 0,
        source: "", target: "",
-       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [] },
+       txpower: null, dist: 0, pathloss: null, stacnt: null, stas: [],
+       loss: 0, assoc_fail: 0, raw: 0, twt: 0 },
 };
 const consoles = { A: [], B: [] };
 let frames = [];
@@ -64,6 +66,8 @@ const AT_CMDS = [
   { cmd: "AT+FREQ_RANGE=" }, { cmd: "AT+CHAN_LIST=" },
   { cmd: "AT+RSSI" }, { cmd: "AT+CONN_STATE" }, { cmd: "AT+WNBCFG" },
   { cmd: "AT+STALIST" }, { cmd: "AT+DIST=" }, { cmd: "AT+PATHLOSS=" },
+  { cmd: "AT+LOSS=" }, { cmd: "AT+ASSOC_FAIL=" },
+  { cmd: "AT+RAW=" }, { cmd: "AT+TWT=" },
   { cmd: "AT+SCAN_AP" }, { cmd: "AT+BSSLIST" },
   { cmd: "AT+TXPOWER=" }, { cmd: "AT+ACKTMO=" }, { cmd: "AT+TX_MCS=" },
   { cmd: "AT+HEART_INT=" }, { cmd: "AT+UNPAIR=" }, { cmd: "AT+LOADDEF=" },
@@ -271,9 +275,15 @@ function updateStatus(d) {
   $(`tx${d}`).textContent = s.tx ?? 0;
   $(`rx${d}`).textContent = s.rx ?? 0;
   $(`up${d}`).textContent = (s.uptime ?? 0) + "s";
-  // 发射功率（+ 距离模型的米数）/ 关联 STA 数：真机报不出来的字段显示 “-”（不编值）
+  // 发射功率（+ 距离模型的米数 + 行为模型开关）/ 关联 STA 数：真机报不出来的字段显示 “-”（不编值）
+  const model = [];
+  if (s.loss) model.push(T("tui_m_loss") + " " + s.loss + "%");
+  if (s.assoc_fail) model.push(T("tui_m_afail") + " " + s.assoc_fail + "%");
+  if (s.raw) model.push("RAW " + s.raw);
+  if (s.twt) model.push("TWT " + s.twt + "ms");
   $(`txpow${d}`).textContent = (s.txpower === null || s.txpower === undefined)
-    ? "-" : (s.txpower + " dBm" + (s.dist ? " @ " + s.dist + "m" : ""));
+    ? "-" : (s.txpower + " dBm" + (s.dist ? " @ " + s.dist + "m" : "")
+             + (model.length ? " · " + model.join(" · ") : ""));
   $(`sta${d}`).textContent = (s.stacnt === null || s.stacnt === undefined) ? "-" : s.stacnt;
   const sl = $(`staList${d}`);
   if (sl) {
@@ -321,7 +331,7 @@ let spamSeq = 0;   // 折叠块唯一 id
 
 // 真机固件周期打印（LMAC 状态/SSID 等）→ 折叠成可展开块，避免刷屏
 function isSpam(t) {
-  return /^(-{3,}|\[\d+\](LMAC STATUS|SSID:)|freq= \d|bgr:|chn:|buf:|irq:|cca:|sta_list|chip-temperat|\btx :|\brx :)/.test(t);
+  return /^(-{3,}|\[\d+\](LMAC STATUS|SSID:)|freq= \d|bgr:|chn:|buf:|irq:|cca:|sta_list|chip-temperat|\btx :|\brx :|WNB: tx=)/.test(t);
 }
 
 function renderConsole(d) {
@@ -456,17 +466,28 @@ function applyConfig() {
   // 距离模型是本模拟器扩展，而且是**链路属性**（每个方向各自算：RSSI = 对端发射功率 − 本机设的距离损耗）
   // → 同时下发给两台 PC 模拟器；真机没有这两条命令（会回 ERROR），所以只对模拟器发。
   const dist = $("cfgDist") ? $("cfgDist").value.trim() : "";
-  if (dist !== "") {
+  const loss = $("cfgLoss") ? $("cfgLoss").value.trim() : "";
+  const afail = $("cfgAFail") ? $("cfgAFail").value.trim() : "";
+  const raw = $("cfgRaw") ? $("cfgRaw").value.trim() : "";
+  const twt = $("cfgTwt") ? $("cfgTwt").value.trim() : "";
+  const wantsSim = [dist, loss, afail, raw, twt].some((v) => v !== "");
+  if (wantsSim) {
     const sims = ["A", "B"].filter((x) => state[x].source === "pc");
     if (!sims.length) {
       alert(T("tui_cfg_pl_hint"));
       return;
     }
     const pl = $("cfgPl") ? $("cfgPl").value : "";
+    // 链路属性 / 两向都相关 → 两台都下发
     sims.forEach((x) => {
-      sendCmd(x, `AT+DIST=${dist}`);
+      if (dist !== "") sendCmd(x, `AT+DIST=${dist}`);
       if (pl) sendCmd(x, `AT+PATHLOSS=${pl}`);
+      if (loss !== "") sendCmd(x, `AT+LOSS=${loss}`);
+      if (afail !== "") sendCmd(x, `AT+ASSOC_FAIL=${afail}`);
     });
+    // RAW 是 AP 的事、TWT 是 STA 的事 → 只下发给当前选中的那台（先把模式设对）
+    if (raw !== "") sendCmd(d, `AT+RAW=${raw}`);
+    if (twt !== "") sendCmd(d, `AT+TWT=${twt}`);
   }
 }
 

@@ -40,6 +40,19 @@ def last_rssi(buf):
     return int(ms[-1]) if ms else None
 
 
+def wait_until(cond, timeout=2.0, interval=0.02):
+    """按**截止时间**等条件成立（先判一次）。不用“猜循环次数”那种写法：
+    循环次数与环境快慢无关，机器一慢就变成假失败（或白等）。
+    """
+    end = time.time() + timeout
+    while True:
+        if cond():
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(interval)
+
+
 class HostClient:
     """host 数据口客户端（对应真实 SPI MACBUS 的 DATA_TX / DATA_RX）。
 
@@ -381,7 +394,106 @@ def main():
     b.pump(0.6)
     check("关距离模型后 B 回到注入值 -30", last_rssi(b.buf) == -30)
 
-    print("== 9. 收尾 ==")
+    print("== 9. 行为模型：丢包 / 关联失败 / RAW 接入窗口 / TWT 唤醒（均默认关）==")
+    # 先确保 A=AP、B=STA 处于连接态
+    a.send("AT+MODE=AP")
+    b.send("AT+MODE=STA")
+    a.pump(0.4)
+    b.pump(0.4)
+    time.sleep(1.5)
+    b.send("AT+CONN_STATE")
+    b.pump(0.8)
+    check("第 9 节起点：B 已连上", "CONN_STATE:CONNECTED" in b.buf)
+
+    # (a) 丢包注入：只作用数据帧，且确定性（100% 必丢、0% 不丢）
+    b.send("AT+LOSS=100")
+    b.pump(0.3)
+    n0 = coreA.wifi.rx_pkts
+    b.send("AT+TXDATA=20")
+    b.pump(0.3)
+    b.send_raw(bytes([0xFF] * 6) + bytes(range(14)))
+    b.pump(0.8)
+    check("LOSS=100%：帧被丢（对端 rx 不变 + 本机回 TX DATA FAIL）",
+          coreA.wifi.rx_pkts == n0 and coreB.wifi.loss_drops == 1,
+          f"rx {n0}->{coreA.wifi.rx_pkts} drops={coreB.wifi.loss_drops}")
+    b.send("AT+LOSS=0")
+    b.pump(0.3)
+    b.send("AT+TXDATA=20")
+    b.pump(0.3)
+    b.send_raw(bytes([0xFF] * 6) + bytes(range(14)))
+    b.pump(0.8)
+    check("LOSS=0%：帧正常送达", coreA.wifi.rx_pkts == n0 + 1,
+          f"rx={coreA.wifi.rx_pkts}")
+
+    # (b) 关联失败概率：100% → 一直连不上（状态机继续重试）
+    b.send("AT+ASSOC_FAIL=100")
+    b.send("AT+MODE=STA")
+    b.pump(0.4)
+    time.sleep(2.0)
+    check("ASSOC_FAIL=100%：B 连不上且重试计数在涨",
+          coreB.wifi.conn != sim.CONN_CONNECTED and coreB.wifi.assoc_fails > 0,
+          f"conn={coreB.wifi.conn_str()} fails={coreB.wifi.assoc_fails}")
+    b.send("AT+ASSOC_FAIL=0")
+    b.pump(0.3)
+    time.sleep(1.5)
+    b.send("AT+CONN_STATE")
+    b.pump(0.8)
+    check("ASSOC_FAIL=0%：自动恢复连接", "CONN_STATE:CONNECTED" in b.buf)
+
+    # (c) RAW 接入窗口：AP 定调度（AT+RAW 只在 AP 上有效），STA 从 ASSOC_RESP 学槽位
+    a.send("AT+RAW=4")
+    a.pump(0.3)
+    b.send("AT+MODE=STA")          # 重新关联 → 收获槽位
+    b.pump(0.4)
+    time.sleep(1.5)
+    check("RAW：STA 学到了 AP 的槽数与自己的槽位",
+          coreB.wifi.raw_slots_ap == 4 and coreB.wifi.slot is not None,
+          f"slots={coreB.wifi.raw_slots_ap} slot={coreB.wifi.slot}")
+    # 窗口外发的帧要**排队等窗口**（不是丢），窗口一开就自动发出去。
+    # 用进程内 send_data 直接验（不经控制台往返）→ 没有“发送途中窗口开了”的竞态。
+    self_frame = bytes([0xFF] * 6) + coreB.cfg.mac + bytes([0x88, 0xB5]) + b"RAW-QUEUED"
+    ok = wait_until(lambda: not coreB.wifi.raw_window_open(), timeout=1.5)
+    q0, r0 = len(coreB.wifi.tx_queue), coreA.wifi.rx_pkts
+    rc = coreB.wifi.send_data(self_frame)
+    check("RAW：窗口外 send_data 受理但排队（不是丢）",
+          ok and rc == 0 and len(coreB.wifi.tx_queue) == q0 + 1,
+          f"rc={rc} q={len(coreB.wifi.tx_queue)} defer={coreB.wifi.raw_defer}")
+    wait_until(lambda: coreA.wifi.rx_pkts > r0, timeout=2.0)
+    check("RAW：窗口一开，排队的帧送达对端", coreA.wifi.rx_pkts > r0,
+          f"rx {r0}->{coreA.wifi.rx_pkts}")
+    a.send("AT+RAW=0")
+    a.pump(0.3)
+
+    # (d) TWT 唤醒窗口：用“现在醒/睡”这个判据选时刻，结果确定
+    b.send("AT+TWT=2000,50")          # 每 2s 只醒 50ms
+    b.pump(0.4)
+    b.send("AT+TWT?")                 # 读回
+    b.pump(0.4)
+    check("TWT 配置读回 TWT:2000,50", "TWT:2000,50" in b.buf)
+    b.send("AT+MODE=STA")
+    b.pump(0.4)
+    time.sleep(1.5)
+    # 睡着时收到的下行帧丢掉
+    wait_until(lambda: not coreB.wifi.twt_awake(), timeout=3.0)
+    d0 = coreB.wifi.twt_sleep_drops
+    coreA.wifi.send_data(bytes([0xFF] * 6) + coreB.cfg.mac + bytes([0x88, 0xB5]) + b"TWT-DL")
+    time.sleep(0.3)
+    check("TWT：睡着时下行数据帧被丢（计数 twt_drop 增加）",
+          coreB.wifi.twt_sleep_drops > d0, f"drops={coreB.wifi.twt_sleep_drops}")
+    # 睡着时自己要发的帧排队，醒来后送达
+    wait_until(lambda: not coreB.wifi.twt_awake(), timeout=3.0)
+    r1 = coreA.wifi.rx_pkts
+    rc2 = coreB.wifi.send_data(bytes([0xFF] * 6) + coreB.cfg.mac + bytes([0x88, 0xB5]) + b"TWT-UL")
+    check("TWT：睡着时 send_data 受理但排队",
+          rc2 == 0 and len(coreB.wifi.tx_queue) >= 1,
+          f"rc={rc2} q={len(coreB.wifi.tx_queue)} defer={coreB.wifi.twt_defer}")
+    wait_until(lambda: coreA.wifi.rx_pkts > r1, timeout=4.0)
+    check("TWT：醒来后排队帧送达对端", coreA.wifi.rx_pkts > r1,
+          f"rx {r1}->{coreA.wifi.rx_pkts}")
+    b.send("AT+TWT=0")
+    b.pump(0.3)
+
+    print("== 10. 收尾 ==")
     stop.set()
     a.s.close()
     b.s.close()

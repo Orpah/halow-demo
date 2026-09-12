@@ -110,6 +110,9 @@ ORPAH-over-HaLow 的业务全链路（Router 桥 / 走失表 / 报文集 / ID �
 
 ## 5b. 自检入口、端口与 tasks.json（2026-09-13 补）
 
+- **backlog 只有一个家 = `docs/backlog.md`**（已做 / 不做附理由 / 留待真机附触发条件）。
+  新增「以后要做」的念头：**要么当场做，要么写进那张表并写清理由/触发条件** ——
+  别再散落回各文档正文（2026-09-13 刚把散在 5 处的旧清单收敛过去）。
 - **一键自检 = `python simulator/run_checks.py`**（套件：模拟器回归 `host/run_tests.py`、
   界面文案 `tools/ui/chk_i18n.py`、静态检查 py/js/json/tasks）。**改完任何东西先跑它**。
   判定 = 退出码 0 **且** 输出无 `FAIL` / `Traceback`；报告写 `simulator/checks_report.md`（入库，

@@ -42,8 +42,21 @@
   [PASS] A 侧看到的 STA 信号随其发射功率变化（≈ -46 dBm）  (rssi=-46)
   [PASS] 按 MAC 查 RSSI 与按索引一致
   [PASS] 关距离模型后 B 回到注入值 -30
-== 9. 收尾 ==
+== 9. 行为模型：丢包 / 关联失败 / RAW 接入窗口 / TWT 唤醒（均默认关）==
+  [PASS] 第 9 节起点：B 已连上
+  [PASS] LOSS=100%：帧被丢（对端 rx 不变 + 本机回 TX DATA FAIL）  (rx 0->0 drops=1)
+  [PASS] LOSS=0%：帧正常送达  (rx=1)
+  [PASS] ASSOC_FAIL=100%：B 连不上且重试计数在涨  (conn=ASSOCIATING fails=4)
+  [PASS] ASSOC_FAIL=0%：自动恢复连接
+  [PASS] RAW：STA 学到了 AP 的槽数与自己的槽位  (slots=4 slot=0)
+  [PASS] RAW：窗口外 send_data 受理但排队（不是丢）  (rc=0 q=1 defer=1)
+  [PASS] RAW：窗口一开，排队的帧送达对端  (rx 1->2)
+  [PASS] TWT 配置读回 TWT:2000,50
+  [PASS] TWT：睡着时下行数据帧被丢（计数 twt_drop 增加）  (drops=1)
+  [PASS] TWT：睡着时 send_data 受理但排队  (rc=0 q=1 defer=1)
+  [PASS] TWT：醒来后排队帧送达对端  (rx 2->3)
+== 10. 收尾 ==
 
-结果: 36/36 通过
+结果: 48/48 通过
 
 --- stderr ---

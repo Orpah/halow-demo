@@ -273,6 +273,11 @@ def _sim_probe(core):
             "txpower": core.cfg.txpower,
             "dist": core.cfg.distance,
             "pathloss": core.cfg.pathloss_n,
+            # 行为模型（丢包/关联失败/RAW/TWT）：模拟器才有，真机报不出来 → 界面显示 0/-
+            "loss": core.cfg.loss_p,
+            "assoc_fail": core.cfg.assoc_fail_p,
+            "raw": core.cfg.raw_slots,
+            "twt": core.cfg.twt_interval_ms,
         }
     return probe
 
@@ -306,6 +311,7 @@ class Device:
             #   txpower 发射功率 dBm；dist/pathloss 距离模型（模拟器扩展）；stacnt/stas 关联 STA
             "txpower": None, "dist": 0.0, "pathloss": None,
             "stacnt": None, "stas": [],
+            "loss": 0, "assoc_fail": 0, "raw": 0, "twt": 0,
         }
         self.t0 = time.time()
         self.buf = b""
