@@ -112,7 +112,13 @@
 - **回放页硬规则（2026-09-12）**：
   - **定位算法只有一份**：`orpah/ui/static/pos.js`（`trilaterate`/`wlsLocate`/`ellipseOf`/
     `obsOfStation`/`qualityOf`…）。`track.html` 与 `replay.html` 都用它 —— 别在页面里
-    再抄一份算法（回放与实时必须逐位一致）。
+    再抄一份算法（回放与实时必须逐位一致）。同理**回放页的「报文流时间轴」判定也只在
+    `pos.js`（`frameGaps`）**：缺口/重复/**序号回退**分开计（回退 = 设备重启或乱序，
+    **不是**丢包；天真的 `seq - prev - 1` 会算出负数缺口）。两条已踩过的坑都锁在单测里：
+    ① `Number(null) === 0` → “没有 seq”被当成 seq=0 → 整段变成一路回退（加 `hasSeq()` 守卫）；
+    ② 结果**别存 `S.frames`** —— 那个名字在 `replay.html` 里已经是位置帧（卡尔曼/CDF 用），
+    会静默冲掉平滑与误差统计；报文流用 `S.stream`。`test_posjs.py` 另有两条页面守卫
+    （两页必须走 `samplesFor`；`replay.html` 必须走 `frameGaps` 且页面里不许出现 `seq - `）。
   - **不看未来**：`obsOfStation` 内置 `p.t <= t`，回放某时刻只能用该时刻**之前**的样本。
     加任何「预取/缓存未来样本」的优化都会破坏这条。同理**时序平滑也是因果的**：
     `kalmanTrack` 只吃 `t<=光标` 的帧（`smRuns`/`smoothAt` 都带 `p.t <= t`；实测 20 个光标位置

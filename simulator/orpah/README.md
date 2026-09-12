@@ -47,7 +47,7 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | 设备清册 / 走失案件（立案→发现→找回·撤销→结案，含接手人） | `registry.py` / `cases.py` | 页面 + `test_server.py` |
 | 告警（长未上报 / 案件超时 / 处置超时 / 验签失败率 / 降级上报 / 设备时钟 / **能力声明不一致**） | `alerts.py` | `test_alerts.py`、`test_levels.py` |
 | 指标面板（验签失败率·算法分布 / 平均 RSSI / 处置时长） | `metrics.py` | `test_metrics.py` |
-| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** + **补站位建议（几何不行时给可执行坐标）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py`（51 条 + 1 条页面守卫，套件自己报数） |
+| 定位：多路由器观测 → 三边/WLS + 95% 椭圆 + 卡尔曼平滑 + 回放 + **误差 CDF（仅模拟环境有真值）** + **补站位建议（几何不行时给可执行坐标）** + **报文流时间轴（序号缺口=丢包证据）** | `motion.py` / `stations.py` / `ui/static/pos.js` | `test_motion.py`、`test_posjs.py`（61 条 + 2 条页面守卫，套件自己报数） |
 | 时钟可信：①无 RTC 设备 `ts=0` → 服务器接收时刻（唯一入口）②设备时钟**偏移/漂移估计**（只估计不改数据；长基线才给漂移，原因可见：基线不足/噪声）③**设备自报能力位 `cap.rtc`**（三态；已签声明防篡改；无 RTC ⇒ 一律服务器时刻且不喂估计器；声明有 RTC 却给不出可用时间 → `id_cap_mismatch` 告警） | `orpah_proto`（`effective_ts`/`cap_of`/`rtc_of`） / `clock.py`（`ClockTracker`） | `test_clock.py`（88 条）+ `test_server.py`（28 条）+ `test_alerts.py` + `demo_clock.py` + 首页「上报控制」能力下拉/ts 置 0 |
 | 抓包解析 / 双源对照（pcap → ORPAH 报文；与 UDP 侧计数对差） | `capture.py`（解析复用 `orpah_proto` 单一源） | `test_capture.py` |
 | **能量轴（免电池客户端）**：三参数储能模型（采集 / 储能 / 上报代价）→ 由能量决定**间隔与降级**；降级**下限 L1**（永不 L3，§8.3 里 L3 不能确认人在场）；电量写进**已签**上报的 `battery_mv`，服务端从（级别+电量）**推导成因**；“没电了”从沉默里**分流**出来（`no_report_energy` warn vs `no_report` crit） | `energy.py` + `alerts.py` + `server.py`/`ui_server.py` | `test_energy.py`（51 条）+ `test_alerts.py` + 首页「能量轴」卡片（含扫描表） |
@@ -64,7 +64,7 @@ AP 空口 → STA 模块收 → host 口推给 Client。
 | `case.html` 走失案件 | 立案（寻人启事要素）/ 接手 / 找回结案 / 撤销 | `/api/cases`、`/api/registry` | SQLite `cases`/`case_events` |
 | `track.html` 定位与轨迹 | 模拟·真实双模式；站位表（打点/绑定）；WLS 定位 + 95% 椭圆；画布⇄地图 | `/api/ts/query`、`/api/stations`、`/api/config` | IoTDB（设备流 + 各路由器观测）+ SQLite `stations` |
 | `rssi.html` | 路径损耗教学计算器（2/3/多点定位） | `/api/config` | 无状态 |
-| `replay.html` 回放 | 时间窗回放、逐帧定位、平滑、有效时段分色、事件时间线、GPX/GeoJSON 导出 | `/api/replay`、`/api/stations`、`/api/registry`、`/api/config` | **只读** IoTDB |
+| `replay.html` 回放 | 时间窗回放、逐帧定位、平滑、有效时段分色、事件时间线、**报文流时间轴（序号缺口/回退/帧间隔）**、GPX/GeoJSON 导出 | `/api/replay`、`/api/stations`、`/api/registry`、`/api/config` | **只读** IoTDB |
 | `metrics.html` 指标面板 | 四项指标 + 各案件处置时长 | `/api/metrics`、`/api/status` | 只读（IoTDB + SQLite） |
 | `keys.html` 密钥管理 | 生成→分发→轮换→吊销→退役（多代并存） | `/api/keys` | SQLite `keys`/`key_revocations` + IoTDB 审计 |
 | `sig.html` 签名工具 | ES256/HS256 签名与验签演示 | `/api/sig` | 无状态（临时密钥对） |
@@ -80,7 +80,7 @@ POST：`/api/ctl`（暂停/改 SN·间隔/走失表 mark·untrack/密钥吊销/�
 
 | 文件 | 作用 | 谁用 |
 |---|---|---|
-| `ui/static/pos.js` | 定位纯函数：RSSI↔距离、三边、WLS、椭圆、质量（GDOP/残差）、观测归集、卡尔曼 | `track.html`、`replay.html` |
+| `ui/static/pos.js` | 定位纯函数：RSSI↔距离、三边、WLS、椭圆、质量（GDOP/残差）、观测归集、卡尔曼、**报文流判定（缺口/回退/帧间隔）** | `track.html`、`replay.html` |
 | `ui/static/map.js` | 底图源列表与条款、本地坐标→经纬度、离线回落 | `track.html`、`replay.html` |
 | `tools/ui/static/ui_i18n.js` | **共享 i18n 字典**（zh/en 单一源） | orpah 11 页 + halow-demo 主 UI |
 | `orpah/ui/static/style.css` | 样式与配色变量（告警红 / 上行蓝 / ID 橙 / 发现灰，色弱校验过） | orpah 各页 |
@@ -102,7 +102,7 @@ POST：`/api/ctl`（暂停/改 SN·间隔/走失表 mark·untrack/密钥吊销/�
 | 5 | 首页 | 「走失表（服务器权威）」卡填 `lostSn` → `标记为走失`（只按 **SN** 加进走失表，**不立案** —— 与第 4 步的区别就在这） | `服务器发布记录` +1、路由器卡「收到走失表」+1 |
 | 6 | 首页 | 等下一个上报周期（人走近路由器时） | 「发现记录（走失命中）」出现「发现 SN」、路由器/服务器卡「发现 N 次」+1；若已有案件 → 案件转「已发现」 |
 | 7 | 走失案件 | `标记已接手` → 找回后 `找回（结案）`（误报则 `撤销（误报）`） | 状态→已找回/已撤销；设备回「启用」；审计事件落 IoTDB（首页「事件历史」卡可见） |
-| 8 | 回放 | 选 SN + 时间窗（快捷 `30` 分钟）→ `▶ 播放` | 轨迹/距离环/椭圆逐帧推进；进度条 **绿(≥2 台可定位)/橙(仅 1 台)/灰(无观测)**、`跳过无效段`；`导出轨迹` GPX/GeoJSON（缺口断开成段） |
+| 8 | 回放 | 选 SN + 时间窗（快捷 `30` 分钟）→ `▶ 播放` | 轨迹/距离环/椭圆逐帧推进；进度条 **绿(≥2 台可定位)/橙(仅 1 台)/灰(无观测)**、`跳过无效段`；**报文流时间轴**（点行跳该帧）；`导出轨迹` GPX/GeoJSON（缺口断开成段） |
 | 9 | 指标面板 | 打开（窗口 15 分钟–24 小时 + SN） | 验签失败率与算法分布、平均 RSSI、各案件处置时长（时长不可用会标 `invalid`，不给负数） |
 | 10 | 首页 | `暂停上报` 后等一会儿 | 「告警」卡出现「设备 X 无上报 · 持续 …」+ 顶部 ⚠ 计数（阈值见 `alerts.py` 的 `ORPAH_ALERT_*` 环境变量） |
 | 11 | 首页 | `注入伪造上报` / `跑全部攻击`（Orpah ID 卡） | 「期望 X · 实际 Y」对照（`signature_invalid` / `replay_detected` / `unknown_device`…），验签失败率随之上升并触发告警 |

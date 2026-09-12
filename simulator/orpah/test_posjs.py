@@ -35,7 +35,7 @@ const EXPORT = ["rssiFromDist", "distFromRssi", "trilaterate", "wlsLocate", "ell
                 "resGrade", "latestAt", "obsOfStation", "obsAt", "kalmanTrack",
                 "pathJitter", "obsSegments", "segIndexAt", "nextValidAt",
                 "truthAt", "errorsOf", "quantileOf", "cdfOf",
-                "gdopOf", "suggestStation", "samplesFor"];
+                "gdopOf", "suggestStation", "samplesFor", "frameGaps"];
 const src = fs.readFileSync(process.argv[2], "utf8")
           + "\nmodule.exports = {" + EXPORT.join(",") + "};\n";
 const m = { exports: {} };
@@ -243,6 +243,39 @@ ck("补站位：近共线（cond 有限但巨大）→ 仍给建议、仍要求�
    && advNear.condBefore > 500 && Math.abs(advNear.y) > 5,
    JSON.stringify(advNear));
 
+/* ---- 报文流分析：缺口 / 重复 / 回退 / 帧间隔（回放页「报文流时间轴」靠它）----
+   两条真陷阱必须在位：序号回退（设备重启）**不是**丢包（不能算出负数缺口）；没有 seq 就不判。 */
+const pts = (arr) => arr.map(([t, seq, rssi, rid]) =>
+  ({ t, seq, rssi, router_id: rid === undefined ? "" : rid }));
+let fg = P.frameGaps(pts([[1000, 1], [2000, 2], [3000, 4], [4000, 5]]));
+ck("报文流：连续帧不报缺口，跳号那条报缺 1",
+   fg.n === 4 && fg.gaps === 1 && fg.gap_total === 1
+   && fg.rows[1].gap === 0 && fg.rows[2].gap === 1 && fg.rows[3].gap === 0);
+ck("报文流：缺口累计（跳 5 条）",
+   P.frameGaps(pts([[1, 1], [2, 7]])).gap_total === 5);
+fg = P.frameGaps(pts([[1000, 5], [2000, 5], [3000, 4]]));
+ck("报文流：seq 相同 = 重复（不算缺口）",
+   fg.dups === 1 && fg.gaps === 0 && fg.rows[1].dup && !fg.rows[1].gap);
+ck("报文流：seq 变小 = 回退（设备重启/乱序，不算缺口、不出现负数）",
+   fg.resets === 1 && fg.gaps === 0 && fg.gap_total === 0 && fg.rows[2].reset);
+fg = P.frameGaps(pts([[1000, 1], [2000, null], [3000, 9], [4000, undefined]]));
+ck("报文流：seq 缺失 → 该帧不判（不猜），也不影响后一条的判定",
+   fg.rows[1].gap === 0 && !fg.rows[1].dup && !fg.rows[1].reset
+   && fg.rows[2].gap === 0 && fg.rows[3].gap === 0 && fg.gaps === 0);
+fg = P.frameGaps(pts([[1000, 1, -55], [3000, 2, -60], [4000, 3, -61]]));
+ck("报文流：帧间隔逐条给（首帧 null）",
+   fg.rows[0].dt === null && fg.rows[1].dt === 2000 && fg.rows[2].dt === 1000);
+ck("报文流：间隔统计（中位/P95/最大，秒级用得到）",
+   fg.dt.n === 2 && fg.dt.med === 1000 && fg.dt.p95 === 1000 && fg.dt.max === 2000);
+ck("报文流：router_id 空串原样保留（真机阶段才非空，页面如实显示“（空）”）",
+   P.frameGaps(pts([[1, 1]])).rows[0].router_id === ""
+   && P.frameGaps(pts([[1, 1, -50, "R1"]])).rows[0].router_id === "R1");
+ck("报文流：空表/undefined 不炸（n=0，统计给 null 不给 0）",
+   P.frameGaps([]).n === 0 && P.frameGaps(undefined).n === 0
+   && P.frameGaps([]).dt.med === null && P.frameGaps([]).gap_total === 0);
+ck("报文流：单帧不给 delta（不能凭空造一条间隔）",
+   P.frameGaps(pts([[1, 1]])).dt.n === 0);
+
 console.log("");
 if (fails.length) {
   console.log("定位内核：失败 " + fails.length + " 项：" + fails.join("；"));
@@ -271,6 +304,17 @@ def page_guard():
         print(f"  FAIL 这两页没有走 samplesFor（单一判据）：{', '.join(bad)}")
         return 1
     print("  OK   两页都走 samplesFor（样本源判据单一源）")
+    # 报文流：判定只能走 pos.js 的 frameGaps（页面里再写一份“算缺口”的循环迟早漂移，
+    # 而且 seq 回退（设备重启）那条陷阱很容易被写成负数缺口）
+    with open(os.path.join(HERE, "ui", "static", "replay.html"), encoding="utf-8") as f:
+        rp = f.read()
+    if "frameGaps(S.points)" not in rp:
+        print("  FAIL replay.html 没有调用 frameGaps（报文流判定必须走单一实现）")
+        return 1
+    if "seq - " in rp or "seq-" in rp:
+        print("  FAIL replay.html 里在页面侧自算 seq 差值（应改用 pos.js 的 frameGaps）")
+        return 1
+    print("  OK   replay.html 走 frameGaps（报文流判定单一源）")
     return 0
 
 

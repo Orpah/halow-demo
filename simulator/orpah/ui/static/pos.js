@@ -11,6 +11,7 @@
 - 95% 置信椭圆 / 搜索半径（由协方差特征值给）
 - 定位质量：残差 RMS、GDOP、站位布局条件数、分级、**补站位建议（几何不行时“往哪儿再放一台”）**
 - 观测归集：在某一时刻 t 各站位能看到什么（时间窗 + 不看未来）
+- 报文流分析：帧序号缺口 / 回退 / 帧间隔（回放页的「报文流时间轴」用；**页面不许自己算**）
 
 全局函数（classic script，页面直接按名字调用，与重构前一致）。
 */
@@ -714,4 +715,48 @@ function nextValidAt(seg, t, minCount = 2) {
     if (seg.counts[i] >= minCount) return seg.t0 + i * seg.step;
   }
   return null;
+}
+
+/* ---------------- 报文流（原始上报帧）分析 ----------------
+
+输入 = 回放窗内的设备上报点 `[{t(ms), rssi, seq, router_id}]`（升序，见 `tsdb.query_report_range`），
+输出 = 逐帧标注 + 汇总。**为什么单独成函数、且放在这里**：页面里再写一份“算缺口”的循环
+迟早与这里漂移，而序号判定有两个**真陷阱**（下面两条），必须有单测（`test_posjs.py` 用 node 跑本文件原文）：
+
+1. **序号回退 ≠ 缺口**：`seq` 是**设备**给的计数，设备重启会从 1 重来（`seq` 也可能因乱序到达
+   而变小）。只写 `seq - prev - 1` 会得出**负数**缺口（看着像丢了几千条），把真问题淹掉。
+   所以：`d > 1` → 缺口 d-1；`d === 0` → 重复；`d < 0` → 回退（重启/乱序），三者分开计。
+2. **没有序号就不判**：`seq` 缺失/非数字 → 该帧的 `gap/dup/reset` 全为 false，**不猜**
+   （本仓“无值不给 0”的约定）。
+
+返回 `{rows, n, gaps, gap_total, dups, resets, dt:{n, med, p95, max}}`；
+`rows[i] = {t, seq, rssi, router_id, dt, gap, dup, reset}`，`dt` = 与上一帧的间隔（ms，首帧 null）。
+*/
+function frameGaps(points) {
+  const rows = [];
+  const dts = [];
+  let gaps = 0, gapTotal = 0, dups = 0, resets = 0, prev = null;
+  (points || []).forEach(p => {
+    const r = { t: p.t, seq: p.seq, rssi: p.rssi, router_id: p.router_id || "",
+                dt: null, gap: 0, dup: false, reset: false };
+    if (prev && prev.t != null && p.t != null && isFinite(p.t) && isFinite(prev.t)) {
+      r.dt = p.t - prev.t;
+      if (r.dt >= 0) dts.push(r.dt);
+    }
+    // 没有序号就不判（**`null` 不能当 0**：`Number(null)===0` 会让“没值”变成一片 seq 回退，
+    // 这正是本仓 `isFinite(null)` 踩过的同一类坑 —— 单测锁住了这一条）
+    const hasSeq = v => v !== null && v !== undefined && v !== "" && isFinite(Number(v));
+    if (prev && hasSeq(prev.seq) && hasSeq(p.seq)) {
+      const d = Number(p.seq) - Number(prev.seq);
+      if (d > 1) { r.gap = d - 1; gaps++; gapTotal += d - 1; }
+      else if (d === 0) { r.dup = true; dups++; }
+      else if (d < 0) { r.reset = true; resets++; }
+    }
+    rows.push(r);
+    prev = p;
+  });
+  dts.sort((x, y) => x - y);
+  const q = k => dts.length ? dts[Math.min(dts.length - 1, Math.floor(k * (dts.length - 1)))] : null;
+  return { rows, n: rows.length, gaps, gap_total: gapTotal, dups, resets,
+           dt: { n: dts.length, med: q(0.5), p95: q(0.95), max: dts.length ? dts[dts.length - 1] : null } };
 }

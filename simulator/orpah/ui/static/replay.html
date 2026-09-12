@@ -43,6 +43,12 @@
   ul.tl li.sec .ty { color: var(--red); }
   ul.tl li.warn .ty { color: var(--org); }
   ul.tl li.ok .ty { color: var(--grn); }
+  /* 报文流行：结论单独上色（不要把整行的 .ty 都染色，否则 seq/Δt 也跟着变色） */
+  ul.tl li .mark { margin-left: auto; }
+  ul.tl li .mark.gap { color: var(--red); }
+  ul.tl li .mark.warn { color: var(--org); }
+  ul.tl li .mark.ok { color: var(--grn); }
+  ul.tl li[data-t] { cursor: pointer; }
   .hint.err { color: var(--red); }
   #map { height: 420px; border-radius: 8px; margin-top: 10px; }
   .leaflet-container { background: #0d1117; }
@@ -189,6 +195,18 @@
   <ul class="tl" id="rpTimeline"></ul>
 </section>
 
+<!-- ============ 3 · 报文流（原始上报帧） ============
+     与 §2 事件时间线分开：事件=业务/安全发生了什么，报文流=**无线链路上收到了哪几帧**。
+     排障价值在「序号缺口 = 上行丢包证据」「帧间隔异常」「来源路由器（真机阶段才非空）」。 -->
+<section class="card">
+  <h3 data-i18n="rp_sec3">3 · 报文流（原始上报帧）</h3>
+  <div class="row">
+    <span class="hint" id="rpFrInfo"></span>
+    <span class="hint" data-i18n="rp_fr_legend">点某一行可把光标跳到该帧时刻；灰=光标之后（未来）。序号缺口=上行丢包证据，序号回退=设备重启/乱序（不是丢包）。</span>
+  </div>
+  <ul class="tl" id="rpFrames"></ul>
+</section>
+
 <script src="ui_i18n.js"></script>
 <script src="vendor/leaflet/leaflet.js?v=1.9.4"></script>
 <script src="map.js"></script>
@@ -240,6 +258,7 @@ const S = {                          // 回放状态
   t: 0, playing: false, timer: null,
   seg: null,                         // 有效时段分段（obsSegments 结果）
   frames: [], sm: [],                // 原始位置帧（含协方差）与卡尔曼平滑后的帧
+  stream: null,                      // 报文流判定（pos.js frameGaps 的结果；别叫 frames，那个是位置帧）
   jitRaw: 0, jitSm: 0,               // 轨迹抖动（相邻帧距离均值）：原始 vs 平滑
   trail: [],                         // 已回放出的估计点（画轨迹；null = 缺口断开）
   truth: [], truthWhy: null,         // 地面真值轨迹（**仅模拟环境**有）+ 拿不到的原因
@@ -399,6 +418,8 @@ async function loadReplay() {
     S.points = rep.points || [];
     S.obs = rep.obs || {};                 // {sid: [{t,rssi,seq}]} 各路由器本窗测量（升序）
     S.events = rep.events || [];
+    // 报文流判定（缺口/重复/回退/帧间隔）一次算完；页面只画 → 单一实现 + 单测在 pos.js
+    S.stream = frameGaps(S.points);
     S.stations = st.stations || [];
     S.truth = []; S.truthWhy = null;       // 真值在 precomputeFrames() 后按帧时刻取（见 loadTruth）
     S.truthN = 0;
@@ -415,6 +436,7 @@ async function loadReplay() {
     await loadTruth();              // 按**帧时刻**精确取真值（网格插值会随步长平方放大误差）
     renderCdf();                    // 误差 CDF（仅模拟环境有真值；无真值就如实说“不适用”）
     renderTimeline();
+    renderFrames();
     render();
   } catch (e) {
     rpInfo(T("err_offline"), "err");
@@ -566,6 +588,7 @@ function render() {
   $("rpClock").textContent = clockOf(S.t);
   $("rpSpan").textContent = T("rp_span_fmt").replace("{v}", durLeft(span / 1000));
   renderTimeline();
+  renderFrames();                 // 报文流的光标态（灰/高亮/跟随滚动）与事件时间线同步更新
 }
 
 function lastEvent() {
@@ -939,6 +962,75 @@ function renderTimeline() {
     if (r < box.scrollTop || r > box.scrollTop + box.clientHeight - 24) box.scrollTop = r - box.clientHeight / 2;
   }
 }
+
+/* ---------------- 报文流时间轴（原始上报帧） ----------------
+   判定全走 pos.js 的 `frameGaps()`（**单一实现 + 单测**）：缺口/重复/回退分开计，
+   页面只负责画。与 §2 的分工：§2 = 业务/安全事件，本节 = 无线链路上收到了哪几帧。 */
+function frameRowText(r) {
+  const bits = [];
+  bits.push(`<span class="t">${clockOf(r.t)}</span>`);
+  bits.push(`<span class="ty">seq ${esc(r.seq == null ? "-" : r.seq)}</span>`);
+  const dts = (r.dt == null) ? "—" : (r.dt / 1000).toFixed(1) + "s";
+  bits.push(`<span>Δt ${esc(dts)}</span>`);
+  bits.push(`<span>RSSI ${esc(r.rssi == null ? "—" : r.rssi)}</span>`);
+  // 来源路由器：**真机阶段才非空**（当前 ui_server 写设备流时没传 → 空串，如实显示）
+  bits.push(`<span>${esc(r.router_id || T("tk_router_none"))}</span>`);
+  let mark = "";
+  if (r.gap) mark = `<span class="mark gap">${esc(T("rp_fr_gap").replace("{n}", r.gap))}</span>`;
+  else if (r.dup) mark = `<span class="mark warn">${esc(T("rp_fr_dup"))}</span>`;
+  else if (r.reset) mark = `<span class="mark warn">${esc(T("rp_fr_reset"))}</span>`;
+  bits.push(mark || `<span class="mark ok">${esc(T("rp_fr_ok"))}</span>`);
+  return bits.join("");
+}
+
+function renderFrames() {
+  const ul = $("rpFrames");
+  if (!ul) return;
+  const f = S.stream;
+  const info = $("rpFrInfo");
+  if (!f || !f.n) {
+    ul.innerHTML = `<li class="hint">${esc(T("rp_fr_none"))}</li>`;
+    ul.dataset.sig = "";
+    if (info) info.textContent = "";
+    return;
+  }
+  if (info) {
+    info.textContent = T("rp_fr_info")
+      .replace("{n}", f.n)
+      .replace("{g}", f.gaps).replace("{gt}", f.gap_total)
+      .replace("{r}", f.resets).replace("{d}", f.dups)
+      .replace("{m}", f.dt.med == null ? "—" : (f.dt.med / 1000).toFixed(1))
+      .replace("{p}", f.dt.p95 == null ? "—" : (f.dt.p95 / 1000).toFixed(1));
+  }
+  if (ul.dataset.sig !== "f" + f.n) {          // 结构只在换数据时重建
+    ul.dataset.sig = "f" + f.n;
+    ul.innerHTML = f.rows.map(r =>
+      `<li data-t="${r.t}" title="${esc(T("rp_fr_jump"))}">` + frameRowText(r) + `</li>`
+    ).join("");
+  }
+  let curIdx = -1;
+  [...ul.children].forEach((li, i) => {
+    const t = +li.dataset.t || 0;
+    li.classList.toggle("future", t > S.t);
+    if (t <= S.t) curIdx = i;
+  });
+  [...ul.children].forEach((li, i) => li.classList.toggle("cur", i === curIdx));
+  const cur = ul.children[curIdx];
+  if (cur && S.playing) {                       // 播放时把当前帧滚进视野
+    const r = cur.offsetTop;
+    if (r < ul.scrollTop || r > ul.scrollTop + ul.clientHeight - 24) ul.scrollTop = r - ul.clientHeight / 2;
+  }
+}
+
+/* 点某一行 → 光标跳到该帧（与拖动进度条同一路径：清轨迹重画，不另建一套跳转逻辑） */
+$("rpFrames").onclick = (ev) => {
+  const li = ev.target.closest("li[data-t]");
+  if (!li) return;
+  stop();
+  S.t = +li.dataset.t;
+  S.trail = [];
+  render();
+};
 
 /* ---------------- 交互 ---------------- */
 $("rpPlay").onclick = () => { S.playing ? stop() : play(); };

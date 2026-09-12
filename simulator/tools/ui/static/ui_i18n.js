@@ -723,6 +723,15 @@
       "rp_exp_done": "已导出 {n} 段 · {m} 点 → {f}",
       "rp_only_sec": "只看安全事件（验签/密钥）",
       "rp_ev_none": "该时间段没有事件。",
+      "rp_sec3": "3 · 报文流（原始上报帧）",
+      "rp_fr_none": "该时间段没有上报帧。",
+      "rp_fr_legend": "点某一行可把光标跳到该帧时刻；灰=光标之后（未来）。序号缺口=上行丢包证据，序号回退=设备重启/乱序（不是丢包）。",
+      "rp_fr_info": "本窗 {n} 帧 · 序号缺口 {g} 处（共缺 {gt} 条）· 回退 {r} 次 · 重复 {d} 次 · 帧间隔 中位 {m}s / P95 {p}s",
+      "rp_fr_gap": "缺 {n} 条",
+      "rp_fr_dup": "序号重复",
+      "rp_fr_reset": "序号回退（重启/乱序）",
+      "rp_fr_ok": "连续",
+      "rp_fr_jump": "跳到该帧",
 
       /* ---- RSSI 定位算法 rssi.html ---- */
       "rs_sub": "Orpah ID · RSSI → 距离 → 2/3/多点定位（无人机悬停取 RSSI）",
@@ -1675,6 +1684,15 @@
       "rp_exp_done": "Exported {n} segments \u00b7 {m} points \u2192 {f}",
       "rp_only_sec": "Security events only (signature / keys)",
       "rp_ev_none": "No events in this window.",
+      "rp_sec3": "3 \u00b7 Frame stream (raw report frames)",
+      "rp_fr_none": "No report frames in this window.",
+      "rp_fr_legend": "Click a row to move the cursor to that frame; grey = after the cursor (future). A seq gap = uplink loss evidence; a seq rollback = device restart / reordering (not loss).",
+      "rp_fr_info": "{n} frames in window \u00b7 {g} seq gaps ({gt} frames missing) \u00b7 {r} rollbacks \u00b7 {d} duplicates \u00b7 frame interval median {m}s / P95 {p}s",
+      "rp_fr_gap": "{n} missing",
+      "rp_fr_dup": "duplicate seq",
+      "rp_fr_reset": "seq rollback (restart / reorder)",
+      "rp_fr_ok": "contiguous",
+      "rp_fr_jump": "jump to this frame",
 
       /* ---- RSSI positioning rssi.html ---- */
       "rs_sub": "Orpah ID \u00b7 RSSI \u2192 distance \u2192 2/3/multi-point positioning (drone hover sampling)",
