@@ -26,10 +26,10 @@
 == 6. 串口空口（PC <-> 真实 CH32V203 板 UART2） ==
   [PASS] 串口空口 B(STA) CONNECTED
   [PASS] 串口空口 A(AP) CONNECTED
-  [FAIL] 串口空口 B 收到数据帧  (len=0)
+  [PASS] 串口空口 B 收到数据帧  (len=20)
   [PASS] 串口空口 A 输出 FRAME:TX
 == 7. 收尾 ==
 
-结果: 23/24 通过
+结果: 24/24 通过
 
 --- stderr ---

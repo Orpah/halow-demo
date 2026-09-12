@@ -3,225 +3,22 @@
 本目录是 TXW8301 的纯软件模拟器（`host/` Python 移植 + `tools/ui/` Web UI +
 `firmware/` CH32V203 固件）。开发、修改、调试任何部分前，**先遵循以下规则与踩坑记录**。
 
-## 0. ORPAH demo（2026-09-09 起，`simulator/orpah/`）
+## 0. ORPAH 业务已迁出本仓库（2026-09-12）
 
-- 定位：在 halow-demo 内做 ORPAH-over-HaLow 的 L1/L2 原型（成熟后抽 orpah-demo）。
-  L1 = 数据通路最小骨架（Client 上行 payload 到 Server）；L2 = 全消息流 + 走失表 +
-  跟踪状态（SPEC §9，纯 PC 无硬件）。
-- **⚠ 范围原则（2026-09-11 用户定，最高约束）：ORPAH 是技术搜寻手段，demo 边界取最小。**
-  只做「用无线技术找到人」这一段（登记走失态/下发走失表/路由器发现上报/服务器回执落库/
-  RSSI 定位/审计与告警）——**不是公安办案系统**。默认**不引入**：组织与机构建模、
-  角色/权限体系、警员身份、案件分配/派单/办案流程、多租户隔离。
-  新需求先过判据：**「让找人更快更准」→ 做；「让管理/流程更完整」→ 默认不做，先记
-  `orpah/ROADMAP.md` §〇。** 需要「谁」时止步于审计标签（自由文本 `actor`）；需要「谁负责」
-  时先确认是否存在真实运营方（demo 目前无登录者）。细节与已应用示例见 `ROADMAP.md` §〇。
-- 分层（对齐 `Protocol/docs/orpah-over-halow/SPEC.md`）：链路 = 以太网帧(ethertype
-  `0x88B5`) 经模拟器二层桥透传；Router→Server 段用真实 UDP。角色：Client=`client.py`+STA
-  模拟器、Router=`router.py`+AP 模拟器、Server=`server.py`(UDP `19447`)。
-- **L2 已实现（2026-09-09）**：`orpah_proto.py` 全套报文（REQ-CONNECT/ACCESS-INFO/
-  REPORT/TRACKING-STATUS/ERROR/LOST-TABLE，统一 JSON 公共头 v/type/sn/ts）。**双向打通**
-  （Server→Router UDP 应答→注入 AP 空口→STA→Client host 口）：`router.py` 双向桥
-  （REQ-CONNECT 查本地缓存回 ACCESS-INFO / REPORT UDP 转发 / 收 Server LOST-TABLE 更新
-  缓存 / 下行注入空口）；`server.py` **权威走失库**（mark_tracked/untrack → 下发
-  LOST-TABLE；收 REPORT → 校验+查库 → 回 TRACKING-STATUS）；`client.py` 双向会话
-  （REQ-CONNECT→ACCESS-INFO→REPORT→TRACKING-STATUS）。**验收：`demo_l2.py`**（两分支
-  未命中 NOT-TRACKED / mark 后 TRACKED，PASS）。UI 加「L2 协议消息流」面板 + 走失表
-  标记/取消按钮。
-- 运行：`python orpah/demo_l1.py --n 3`（L1 验收）、`python orpah/demo_l2.py`（L2 验收）。
-  单独跑见 `orpah/README.md`。
-- **密钥库（2026-09-12，P1）叮：`orpah.db` 里的 `keys` 表是**已发密钥的真相**，
-  改下面任一东西都会让已入库的密钥全部验不过（`signature_invalid`）：
-  ① `orpah_id.Device` 的密钥生成（尤其 `derive_demo_privkey` 的派生前缀/算法 ——
-  模拟器私钥就靠它「由 (SN, 代次) 确定派生」，否则服务器重启后公钥对不上）；
-  ② `verify_report` 的验签入参（预像/JCS 规范化）；③ `b64url`/PEM 编解码。
-  改完请跑 `python orpah/test_keys.py`（生命周期单测）+ `python orpah/demo_id.py`（端到端验收）；
-  实在要换算法就删 `orpah.db` 重新播种（会一并清掉清册/案件/站位）。
-- **orpah 进程不要改客户端 SN 做测试**（会真的造出新的密钥代次并写进密钥库/审计）。
-- **防 spoof（空口无认证）演示（2026-09-12，P1）**：前提是 ORPAH 空口**开放/无认证** ——
-  任何人都能往空口里丢一条 ORPAH-ID-REPORT。防线顺序：**格式 → SN 校验位（Damm32/mod97）
-  → 时间窗/nonce 去重 → 吊销表 → 设备公钥验签**。
-  - 攻击构造**只有一份**：`orpah/spoof.py`（13 种，含 1 条合法对照；含 2026-09-13 新增的
-    **能力降级** `cap_downgrade` = 改已签声明的 `cap.rtc`）——
-    `demo_spoof.py`（真链路端到端）、`test_spoof.py`（离线逐条）、页面（index 选类型注入）共用，
-    否则“演示的”与“测的”会漂移。
-  - 页面入口：index 的 Orpah ID 卡片 →「注入伪造上报」/「跑全部攻击」（走真空口链路，落 `id_reject`）。
-  - **已知边界（必须如实展示，不要包装成“防住了”）**：`xport`（路由器侧观测）**不在签名预像里**，
-    篡改它验签照样通过；而定位数据恰恰来自路由器侧测量 → **能冒充路由器就能伪造定位**。
-    已记 ROADMAP 开放问题，动手补前先与用户对齐。
-  - ⚠ `spoof.CASES` 里 `revoked` **会改密钥库状态，必须放最后**；且 `unrevoke` 会把各代转成
-    retired（之后验签就 `unknown_device`）—— 页面因此把 `revoked` 排除在 `UI_KINDS` 之外。
-- **等待一律用 `orpah/waiting.py`（2026-09-12，review 反馈起）**：
-  - **禁止** `for _ in range(N): time.sleep(0.05)` 这种「猜次数」等待 —— 机器快慢/负载一变
-    就误判（等太短=假失败，等太久=白等），且循环次数与语义无关，读者无法判断够不够。
-  - 统一入口：`wait_until(cond, timeout=10.0, interval=0.05)`（按**截止时间**轮询，先判一次，
-    返回 bool，**不抛异常**）、`wait_new(lst, pred, timeout=5.0, interval=0.1)`（只看**新增**元素，
-    避免拿到上一轮的旧记录而假 PASS）。
-  - **等「网络/回调答复」不要轮询列表**：用回调 + `queue.Queue`（或 `threading.Event`）——
-    见 `test_clock.py` 的 `send_id`：`OrpahServer(on_id_report=ID_EVENTS.put)` + 按 nonce 匹配、
-    先抽掉陈旧条目。
-  - **超时必须可见、失败要响**：`wait_until` 返回 False 时打印 `[!!] …未…` 并让用例失败
-    （`return 1/2`），**绝不静默继续**（旧代码就是静默 `continue`，链路没通也报 PASS）。
-  - 判据：任何等待都该能回答「等的是什么条件、超时多少、超时后怎么办」；答不上来就是猜次数。
-- **拓扑计数是「按内容」分色的三个口径，别合并成一个数（2026-09-12）**：
-  - **蓝 `--acc`** = L2 上行（REQ-CONNECT / REPORT）；**橙 `--id`** = Orpah ID 签名上报
-    （ID-REPORT）；**浅灰白 `--found`** = 发现（ORPAH-FOUND）。同一颜色 = 同一类内容，节点行与链路拆行一致。
-  - **配色按色弱友好选（2026-09-12，用户要求）**：蓝 + 橙是两个不同色觉通道，
-    红盲/绿盲/蓝黄盲下都不混；发现用**中性浅灰白**（业务事件，不当内容类型上色）。
-    实测（Machado CVD 模拟 + CIEDE2000）：蓝↔橙 50.5–56.1（好）、蓝↔浅灰白 21.3–24.7；
-    对比度 7.49 / 8.40 / 12.26（均过 WCAG AA）。
-    **别再改回紫 `#a371f7`**：它与蓝在红盲/绿盲下 ΔE00 仅 10.2 / 5.6（几乎一色）；
-    **也不要用黄 `#d29922` 当发现**：它与橙 ΔE00=4.2，全类型一色。
-    另：数字都带文字标签（L2/ID/REPORT/发现），颜色是辅助通道，不辨色也能读。
-  - 各口径（`ui_server.status()` 提供原始计数，前端只做加和/分色）：
-    `client_sent` = REQ-CONNECT + REPORT（每周期 2 条，故恒为 `router_up` 的 2 倍）；
-    `id_sent` = 本机注入的 ID-REPORT（周期 + 页面重放/超窗/伪造，全部经 `_inject_id` 计数）；
-    `tx_sta` = STA 空口**数据**帧 = `client_sent + id_sent`；
-    `router_up`/`router_id_up` = 路由器真正发给 Server 的 REPORT / ID（REQ-CONNECT 本机应答不过 UDP）；
-    UDP 帧总额 = `router_up + router_id_up + found_total`；`server_recv` 只计 REPORT，
-    ID 走验签通道（`id_report_total`，**含被拒**）。
-  - **新增一种上行内容时**：在 router 的转发表里加计数 + 回调（仿 `on_up_id`），
-    `ui_server` 计一份、`status()` 暴露、前端给颜色与悬停说明，四步都要做；
-    只在空口加而不在 UDP 侧加，页面立刻"对不上"（本次 ID 上报就是这样被发现的）。
-  - 周期上报的 ID 条数会比会话数多 1：启动时立刻 `_id_tick()` 一次（见 `start()` 注释），不是漏洞。
-- **IoTDB 查询：时间可进 `WHERE`，值不行（2026-09-12，回放要按窗取数）**：
-  - **时间过滤写进 SQL**（`WHERE time >= <ms> AND time <= <ms>` + `ORDER BY time ASC`）——
-    时间戳是 IoTDB 的原生索引，准确且快。`tsdb.query_report_range` / `query_events_range`
-    就是这么取「某设备某时间窗」的（回放用，见 `orpah/API.md` §10）。
-  - **值过滤（etype/sn）不要写进 WHERE**，在本地筛（`query_events*` 就是多取几倍再 filter）——
-    树模型对「非投影列」做值过滤不可靠（历史坑）。两件事别混。
-  - 历史回读一律**倒序**（最近优先），回放窗口一律**升序**（按时间轴消费）。
-- **多路由器观测 / 「移动的人」演示数据（2026-09-12）**：
-  - **一条链路分两类数据**：设备自己报的链路值 → `root.orpah.devices.<sn>`；
-    **各路由器各自测到它**的强度 → `root.orpah.routers.<sid>.<sn>`（`router_id`/站位 sid 即路由器身份）。
-    **绝不能把多台路由器的测量挤进同一路径的同一时间戳** —— IoTDB 同设备同时间戳是
-    last-write-wins，会互相覆盖。
-  - **演示数据由 `orpah/motion.py` 生成**（闭合路线 + 匀速 + 对数距离路径损耗，确定性可复现）：
-    `ui_server` 扮三台路由器，每个上报周期各写一条测量；设备 REPORT 的 rssi = 当前最近那台的测量。
-    关掉它用 `ui_server.py --no-walk`（回到恒定 RSSI）。
-  - **定位需要同一时刻 ≥2 个观察者**：单台路由器只有距离环；「悬停点 + 窗口中位数」模型的前提是
-    目标静止 —— 人一走动就必须用「路由器序列 + 取 t 之前最近一条」（`pos.js` 的 `obsOfStation`
-    第三条分支，时效 `ROUTER_MAX_AGE_MS`）。观测优先级：手动绑定 > 时间窗 > 路由器序列。
-  - **tsdb 写入接口的 `ts` 参数单位是 epoch 秒**（`write_report` / `write_router_obs`）。
-    传毫秒会被当成天文数字时间戳 → IoTDB 报错 → 异常被 `try/except` 吞掉，
-    **只表现为 `/api/status.tsdb=false` 且数据静默不落库**（排查时先看这条）。
-  - **`tsdb._read_rows` 必须整段持锁**（取数据集 + 遍历游标 + 关闭）：IoTDB 的 `Session`
-    **不是线程安全的**，同一 Session 上并发的查询会互相踩游标 —— 只锁 `execute_query_statement`
-    时，另一线程的查询会让本线程的遍历**读出空结果**（实测：串行 4 发全对，并发 4 发里有 2 条
-    返回 0 行 / `ok:false`）。HTTP 是 ThreadingHTTPServer，两个页面/两个标签页同时请求就会撞上。
-    排查手法：同一窗口**串行 vs 并发**各发几次对比。
-- **回放页硬规则（2026-09-12）**：
-  - **定位算法只有一份**：`orpah/ui/static/pos.js`（`trilaterate`/`wlsLocate`/`ellipseOf`/
-    `obsOfStation`/`qualityOf`…）。`track.html` 与 `replay.html` 都用它 —— 别在页面里
-    再抄一份算法（回放与实时必须逐位一致）。同理**回放页的「报文流时间轴」判定也只在
-    `pos.js`（`frameGaps`）**：缺口/重复/**序号回退**分开计（回退 = 设备重启或乱序，
-    **不是**丢包；天真的 `seq - prev - 1` 会算出负数缺口）。两条已踩过的坑都锁在单测里：
-    ① `Number(null) === 0` → “没有 seq”被当成 seq=0 → 整段变成一路回退（加 `hasSeq()` 守卫）；
-    ② 结果**别存 `S.frames`** —— 那个名字在 `replay.html` 里已经是位置帧（卡尔曼/CDF 用），
-    会静默冲掉平滑与误差统计；报文流用 `S.stream`。`test_posjs.py` 另有两条页面守卫
-    （两页必须走 `samplesFor`；`replay.html` 必须走 `frameGaps` 且页面里不许出现 `seq - `）。
-  - **不看未来**：`obsOfStation` 内置 `p.t <= t`，回放某时刻只能用该时刻**之前**的样本。
-    加任何「预取/缓存未来样本」的优化都会破坏这条。同理**时序平滑也是因果的**：
-    `kalmanTrack` 只吃 `t<=光标` 的帧（`smRuns`/`smoothAt` 都带 `p.t <= t`；实测 20 个光标位置
-    最多前视 0 ms、0 个未来点）。
-  - **测量噪声（`motion.py` 的 `NOISE_DB=2.0`）是平滑/椭圆能验证的前提**：无噪声时定位结果
-    恒等于真值（RMS 0.00 m），平滑、残差、置信椭圆全都失去意义。噪声用 SHA-256(sid|t_ms)
-    确定性生成（不用随机数库）→ 回放/测试可复现；**逐站位不同**（`ui_server` 必须传 `sid=`），
-    否则三台路由器噪声一致 = 又变回「自洽的假数据」。
-  - **时序平滑用恒速卡尔曼、不用滑动平均**（`pos.js` 的 `kalmanTrack`，4 状态 x,y,vx,vy）：
-    移动目标上 N 点平均滞后 ≈ (N/2)×采样周期，找人场景里滞后就是「指错位置」
-    （合成实测：RMS 二者接近 3.5/3.4 m，但滞后 卡尔曼 0.4 m vs 平均 2.7 m）。
-    **搜索半径取滤波后协方差 P**（Q+R），不用测量协方差 —— 否则「输出更平滑」会被误当成「更准」，
-    给出过小的半径（假自信）。
-  - **协方差更新必须用 Joseph 形式** `P=(I−KH)Pp(I−KH)ᵀ+KRKᵀ`：更短的 `P=(I−KH)Pp`
-    在浮点下丢对称正定 → 跑几十帧后创新协方差近奇异 → 增益暴冲 → **状态发散**
-    （实测真实数据第 84 帧从 −11 m 跳到 12000 m；改 Joseph 后 793 帧全有限）。
-    另加「非有限/负方差 → 重置为测量值」兜底，绝不把 NaN 写进轨迹（静默垃圾最糟）。
-  - 页面切换语言会带 `?lang=` **整页重载**（`ui_i18n.js` 的设计），因此 JS 动态写出的文案
-    切语言后自动刷新，不用各页自己监听。
-  - **轨迹导出（GPX/GeoJSON，回放页）三条硬规则**：① 导出**整窗**（不是只导已回放部分）；
-    ② **缺口必须断开**（> `ROUTER_MAX_AGE_MS` 或滤波器 `reset` → GPX 多 `<trkseg>` / GeoJSON 多
-    `LineString` Feature），跨缺口的直线不是真走出来的路；③ 经纬度**只走 `map.js` 的 `toLatLng`**
-    （与地图落点同一个换算），GeoJSON 坐标是 `[lng, lat]`。纯前端，无新接口。
-  - **对照导出（真值+原始+平滑，2026-09-13 补）**：第四个来源 `cmp` + 第三种格式 **CSV**。
-    分工：GPX/GeoJSON 是**地图格式**（“看哪儿偏了”：三组线段 + `properties.source`），
-    CSV 是**逐帧对照表**（“偏了多少”：`t,truth_x/y,est_x/y,err_m,sm_x/y,sm_err_m,+经纬度`）——
-    比 CDF 多的是**时段定位**（误差大在哪一段）。两条纪律：① 配对与误差 CDF **同一份**配对
-    （`S.truthIdx[k]` → `S.frames[i]`/`S.sm[i]`/`S.truth[k]`，按帧时刻精确取真值、不插值）；
-    ② **没有真值就不静默退化成单源** —— 选 `cmp` 当场提示“不适用”+`truthWhy` 原因，
-    按下导出也不产文件（真值只有模拟环境有，真机看不需要真值的 RMS/椭圆/搜索半径）。
-    CSV 里缺口**不补行**：时间戳直接跳（自己会说话）。
-  - **告警处置态（2026-09-12，§三 A 方案）**：`case_overtime` **只在「无人接手」时**才报 ——
-    `Case.handler` 是与 `status` **正交**的一维（不是新状态；「处置中」是页面派生显示），
-    接手人=自由文本（复用审计 `actor`，**不建 operators 表/不做登录**）。改 `cases` 表列名/语义时记住：
-    `CREATE TABLE IF NOT EXISTS` **不给老表补列** → `_init_db` 里用 `PRAGMA table_info` + `ALTER TABLE`
-    兜迁移（否则老 `orpah.db` 写库报 `no such column`）。`test_alerts.py` 里的假 `Case` 必须带 `handler`
-    （缺属性→测试直接崩；多给属性→掩盖真 AttributeError，两种都踩过）。
-  - **一键回归 = `orpah/run_checks.py`**（2026-09-12）：跑 `test_*.py` 全部离线套件（现 14 个）+
-    批量合规用例（`checks_batch.py`，表驱动：黄金样本/SN 边界/parse_sn/报文编解码），
-    报告写到 `orpah/checks_report.md`（**入库**，同 `host/test_results.txt` 惯例）。
-    **改完任何 orpah 代码先跑它**。两条硬规则：① 判定 = 退出码 0 **且** 输出无 `FAIL`/`Traceback`
-    （有些脚本自己 catch 异常还往下跑，只看退出码会漏）；② `--e2e`（L1/L2/L3/L3b/防 spoof）
-    **必须先在别的终端停掉 orpah-ui** —— demo 与它（:8901 那套端口）串扰会跑出假失败，
-    脚本自己也检查并拒绝（退出码 2）。
-  - **时钟可信（2026-09-12，无 RTC 设备）**：设备 `ts=0`/缺失 → 协议层跳过时间窗（`verify_report` 已做），
-    但**存什么时间必须走唯一入口** `orpah_proto.effective_ts(ts, rx)`（返回 `(ts, src)`）——
-    以前 `write_report`/路由器观测/`registry.touch` 各自 `time.time()` 兜底，会有偏差且导致
-    「设备流与路由器观测时刻不一致」（定位/回放按时间对齐 → 匹配不到）。**一次算、各处用**；
-    `src=server` 必须**留痕**（审计 detail 写 `ts_src=server`，页面可标）。
-    **绝不改报文里的 `ts`** —— 它在签名预像里，改了验签就过不了；归一化只用于我们的记录。
-    测试：`test_clock.py`（已并入 `run_checks.py`）。
-  - **能量轴（免电池客户端，2026-09-13）**：模型 = `orpah/energy.py`（三参数：采集 `harvest_mw` /
-    储能 `charge_mj` / 每次上报代价 `cost_mj`；**参数是演示标定值，不是实测**）。四条不能碰的约定：
-    ① 能量降级的**下限是 L1（HS256）**，**永不降到 L3** —— §8.3 里 L3 是 coverage-only、
-    **不能确认人在场**，宁可**如实沉默**（`interval_s=None` → 不发报）也不发无法确认在场的报；
-    ② 成因**不新增报文字段**：服务端从两个**在签名覆盖内**的事实（`hdr.level` + `payload.battery_mv`）
-    推导 `degraded_reason = "energy" | "key"`（`≤ ORPAH_ALERT_ENERGY_LOW_MV` 且降级 → energy）；
-    ③ 沉默必须**归因分叉**：最后一条已签电量低 → `no_report_energy`（warn，等它取能）；
-    电量充足 → `no_report`（30s warn → 300s crit，该出警）。**两者不得合并**（处置相反）；
-    ④ `/api/status.energy` 与 GET `/api/energy` 的 `on/params/state` **形状必须一致**（页面同一份渲染代码），
-    但 `status` 里**不放扫描表**（13 行不该每秒重算/重传）—— **鼎过一回**：曾经 `status.energy`
-    就是扁平 `state`，页面按 `{on,params,state}` 读 → 状态格全「—」、输入框不回显、扫描表标不出当前点。
-    POST `/api/energy` 里调 `_energy_step(drain=False)`（只重算策略不推电量）以便立即回显。
-    测试：`test_energy.py`（51 条，含“各级别间隔单调不增 + 恰好一处有意跳变”的回归锁）+ `test_alerts.py`/`test_server.py`。
-  - **查审计事件别读错字段**：`GET /api/ts/events` 返回的键是 **`rows`**（不是 `events`）；
-    另注意它按 `etype`/`sn` 在**本地**过滤（值过滤不进 WHERE，见 §0 IoTDB 条），
-    所以“某类事件为空”先确认字段名，再确认是不是真没写进去。
-  - **地图代码分两层**：`ui/static/map.js` = **底图源列表 / 条款说明 / 本地坐标↔经纬度换算 /
-    底图图层 + 离线回落**的**单一源**（track.html 与 replay.html 共用，两页 `ensureMap()` 都调
-    `addBaseLayer(lmap)`）—— 那是**合规相关**的东西
-    （各源署名文本、离线限制、按语言两套列表都不同），拄两份迟早漂移；
-    **Leaflet 图层管理各页自己写**（实时/回放画法不同：回放轨迹要跳缺口断开）。
-  - **离线回落（2026-09-12，B 方案）**：OSM 官方瓦片政策禁止离线/预取 → demo **不带离线底图包**，
-    改为瓦片取不到时自动换**本地自绘网格底图**（canvas 现画，不含第三方数据 → 无许可问题）+
-    比例尺 + 提示（含「重试底图」）。判据 = **连续 4 张失败且成功数为 0**（个别 404 不误判）；
-    自定义源空 URL 直接判离线。演示离线不用拔网线：把自定义瓦片 URL 填成不可达地址。
-    PMTiles 区域包（A 方案）未做，做法/合规约束见 ROADMAP §二。
-  - 回放地图开图时按「站位 + 轨迹」`fitBounds` **自动框景**：演示场景只有 ~60 m，
-    默认 zoom 下几乎看不见（实测 zoom 19 才舒服）。
-- **`host/sim.py` 新增「host 数据口」**（`--host <port>` / `Core(host_port=)`，缺省不启用）：
-  语义 = SPI MACBUS `DATA_TX`(host 注入→空口转发) / `DATA_RX`(收帧推 host)；帧格式同空口
-  `AA 55 TYPE LEN CRC payload`。不加参数完全不影响原有行为（24 项回归仍过）。
-- 涉及本 demo 的公共改动只有 `sim.py` 的 HostPort（可选）；orpah 各进程不 import sim
-  （`orpah/host_bus.py` 独立实现同帧格式，将来换真实 SPI 只替换底层收发）。
-- **UI：`python orpah/ui_server.py`（浏览器 http://127.0.0.1:8901/，VS Code 任务
-  `orpah-ui`）**——内嵌整条链路自动周期会话（REQ-CONNECT→REPORT），页面三层拓扑 +
-  ORPAH-REPORT 实时报文流 + L2 协议消息流（方向↑↓/报文/sn/状态/节点）+ 走失表控制。
-  两 UI 启动任务（`orpah-ui` / `sim-server-host-sim|tj45|hc01`）**不带端口参数、直接用
-  缺省端口**（orpah=8901、tools=8899），一键即跑不弹窗；想换端口用命令行
-  `python ... --port <n>`（后端均支持 `--port`，2026-09-09）。
-- **Orpah ID SN 硬规则（2026-09-10 用户定）**：
-  ① CC = ISO 3166-1 alpha-2，**不套 Crockford 限制**（可含 I/L/O/U，正则 `[A-Z]{2}`）；
-  ② **校验位只算 `ORG-UNIQUE`（不含 CC）**——`damm32.py` / `orpah_id.py` / `c/damm32.c`
-     的 check 函数输入一律是 ORG-UNIQUE（或 ORG-UNIQUE-CHECK），不含 CC；
-  ③ **所有文档与代码样例的 CC 只用 `CN`（中国）**，不使用其它国家——测试向量、黄金样本、
-     UI 默认值、自检输出统一 `CN`（黄金样本 `WH01-9AF3C1D2 → B`，整串 `CN-WH01-9AF3C1D2-B`）；
-  ④ 工具页（主页头部入口）：`track.html`（定位与轨迹：多路由器持续测 RSSI → 实时定位 +
-     轨迹绘制，纯前端模拟）、`rssi.html`（RSSI→距离→2/3/多点定位，canvas 可视化）、
-     `sig.html`（ES256/HS256/none 签名验签，后端 `/api/sig`）、
-     `checksum.html`（SN 校验码，Damm32/Luhn32/Mod97 三 tab）、
-     `damm32.html`（Damm32 构造/验证，计算器在最顶端）。
-     checksum/damm32 的 CC 用下拉框（`<datalist>`）+ 支持直接输入 + 提示，CC 输入框回车
-     跳 ORG-UNIQUE、右侧实时显示国名、ORG-UNIQUE 自动大写。
+ORPAH-over-HaLow 的业务全链路（Router 桥 / 走失表 / 报文集 / ID 验签 / 定位 / 告警 / IoTDB / Web UI，
+原 `simulator/orpah/`）已整体迁到**独立仓库**：
+`F:\git\orpah-over-halow`（GitHub: langhua/orpah-over-halow，`git subtree split` 保留历史）。
+
+- **本仓库只剩空口/设备侧**：`host/`（`sim.py` 空口仿真 + host 数据口）、`tools/ui/`（TXW8301 Web UI）、
+  `firmware/`、`hardware/`、`docs/`。**不要在 `tools/` 里实现 ORPAH 业务**。
+- **两个仓库怎么相接**：业务侧通过 **host 数据口（TCP）** 与本仓库的空口仿真对接；
+  帧格式 = `AA 55 TYPE LEN_H LEN_L CRC payload`（CRC-8/ATM 0x07），语义 = SPI MACBUS
+  DATA_TX/DATA_RX。业务侧有独立实现 `orpah-over-halow/host_bus.py`（只依赖 TCP + 帧格式，
+  不 import `sim.py`），换真实 SPI 时只替换底层收发。
+- **ORPAH 业务规则 / 踩坑**：见 `orpah-over-halow/AGENTS.md`（原 §0 全部内容已搬过去）。
+- **本项目自持一份文案字典**：`tools/ui/static/ui_i18n.js`（2026-09-12 从"与 orpah 共用的一份"拆出，
+  只留本 UI 用到的 158 个 key）。改文案时若发现 key 缺失，用 `node --check` 与页面实测核对；
+  拆分脚本与归属判据见提交历史（`halow-demo` 2026-09-12 那次）。
 
 ## 0b. 编码约定（2026-09-09）：仓库文本一律 UTF-8
 
@@ -422,3 +219,4 @@
 暂复用 tah 方言，收到其 AT 手册后需补真实方言并更新本清单。）
 
 （fritzing 元件规则见 `fritzing-parts-langhua/AGENTS.md`；详细历史踩坑在仓库 docs/ 各文件。）
+

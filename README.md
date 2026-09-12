@@ -59,21 +59,21 @@ python tools/ui/server.py --host-sim    # 浏览器开 http://127.0.0.1:8899/
 设备档案/别名/协议族见 [`simulator/host/devprofiles.py`](simulator/host/devprofiles.py)，
 完整说明见 [`simulator/README.md`](simulator/README.md)。
 
-## ORPAH-over-HaLow demo（simulator/orpah/）
+## ORPAH-over-HaLow demo → 已迁到独立仓库（2026-09-12）
 
-基于模拟器的 ORPAH-over-HaLow 原型（Client 终端上行 → 奥帕 Server；L2 起含双向下行、
-走失表与跟踪状态；L3 含多 Router 漫游/去重 + SN 中英数字校验）。纯 PC、零硬件：
+原 `simulator/orpah/`（ORPAH 业务全链路：Router 桥 / 走失表 / 报文集 / ID 验签 / 定位 / 告警 /
+IoTDB / Web UI，`ui_server.py` :8901）已**整体迁出**到独立仓库：
 
-```bash
-cd simulator/orpah
-python ui_server.py        # Web UI：自动开浏览器 http://127.0.0.1:8901/
-python demo_l1.py --n 3    # L1 命令行验收（Server 收到 3 条 = PASS）
-python demo_l2.py          # L2 全消息流 + 走失表两分支验收 = PASS
-python demo_l3.py          # L3 双 Router 漫游/去重 + SN 校验验收 = PASS
-python demo_l4.py          # L3b Router 主动拉表验收 = PASS
-```
+- `F:\git\orpah-over-halow`（GitHub: `langhua/orpah-over-halow`）
+  —— `git subtree split` 迁移，160 个提交历史完整保留；那边自带空口仿真副本（`vendor/halow/`），
+  零硬件、单进程即可跑全链路 demo，**不需要先启动本仓库**。
 
-详见 [`simulator/orpah/README.md`](simulator/orpah/README.md)（分层、报文、验收标准）。
+**本仓库现在只剩空口/设备侧**（`simulator/host/` 空口仿真 + `tools/ui/` TXW8301 Web UI +
+`firmware/` + `hardware/`）。两边通过 **host 数据口（TCP，帧 `AA 55 TYPE LEN_H LEN_L CRC payload`）**
+相接 —— 业务侧 `host_bus.py` 只依赖 TCP + 帧格式，换真实 SPI 只替换底层收发。
+
+> 详细分工与规则：本仓库 [`simulator/AGENTS.md`](simulator/AGENTS.md) §0；
+> 业务侧规则见 `orpah-over-halow/AGENTS.md`。
 
 ## 相关链接
 1. [TXW8301淘宝链接](https://item.taobao.com/item.htm?id=856103881366&skuId=5660266844543)
