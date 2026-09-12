@@ -142,6 +142,14 @@
     ② **缺口必须断开**（> `ROUTER_MAX_AGE_MS` 或滤波器 `reset` → GPX 多 `<trkseg>` / GeoJSON 多
     `LineString` Feature），跨缺口的直线不是真走出来的路；③ 经纬度**只走 `map.js` 的 `toLatLng`**
     （与地图落点同一个换算），GeoJSON 坐标是 `[lng, lat]`。纯前端，无新接口。
+  - **对照导出（真值+原始+平滑，2026-09-13 补）**：第四个来源 `cmp` + 第三种格式 **CSV**。
+    分工：GPX/GeoJSON 是**地图格式**（“看哪儿偏了”：三组线段 + `properties.source`），
+    CSV 是**逐帧对照表**（“偏了多少”：`t,truth_x/y,est_x/y,err_m,sm_x/y,sm_err_m,+经纬度`）——
+    比 CDF 多的是**时段定位**（误差大在哪一段）。两条纪律：① 配对与误差 CDF **同一份**配对
+    （`S.truthIdx[k]` → `S.frames[i]`/`S.sm[i]`/`S.truth[k]`，按帧时刻精确取真值、不插值）；
+    ② **没有真值就不静默退化成单源** —— 选 `cmp` 当场提示“不适用”+`truthWhy` 原因，
+    按下导出也不产文件（真值只有模拟环境有，真机看不需要真值的 RMS/椭圆/搜索半径）。
+    CSV 里缺口**不补行**：时间戳直接跳（自己会说话）。
   - **告警处置态（2026-09-12，§三 A 方案）**：`case_overtime` **只在「无人接手」时**才报 ——
     `Case.handler` 是与 `status` **正交**的一维（不是新状态；「处置中」是页面派生显示），
     接手人=自由文本（复用审计 `actor`，**不建 operators 表/不做登录**）。改 `cases` 表列名/语义时记住：

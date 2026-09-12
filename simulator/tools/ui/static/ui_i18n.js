@@ -732,6 +732,8 @@
       "rp_fr_reset": "序号回退（重启/乱序）",
       "rp_fr_ok": "连续",
       "rp_fr_jump": "跳到该帧",
+      "rp_exp_cmp": "对照（真值+原始+平滑）",
+      "rp_exp_no_truth": "本窗没有地面真值（仅模拟环境有：需模拟器带行走模型且能按帧时刻取点）—— 对照导出不适用。",
 
       /* ---- RSSI 定位算法 rssi.html ---- */
       "rs_sub": "Orpah ID · RSSI → 距离 → 2/3/多点定位（无人机悬停取 RSSI）",
@@ -1693,6 +1695,8 @@
       "rp_fr_reset": "seq rollback (restart / reorder)",
       "rp_fr_ok": "contiguous",
       "rp_fr_jump": "jump to this frame",
+      "rp_exp_cmp": "comparison (truth + raw + smoothed)",
+      "rp_exp_no_truth": "No ground truth in this window (simulation only: needs a walk model that can be sampled at frame times) - comparison export not applicable.",
 
       /* ---- RSSI positioning rssi.html ---- */
       "rs_sub": "Orpah ID \u00b7 RSSI \u2192 distance \u2192 2/3/multi-point positioning (drone hover sampling)",

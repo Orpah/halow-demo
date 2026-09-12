@@ -138,9 +138,11 @@
       <select id="expSrc">
         <option value="raw" selected data-i18n="rp_exp_raw">原始</option>
         <option value="sm" data-i18n="rp_exp_sm">平滑</option>
+        <option value="cmp" data-i18n="rp_exp_cmp">对照（真值+原始+平滑）</option>
       </select></label>
     <button class="btn" id="expGpx">GPX</button>
     <button class="btn" id="expGeo">GeoJSON</button>
+    <button class="btn" id="expCsv">CSV</button>
     <span class="hint" id="expMsg" data-i18n="rp_exp_hint">导出整窗轨迹（不只已回放部分）；缺口断开成多段，不连线。经纬度按上面的基点换算。</span>
   </div>
   <canvas id="canvasReplay" width="620" height="420"></canvas>
@@ -757,46 +759,147 @@ function exportRuns(src) {
   return runs;
 }
 
+/* ---- 对照导出：真值 + 原始估计 + 平滑估计（**仅模拟环境**有真值）----
+
+为什么值得做：CDF 只告诉你“误差分布多好”，但查不出“误差大在哪一段”—— 要定位是
+站位几何、某条扇区还是某个时间段的问题，得把两条轨迹**叠在同一个文件里**看。
+
+配对口径（与误差 CDF **同一份**配对）：`S.truthIdx[k]` = 第 k 个真值点对应的帧下标
+（`loadTruth()` 按帧时刻精确取点，不经过插值）；因此逐帧取 `S.frames[i]` / `S.sm[i]` / `S.truth[k]`。
+真值缺席（`--no-walk` / 取点失败）→ `truthWhy` 给出原因，UI 直接说“不适用”。
+
+真值轨迹的分段：与估计轨迹**各自按同一份缺口规则**断开（相邻帧间隔 > `ROUTER_MAX_AGE_MS`），
+不平滑侧不按 `reset`（真值本来就是“人真的走的路线”，没有滤波器）。 */
+function truthPoints() {
+  if (!S.truthIdx.length || !S.truth.length) return [];
+  return S.truth.map((p, k) => ({ t: p.t, x: p.x, y: p.y, i: S.truthIdx[k] }));
+}
+
+function pairRows() {
+  const out = [];
+  S.truthIdx.forEach((i, k) => {
+    const tr = S.truth[k];
+    if (!tr) return;
+    const raw = S.frames[i], sm = S.sm[i];
+    if (!raw) return;
+    out.push({
+      t: raw.t,
+      tx: tr.x, ty: tr.y,
+      rx: raw.x, ry: raw.y,
+      err: Math.hypot(raw.x - tr.x, raw.y - tr.y),
+      sx: sm ? sm.x : null, sy: sm ? sm.y : null,
+      errSm: sm ? Math.hypot(sm.x - tr.x, sm.y - tr.y) : null,
+    });
+  });
+  return out;
+}
+
+/* runsOf(pts, reset 断开?) —— 与 exportRuns 同一缺口规则；单独一份是因为真值可能比估计少。 */
+function runsOf(pts, useReset) {
+  const runs = []; let cur = [];
+  for (const p of pts) {
+    const gap = cur.length > 0
+      && (p.t - cur[cur.length - 1].t > ROUTER_MAX_AGE_MS || (useReset && p.reset));
+    if (gap) { runs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
+function cmpParts() {
+  const rows = pairRows();
+  const truth = runsOf(rows.map(r => ({ t: r.t, x: r.tx, y: r.ty })), false);
+  const raw = runsOf(rows.map(r => ({ t: r.t, x: r.rx, y: r.ry })), false);
+  const sm = runsOf(rows.map(r => ({ t: r.t, x: r.sx, y: r.sy })).filter(p => p.x !== null), true);
+  return { rows, truth, raw, sm };
+}
+
 function xmlEsc(s) {
   return String(s).replace(/[<>&'"]/g, c =>
     ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c]));
 }
 
-function gpxOf(runs, sn, src) {
-  const segs = runs.map(run =>
-    "    <trkseg>\n" + run.map(p => {
-      const ll = toLatLng(p.x, p.y);
-      return '      <trkpt lat="' + ll[0].toFixed(7) + '" lon="' + ll[1].toFixed(7) + '">' +
-             "<time>" + new Date(p.t).toISOString() + "</time></trkpt>\n";
-    }).join("") + "    </trkseg>\n").join("");
+const SRC_LABEL = { truth: "truth", raw: "raw", sm: "smoothed" };
+
+/* 导出组：单源一份；`cmp` = 真值/原始/平滑三份（共用一个文件） */
+function exportGroups(src) {
+  if (src !== "cmp") return [{ src: src, runs: exportRuns(src) }];
+  const p = cmpParts();
+  return [{ src: "truth", runs: p.truth }, { src: "raw", runs: p.raw },
+          { src: "sm", runs: p.sm }];
+}
+
+function gpxOf(groups, sn) {
+  const one = groups.length === 1;
+  const tracks = groups.map(g => {
+    const segs = g.runs.map(run =>
+      "    <trkseg>\n" + run.map(p => {
+        const ll = toLatLng(p.x, p.y);
+        return '      <trkpt lat="' + ll[0].toFixed(7) + '" lon="' + ll[1].toFixed(7) + '">' +
+               "<time>" + new Date(p.t).toISOString() + "</time></trkpt>\n";
+      }).join("") + "    </trkseg>\n").join("");
+    // 单源时名字保持与以前一致（就是 SN）；对照导出才在名字里标出是哪一条
+    const name = one ? sn : sn + " " + SRC_LABEL[g.src];
+    return "  <trk><name>" + xmlEsc(name) + "</name><type>ORPAH " +
+           SRC_LABEL[g.src] + "</type>\n" + segs + "  </trk>\n";
+  }).join("");
   return '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<gpx version="1.1" creator="ORPAH simulator (halow-demo)" xmlns="http://www.topografix.com/GPX/1/1">\n' +
     "  <metadata><name>" + xmlEsc(sn) + "</name><time>" + new Date().toISOString() + "</time></metadata>\n" +
-    "  <trk><name>" + xmlEsc(sn) + "</name><type>ORPAH " +
-    (src === "sm" ? "smoothed" : "raw") + "</type>\n" + segs + "  </trk>\n</gpx>\n";
+    tracks + "</gpx>\n";
 }
 
-function geoOf(runs, sn, src) {
-  return JSON.stringify({
-    type: "FeatureCollection",
-    features: runs.map(run => ({
-      type: "Feature",
-      properties: {
-        sn: sn, source: src === "sm" ? "smoothed" : "raw",
-        points: run.length,
-        from: new Date(run[0].t).toISOString(),
-        to: new Date(run[run.length - 1].t).toISOString(),
-        from_ms: run[0].t, to_ms: run[run.length - 1].t,
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: run.map(p => {
-          const ll = toLatLng(p.x, p.y);
-          return [+ll[1].toFixed(7), +ll[0].toFixed(7)];
-        }),
-      },
-    })),
-  }, null, 2) + "\n";
+function geoOf(groups, sn) {
+  const feats = [];
+  groups.forEach(g => g.runs.forEach(run => feats.push({
+    type: "Feature",
+    properties: {
+      sn: sn, source: SRC_LABEL[g.src],
+      points: run.length,
+      from: new Date(run[0].t).toISOString(),
+      to: new Date(run[run.length - 1].t).toISOString(),
+      from_ms: run[0].t, to_ms: run[run.length - 1].t,
+    },
+    geometry: {
+      type: "LineString",
+      coordinates: run.map(p => {
+        const ll = toLatLng(p.x, p.y);
+        return [+ll[1].toFixed(7), +ll[0].toFixed(7)];   // GeoJSON 是 [lng, lat]
+      }),
+    },
+  })));
+  return JSON.stringify({ type: "FeatureCollection", features: feats }, null, 2) + "\n";
+}
+
+/* CSV：**逐帧对照表**（真值 / 原始估计 / 平滑估计 / 两条误差）—— 这是拿去算指标的那份。
+   与 GPX/GeoJSON 的分工：地图类格式给“看哪儿偏了”，CSV 给“偏了多少、能不能算”。
+   缺口**不静默填**：`t` 直接跳（时间戳自己会说话），不插值、不补行。 */
+function csvOf(src) {
+  const head = (cols) => cols.join(",") + "\n";
+  const n6 = (v) => (v == null ? "" : Number(v).toFixed(6));
+  if (src === "cmp") {
+    const rows = pairRows();
+    let s = head(["t_ms", "time", "truth_x", "truth_y", "est_x", "est_y", "err_m",
+                  "sm_x", "sm_y", "sm_err_m", "truth_lat", "truth_lon", "est_lat", "est_lon"]);
+    for (const r of rows) {
+      const tl = toLatLng(r.tx, r.ty), el = toLatLng(r.rx, r.ry);
+      s += [r.t, new Date(r.t).toISOString(), n6(r.tx), n6(r.ty), n6(r.rx), n6(r.ry),
+            r.err.toFixed(3), n6(r.sx), n6(r.sy),
+            r.errSm == null ? "" : r.errSm.toFixed(3),
+            tl[0].toFixed(7), tl[1].toFixed(7), el[0].toFixed(7), el[1].toFixed(7)].join(",") + "\n";
+    }
+    return s;
+  }
+  const runs = exportRuns(src);
+  const pts = [].concat.apply([], runs);
+  let s = head(["t_ms", "time", "x", "y", "lat", "lon", "run"]);
+  runs.forEach((run, ri) => run.forEach(p => {
+    const ll = toLatLng(p.x, p.y);
+    s += [p.t, new Date(p.t).toISOString(), n6(p.x), n6(p.y),
+          ll[0].toFixed(7), ll[1].toFixed(7), ri + 1].join(",") + "\n";
+  }));
+  return s;
 }
 
 function exportName(src, ext) {
@@ -805,7 +908,8 @@ function exportName(src, ext) {
     const d = new Date(ms), p = (v) => String(v).padStart(2, "0");
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
   };
-  return "orpah-" + safe + "-" + (src === "sm" ? "smoothed" : "raw") + "-" +
+  const tag = src === "sm" ? "smoothed" : (src === "cmp" ? "compare" : "raw");
+  return "orpah-" + safe + "-" + tag + "-" +
          stamp(S.from) + "-" + stamp(S.to) + "." + ext;
 }
 
@@ -819,15 +923,26 @@ function downloadText(name, text, mime) {
 
 function doExport(kind) {
   const src = $("expSrc").value;
-  const runs = exportRuns(src);
-  const n = runs.reduce((s, r) => s + r.length, 0);
+  // 对照导出要真值：没有（--no-walk / 取点失败）→ **不静默退化成单源**，直接说清楚原因
+  if (src === "cmp" && !S.truthIdx.length) {
+    $("expMsg").textContent = T("rp_exp_no_truth") +
+      (S.truthWhy ? "（" + S.truthWhy + "）" : "");
+    return;
+  }
+  const groups = exportGroups(src);
+  const n = groups.reduce((s, g) => s + g.runs.reduce((a, r) => a + r.length, 0), 0);
   if (!n) { $("expMsg").textContent = T("rp_exp_none"); return; }
-  const name = exportName(src, kind === "gpx" ? "gpx" : "geojson");
-  downloadText(name, kind === "gpx" ? gpxOf(runs, $("rpSn").value, src)
-                                    : geoOf(runs, $("rpSn").value, src),
-               kind === "gpx" ? "application/gpx+xml" : "application/geo+json");
+  const sn = $("rpSn").value;
+  const ext = kind === "gpx" ? "gpx" : (kind === "csv" ? "csv" : "geojson");
+  const name = exportName(src, ext);
+  const body = kind === "gpx" ? gpxOf(groups, sn)
+             : kind === "csv" ? csvOf(src) : geoOf(groups, sn);
+  const mime = kind === "gpx" ? "application/gpx+xml"
+             : kind === "csv" ? "text/csv" : "application/geo+json";
+  downloadText(name, body, mime);
   $("expMsg").textContent = T("rp_exp_done")
-    .replace("{n}", runs.length).replace("{m}", n).replace("{f}", name);
+    .replace("{n}", groups.reduce((a, g) => a + g.runs.length, 0))
+    .replace("{m}", n).replace("{f}", name);
 }
 
 function draw(obs, est, ell) {
@@ -1049,7 +1164,13 @@ $("rpSkip").onchange = () => { $("rpValid").title = ""; };
 $("rpSmooth").onchange = () => { render(); };
 $("expGpx").onclick = () => doExport("gpx");
 $("expGeo").onclick = () => doExport("geojson");
-$("expSrc").onchange = () => { $("expMsg").textContent = T("rp_exp_hint"); };
+$("expCsv").onclick = () => doExport("csv");
+$("expSrc").onchange = () => {
+  // 选对照但没真值 → 当场提示（而不是按下去才报“文件没内容”）
+  $("expMsg").textContent = ($("expSrc").value === "cmp" && !S.truthIdx.length)
+    ? T("rp_exp_no_truth") + (S.truthWhy ? "（" + S.truthWhy + "）" : "")
+    : T("rp_exp_hint");
+};
 $("view").onchange = applyView;
 /* 换瓦片源 / 改基点：地图图层必须重建（地图对象本身先销毁释放瓦片） */
 $("tileSrc").onchange = () => { resetMap(); };

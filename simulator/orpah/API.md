@@ -699,6 +699,18 @@ register/issue ──> active ──rotate──> grace ──宽限到期(sweep
 
 汇总行给出「本窗 N 帧 · 缺口 g 处（共缺 gt 条）· 回退 r 次 · 重复 d 次 · 帧间隔 中位/P95」。
 点某一行 = 把光标跳到该帧（与拖动进度条同一路径）。
+
+**对照导出（真值+原始+平滑，页面行为，2026-09-13）**：导出下拉第四个来源 `cmp` + 第三种格式 **CSV**
+（**无新接口**，真值走已有的 `POST /api/truth` 按帧时刻取点，配对与误差 CDF 同一份）。
+
+| 格式 | 内容 | 用途 |
+|---|---|---|
+| GPX | 三个 `<trk>`（`sn` / `sn truth` / `sn raw` / `sn smoothed`），各自按缺口分段 | 地图/GIS：**看哪儿偏了** |
+| GeoJSON | Feature 列表，`properties.source = truth\|raw\|smoothed` | 同上（坐标 `[lng, lat]`） |
+| CSV | 逐帧对照表：`t_ms,time,truth_x/y,est_x/y,err_m,sm_x/y,sm_err_m,truth_lat/lon,est_lat/lon` | 算指标：**偏了多少 + 哪个时段偏** |
+
+- **没有真值就不静默退化成单源**：选 `cmp` 当场给“不适用”+ `truthWhy` 原因，按下导出也不产文件。
+- CSV 里**缺口不补行**（`t` 直接跳，不插值），与 GPX/GeoJSON 的“缺口断开”同一纪律。
 - 事件是**全局表**（`root.orpah.events` 不分设备，见 §5），故未知 SN 也能拿到事件、
   只是 `points:[]`。
 - 回放**不看未来**：前端只用 `ts <= 当前光标` 的样本（`pos.js` 的 `obsOfStation` 已内置）。
