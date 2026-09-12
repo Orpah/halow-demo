@@ -175,6 +175,10 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 
 - `limit` 上限 500（默认 50）。`etype` / `sn` 在**服务端本地过滤**（多取 10 倍再筛，上限 5000），
   因为 IoTDB 树模型对「非投影列」做值过滤不可靠。
+- ⚠ **`etype` / `sn` 是精确匹配（大小写敏感）**：`tsdb.query_events` 里是 `r["etype"] != etype`
+  直接比较，没有 `lower()` —— 传 `case_mark` 能筛到，传 `Case_Mark` 会得到空集（且 `ok:true`，
+  因为那只是一次合法但无匹配的查询）。页面上的筛选是**下拉框**（value 就是机器值）
+  所以不会踩到；直接调 API 时请用小写机器值。
 - **持久化**：这些事件重启后仍在（内存环形缓冲只留 20 条，历史以本接口为准）；
   `index.html` 的「事件历史（IoTDB 落库）」区消费本接口。
 - **写事件的时间戳单调化**：所有事件共用 `root.orpah.events` 这一个设备路径，
@@ -389,7 +393,7 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
   `case_handled_overtime` 用 `handled_at`、签名用首条样本时间），页面显示为「持续 X」。
 - 排序：`crit` 先于 `warn`，同级按 `since` 升序。
 - 阈值未满样本时不告警（如签名样本不足 `sig_window` 条）；设备从未上报过、
-  或状态非「启用」的，不参与 `no_report`。
+  或状态非**工作态**（启用 / 走失中）的，不参与 `no_report`。
 - 页面：`index.html` 页头徽标（`#alertBadge`，`crit` 红 / `warn` 橙）+ 告警卡片，
   3 秒轮询；无告警时徽标与卡片整体隐藏。
 
@@ -430,7 +434,7 @@ registry/cases/index 均 1s 轮询同一数据源（SQLite 持久化）。
 |---|---|---|
 | `issue` | `sn`, `model?`, `firmware?` | 签发新一代（`gen = 最大代次+1`）；**已有 active 时幂等** → `note_code=already_active` 并回既有 `kid` |
 | `rotate` | `sn` | 旧 active → `grace`（`now+grace_sec`），新钥 → `active`；回 `kid`/`prev_kid`/`grace_until` |
-| `adopt` | `sn` | 让**演示终端**改用当前 `active` 代（演示「设备侧完成更新」）；非终端 SN → `note_code=not_demo_sn` |
+| `adopt` | `sn` | 让**演示终端**改用当前 `active` 代（演示「设备侧完成更新」）：把 `id_dev` 置空后按 active 代重建，**下一次上报周期起**用新代签名（不是即时改签名）；非终端 SN → `note_code=not_demo_sn` |
 | `retire` | `sn`, `kid?` | 退役某代（**当「让宽限期立即到期」的按钮**）；不带 `kid` 则退所有非 active 代 |
 | `revoke` | `sn`, `reason?` | **整机作废**：所有代立即不可验签（不可逆*） |
 | `unrevoke` | `sn` | 撤销的逆操作（*仅演示；代次一律转 `retired`，要恢复需重新 `issue`） |
