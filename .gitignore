@@ -6,3 +6,7 @@ SDK_*/
 
 # 个人/待办交接文档（不随仓库提交）
 simulator/docs/crossfw-taixin-handoff.md
+
+# Python（TXW8301/tools 下的脚本会 import / 编译出这些）
+__pycache__/
+*.pyc
