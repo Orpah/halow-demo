@@ -312,13 +312,6 @@
 			"problemMatcher": []
 		},
 		{
-			"label": "tmp-audit-readme-figs",
-			"type": "shell",
-			"command": "C:\\Python313\\python.exe simulator\\tools\\dev\\check_docs.py",
-			"isBackground": false,
-			"problemMatcher": []
-		},
-		{
 			"label": "tmp-stop-simui",
 			"type": "shell",
 			"command": "C:\\Python313\\python.exe simulator\\tools\\dev\\stop_ui.py",
@@ -329,6 +322,13 @@
 			"label": "tmp-tasksjson-diff",
 			"type": "shell",
 			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo; git rev-parse --show-toplevel; '=== diff stat'; git --no-pager diff --stat -- .vscode/tasks.json; '=== 新增 label 数量'; (git --no-pager diff -- .vscode/tasks.json | Select-String -Pattern '^\\+\\s+\"label\"').Count; '=== 文件总行数 / 任务总数'; (Get-Content .vscode/tasks.json).Count; (Select-String -Path .vscode/tasks.json -Pattern '\"label\"').Count",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-survey",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\survey_repos.py'",
 			"isBackground": false,
 			"problemMatcher": []
 		}
