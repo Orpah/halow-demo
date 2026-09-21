@@ -362,6 +362,7 @@ python host/sim.py --name PCAP --role STA --ssid halowlink --link-serial COM24
 | 串口无 `OK` | 波特率不对（应为 115200）/ 线没接 / BOOT0 状态异常 |
 | 敲 `AT` 完全无反应 | 先确认没搞错线（**横幅能出只证明板→PC 那根通**）；若是 2026-09-21 之前的旧固件，则行尾必须 LF 且不回显（见 §4）|
 | 命令回 `ERROR` 但看着没打错 | 旧固件才会：上一条 CR 结尾的命令**留在行缓冲里**、与本次输入粘成一条（例：`AT\r` 后发 `AT\r\n` ⇒ 实际执行 `ATAT`）|
+| 板子的串口**一直在刷屏**（一串串 `AT+CONN_STATE` / `AT+RSSI` / `AT+MODE?` / `AT+BSS_BW?` …） | 那是 **UI 在轮询真机**（native 真机路径：每 ~2 s 发两条状态 + 每 ~5 s 发一整套慢查询）+ 固件**回显**把每条命令都打了出来 —— 不是故障。**关掉 UI 就安静了**；⚠ 也**别同时用 WindTerm 和 UI 抢同一个口**（Windows 串口是独占的：UI 占着时 WindTerm 根本打不开）。若看到的是**每秒一行** `LMAC: …` / `WNB: …`，那是之前开的 `AT+SYSDBG=…,1`（发 `AT+SYSDBG=LMAC,0` / `WNB,0` 关掉）|
 | 两板连不上 | 确认 SSID、BSS_BW、CHAN_LIST 一致；虚拟空口 TX↔RX 交叉且共地 |
 | `AT+RSSI` 恒定 | 默认是注入的固定值（模拟器 `sim_cfg.rssi`，默认 -30）。要看距离/功率的影响就用 `AT+DIST=<米>` 开距离模型（模拟器扩展，`docs/AT_commands.md` §8） |
 | CONN 灯不亮 | 检查 PC13 接线与 `board.h` 中 `CONN_LED_ACTIVE_LOW` |
