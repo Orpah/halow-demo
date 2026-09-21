@@ -238,7 +238,9 @@ cd firmware
 make                 # 生成 build/txw8301-sim.bin
 ```
 
-工具链路径在 `Makefile` 顶部 `RISCV_PREFIX` / `CROSS_COMPILE` 配置。
+工具链前缀在 `Makefile` 顶部 `RISCV_PREFIX`（**默认已指向本机 MounRiver Studio 内嵌的
+`riscv-none-embed-`**，本机直接 `make` 即可；换机器用 `make RISCV_PREFIX='.../bin/riscv-none-embed-'` 覆盖）。
+Windows 上**不需要 sh**（建/删目录走 `cmd /c`，见 `firmware/README.md` 的构建说明）。
 
 ## 3. 烧录
 

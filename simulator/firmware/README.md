@@ -28,19 +28,26 @@ firmware/
 
 ## 构建
 
-需要 RISC-V GCC 工具链（推荐 **MounRiver Studio** 自带，或 xPack 版）：
+**必须用 MounRiver Studio 自带的那份工具链**（`-DWCH_INTERRUPT_FAST` 依赖它的
+`interrupt("WCH-Interrupt-fast")` + 启动文件里的硬件栈配置；独立 xPack 版**会跑飞**）。
+`Makefile` 的 `RISCV_PREFIX` **默认就指向本机 MRS2 内嵌的那份**（前缀是
+**`riscv-none-embed-`**，不是 `riscv-none-elf-`），所以本机直接：
 
 ```bash
 # 在 firmware/ 目录
 make                       # -> build/txw8301-sim.elf / .bin
-# 指定工具链前缀（如 MounRiver 安装路径）
-make RISCV_PREFIX="C:/MounRiver/MounRiver_Studio/toolchain/RISC-V GCC Toolchain/bin/riscv-none-elf-"
 make clean
+# 换机器/换工具链时覆盖前缀：
+make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
 ```
 
 要点：
+- **Windows 上不需要 sh**（2026-09-21 实测 Win11 + GNU Make 4.4.1）：recipe 里的
+  `mkdir -p` / `rm -rf` 会报「找不到指定的文件」（make 对没有 shell 元字符的行**直接
+  CreateProcess**，不经 sh；本机 `sh` 也不在 PATH）⇒ 建/删目录已改成 `cmd /c`
+  （`Makefile` 里的 `MKDIR`/`RMDIR`，POSIX 平台仍用 `mkdir`/`rm`）。
 - `-DWCH_INTERRUPT_FAST` 使用 WCH 的 `interrupt("WCH-Interrupt-fast")` 中断模型，
-  与启动文件 `csrw 0x804, 0x3`（硬件栈/嵌套）配合，**必须用 MounRiver 工具链**。
+  与启动文件 `csrw 0x804, 0x3`（硬件栈/嵌套）配合。
 - `-msmall-data-limit=8` 需要链接脚本中的 `__global_pointer$`（已提供）。
 - 主频 **8MHz HSI、无 PLL**：最简最稳；波特率 115200 误差约 0.6%。
 
