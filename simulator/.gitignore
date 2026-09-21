@@ -17,5 +17,8 @@ __pycache__/
 *.pyc
 .venv/
 
+# 截图输出（tools/dev/shot_ui.py 默认写这儿）—— 要给 README 用的图请另存 simulator/docs/
+tools/ui/images/
+
 # Fritzing 备份
 *.fzz~
