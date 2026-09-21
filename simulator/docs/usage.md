@@ -309,6 +309,43 @@ python tools/sim_config.py COM4 status
 - 板 A CONN 灯亮，板 B CONN 灯亮；两侧 RSSI 灯按模拟信号强度点亮。
 - 未配对用 `AT+PAIR=1`（双端同时开）也能快速配对。
 
+### 单板方案：PC 当空口对端（不用第二块板）
+
+`host/sim.py` 的空口可以是**串口**（`--link-serial`）而不再是 TCP ⇒ 拿一块 CH32V203 板
+（跑本仓 `firmware/`）+ 一路 USB-UART，就能让 **PC 模拟器当对端**，不必再买一块板。
+
+接线（图 + 逐网规格见 `../hardware/wiring/README.md`，2026-09-21 已实测配对成功）：
+
+```
+控制台：  板 PA9(TX)  → CH347F P2/UART0(COM23) 的 RXD0
+          板 PA10(RX) ← CH347F P2/UART0(COM23) 的 TXD0
+虚拟空口：板 PA2(TX)  → CH347F P3/UART1(COM24) 的 RXD1
+          板 PA3(RX) ← CH347F P3/UART1(COM24) 的 TXD1
+共地：    板 GND     ── CH347F GND（CH347F 的 3V3/VIO 不接）
+```
+
+- ★ **必须交叉**（TX→RX）：接反的症状是「**板上 `link_tx` 在涨、PC 侧恒空闲/离线 + 板上 `link_rx=0`**」——
+  先查这两根，别先调 SSID/信道/带宽。
+- ★ **模组（TX-AH EVB）整块不接**（它原先占着 `PA2/PA3` 与 CH347F 的 `P3`）。
+
+跑法（板子默认就是 AP；PC 当 STA）：
+
+```bash
+# 板子侧（COM23）：AP 的信标要带 SSID，STA 才认（板侧默认 SSID 是空串）
+AT+SSID=halowlink
+
+# PC 侧
+python host/sim.py --name PCAP --role STA --ssid halowlink --link-serial COM24
+```
+
+验证（两处都能看）：
+
+- **板上 COM23**：出现 `+STA_CONNECTED`；`AT+WNBCFG` 里 `stacnt=1`；`AT+SYSDBG=LMAC,1` 的 `link_rx` 开始涨；
+- **PC 侧**：在其 AT 控制台（默认 `127.0.0.1:9001`）发 `AT+CONN_STATE` → `CONN_STATE:CONNECTED`；
+  发 `AT+SYSDBG=WNB,1` 可把**每一帧空口收发**打成 `FRAME:TX/RX …`（看有没有收到信标最直接）。
+- 用 UI 时（`python tools/ui/server.py --a pc --a-link COM24 --b COM23`）：**别看中间那栏「链路断开」**
+  —— 它只在「两台都是 PC 模拟器」时才画虚拟链路；本方案的空口是**物理线**，只看两张卡片的「连接」。
+
 ## 6. 数据联调（SPI 宿主总线）
 
 1. Host（你的 MCU 或 USB-SPI 适配器，如 CH341A/CH347A）接模拟器 SPI 口。

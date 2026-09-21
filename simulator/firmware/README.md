@@ -107,8 +107,17 @@ make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
   现在应该回 `OK`，而不再是"无反应 + 把下一条命令粘成 `ATAT`"。
 - 该版产物：`txw8301-sim.hex` 41875 B（`sha256 0D4543E9BCE1AA8C…`）、`.bin` 14875 B（`B26636ACBDA33465…`）。
 
-**仍未验证（如实）**：两板或 PC↔板的 AP↔STA 配对（虚拟空口 `link_rx` 一直 0，没接对端）；
-SPI 宿主口；LED/按键/拨码交互（**nano 板上没有这些器件**）；`AT+TXDATA` 数据面。
+**AP↔STA 配对（PC 当空口对端，2026-09-21）：✔ 成功**（用户实测）—— 模组整块拔掉、
+板上 `PA2/PA3` 与 CH347F `P3` 按图**交叉**接好、板上发过 `AT+SSID=halowlink` 之后，
+PC 侧 `python host/sim.py --role STA --ssid halowlink --link-serial COM24` 能对上（A 侧「已连接」）。
+接线规格与复验方式见 `../hardware/wiring/README.md`（图已逐网核对）。
+
+★★ **接反（TX↔TX / RX↔RX）的症状**（踩过一次，很费时间）：
+**板上 `link_tx` 照旧在涨（信标在发），但 PC 侧 A 恒「空闲/离线」、板上 `link_rx=0`**。
+看到这个组合**先查那两根是否交叉**（`PA2(TX)→RXD1`、`PA3(RX)←TXD1`），不要去调 SSID/信道/带宽。
+另一个先排除的项：**模组是否还挂着**（它原先占着 `PA2/PA3` 与 CH347F `P3`）。
+
+**仍未验证（如实）**：SPI 宿主口；LED/按键/拨码交互（**nano 板上没有这些器件**）；`AT+TXDATA` 数据面。
 
 ## 移植 / 扩展
 - **换主频**：`board.h` 中 `SYSTEM_CLOCK_HZ`，并在 `SystemInit` 配置 PLL。
