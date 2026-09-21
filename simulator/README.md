@@ -20,6 +20,19 @@
 
 ---
 
+## 台面接线（看图最快）
+
+**单板联调：PC 当空口对端**（拿一块 CH32V203 板 + CH347F 就能跟 PC 模拟器配对，不必买第二块板）——
+左边 nanoCH32V203（跑 `firmware/`）、右边 CH347F：`P2`(UART0 = **COM23**) 是**控制台**、
+`P3`(UART1 = **COM24**) 是**虚拟空口**；模组整块不接。
+
+[![PC 当空口对端的单板接线：nanoCH32V203 ↔ CH347F（P2=控制台 COM23、P3=虚拟空口 COM24）](hardware/wiring/pcpeer-ch347f-nanoch32v203.svg)](hardware/wiring/pcpeer-ch347f-nanoch32v203.svg)
+
+- 逐网规格 / 怎么复验（网表核对脚本）/ 踩过的接线坑 → [`hardware/wiring/README.md`](hardware/wiring/README.md)
+- 两板对连（AP + STA）与运行步骤 → [`docs/usage.md`](docs/usage.md) §5
+
+---
+
 ## 目录结构
 
 ```

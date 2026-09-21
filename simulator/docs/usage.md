@@ -324,6 +324,8 @@ python tools/sim_config.py COM4 status
 共地：    板 GND     ── CH347F GND（CH347F 的 3V3/VIO 不接）
 ```
 
+[![PC 当空口对端的单板接线：nanoCH32V203 ↔ CH347F（P2=控制台 COM23、P3=虚拟空口 COM24）](../hardware/wiring/pcpeer-ch347f-nanoch32v203.svg)](../hardware/wiring/pcpeer-ch347f-nanoch32v203.svg)
+
 - ★ **必须交叉**（TX→RX）：接反的症状是「**板上 `link_tx` 在涨、PC 侧恒空闲/离线 + 板上 `link_rx=0`**」——
   先查这两根，别先调 SSID/信道/带宽。
 - ★ **模组（TX-AH EVB）整块不接**（它原先占着 `PA2/PA3` 与 CH347F 的 `P3`）。

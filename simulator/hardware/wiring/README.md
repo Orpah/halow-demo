@@ -7,6 +7,11 @@
 |---|---|
 | `pcpeer-ch347f-nanoch32v203.fzz` / `.svg` | **PC 当空口对端（单板）**：nanoCH32V203（跑本仓 `firmware/`）+ CH347F。`P2`（UART0 = **COM23**）当**控制台**、`P3`（UART1 = **COM24**）当**虚拟空口**；空口对端不是第二块板，而是 PC 上的 `python host/sim.py --link-serial COM24`。 |
 
+[![PC 当空口对端的单板接线：nanoCH32V203 ↔ CH347F（P2=控制台 COM23、P3=虚拟空口 COM24），模组不接](pcpeer-ch347f-nanoch32v203.svg)](pcpeer-ch347f-nanoch32v203.svg)
+
+上图就是这套夹具的全部：左边 nanoCH32V203、右边 CH347F，**5 根线**（右上两行标注已直接写在线旁：
+`P2=控制台(COM23)` / `P3=虚拟空口(COM24)`）；**模组（TX-AH EVB）不在图上 = 整块不接**。
+
 > ⚠ **`.svg` 里那两行标注（`P2=控制台(COM23)` / `P3=虚拟空口(COM24)`）是手工加在导出上的**
 > （2026-09-21 用户加；`.fzz` 里**没有**）⇒ 谁从 `.fzz` 重新导出一次，那两行就没了。
 > 图的权威内容始终是 `.fzz` 的网表；标注只是给人看的。若以后想"导出即带标注"，得在 Fritzing 里也放上文字块。
