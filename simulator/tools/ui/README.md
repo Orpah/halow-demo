@@ -104,7 +104,27 @@ python server.py --port 8899         # 自定义端口
 
 启动后自动打开浏览器 `http://127.0.0.1:8899/`（`--no-browser` 可关闭）。
 
-> 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）。
+## 界面（截图）
+
+三种设备组合各一张 —— 都是**真实页面**截图（启动命令就是上面「启动」那几条）：
+
+**纯 PC 模拟器**（`--host-sim`：A/B 都是 CH32V203 虚拟机，虚拟空口 TCP 建链、两侧 CONNECTED）：
+
+[![纯 PC 模拟器：A/B 都是 CH32V203 虚拟机，虚拟空口已建链](../../docs/ui_hostsim_demo.png)](../../docs/ui_hostsim_demo.png)
+
+**混合设备**（A=CH32V203 虚拟机、B=T-Halow-RJ45 虚拟机）：两台**不同类型**仍可走虚拟空口互通；
+注意页面中间那格会写明**真机 ↔ 虚拟机不互通**（那是 RF 与虚拟口的分界）：
+
+[![混合设备：A=CH32V203 虚拟机（AP）、B=T-Halow-RJ45 虚拟机（STA）](../../docs/ui_simplified_demo.png)](../../docs/ui_simplified_demo.png)
+
+**两块 T-Halow-RJ45 虚拟机**（`--target tj45`）：
+
+[![两块 T-Halow-RJ45 虚拟机：虚拟空口已建链](../../docs/ui_hostsim_tj45_demo.png)](../../docs/ui_hostsim_tj45_demo.png)
+
+> 这三张里**帧监视器都是空的**：它要先开「帧监视」（走 `AT+SYSDBG=WNB,1`）并且真有数据帧流过
+> 才有内容 —— 见下面「用帧监视器看数据帧（无硬件演示）」。
+> 想自己重出这几张：上面「启动」的命令 + 浏览器打开 `http://127.0.0.1:8899/` 截图即可
+> （**别用 VS Code 内嵌浏览器** —— 它能绘制的区域只有约 364×490 CSS px，超出部分全黑）。
 
 ## 界面功能
 
@@ -118,7 +138,7 @@ python server.py --port 8899         # 自定义端口
 > **STA 信息的来源**：PC 模拟器是**同进程对象** → 服务端直读 `sim.Wifi` 的计数与关联表
 > （`_sim_probe`，不走 AT、不刷控制台）；真机的关联 STA 信息不在厂商 AT 命令集里，
 > 所以那两格显示 `-`（不编值）。模拟器侧另有 `AT+STALIST` 可手查（见
-> `../docs/AT_commands.md` §8）。
+> `../../docs/AT_commands.md` §8）。
 
 ## 工作原理
 

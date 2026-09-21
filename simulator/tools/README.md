@@ -7,6 +7,16 @@ SPI 模式为实验性（验证宿主接口）。
 > 想要**图形化界面**？用 `tools/ui/`（Web 仪表盘）：双机视图、AT 控制台、
 > 帧监视器、配置面板。见 [ui/README.md](ui/README.md)。
 
+两种模式各自控的是哪条路（GUI 与这个 CLI 在同一侧）：
+
+```mermaid
+flowchart LR
+  T["sim_config.py<br/>跨平台 Python3<br/>（对标 T-Halow-RJ45 的 thalow_config.py）"]
+  T -->|"UART 模式（主用）<br/>与真实模组 AT 一致"| U["板的 CH340C ↔ USART1<br/>命令集与固件 sim_at.c 一一对应"]
+  T -->|"SPI 模式（实验性）<br/>CH341A / CH347A · VID 0x1A86"| S["宿主接口 SPI1 + IRQ PB0<br/>帧协议 CMD+LEN+CRC8/ATM+载荷"]
+  G["tools/ui/ Web 仪表盘<br/>双机视图 · AT 控制台 · 帧监视器 · 配置面板"] --- T
+```
+
 ## 依赖
 
 ```bash

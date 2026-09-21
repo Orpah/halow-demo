@@ -25,7 +25,20 @@ firmware/
     ├── sim_link.c/h          # UART2 虚拟空口（组帧/CRC）
     └── sim_led.c/h           # CONN/RSSI 灯、CONNECT 键、模式拨码
 ```
+三路外设 + 一路时基接起来就是这张图（节点名就是上表里的文件；实线 = 数据流）：
 
+```mermaid
+flowchart LR
+  PC["PC 控制台<br/>WindTerm / PuTTY"] <-->|"USART1 PA9/PA10<br/>115200 8N1 · AT 命令"| AT["sim_at.c<br/>AT 命令引擎<br/>（含 TXDATA 裸帧数据模式）"]
+  PEER["对端：另一块板<br/>或 PC 侧 host/sim.py"] <-->|"USART2 PA2/PA3<br/>虚拟空口 · 组帧+CRC8<br/>（两板 TX↔RX + GND 对连）"| LK["sim_link.c"]
+  HOST["宿主接口<br/>（真机时 = 主控）"] <-->|"SPI1 PA4~PA7 + IRQ PB0"| SP["spi_slave.c<br/>协议见 docs/spi_protocol.md"]
+  TIM["TIM2<br/>1 ms 时基"] --> MAIN["main.c<br/>主循环"]
+  MAIN --> WIFI["sim_wifi.c<br/>AP/STA/配对/RSSI/数据转发<br/>（信标 500 ms）"]
+  WIFI --> LK
+  WIFI --> AT
+  LED["sim_led.c<br/>CONN/RSSI 灯 · CONNECT 键 · 模式拨码"] --- MAIN
+  CFG["sim_cfg.c<br/>配置存储（模拟 syscfg）"] --- WIFI
+```
 ## 构建
 
 **必须用 MounRiver Studio 自带的那份工具链**（`-DWCH_INTERRUPT_FAST` 依赖它的
