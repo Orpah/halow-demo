@@ -65,22 +65,30 @@ static uint16_t s_line_len;
 
 static void console_on_byte(uint8_t b)
 {
-    /* data-mode (AT+TXDATA): raw bytes go straight to the frame buffer */
+    /* data-mode (AT+TXDATA): raw bytes go straight to the frame buffer
+     * ★ 必须放在最前面 —— 数据面是**二进制裸帧**，绝不能当行处理、也不能回显。*/
     if (sim_at_txdata_active()) {
         sim_at_data_byte(b);
         return;
     }
 
-    if (b == '\n') {
+    /* ★★ 2026-09-21 上机加固（原来只认 `\n`，`\r` 被丢弃**且不清行缓冲**）：
+     *   ① **`\r` 与 `\n` 都当行尾** ⇒ 终端行尾设置不再敏感；CRLF 时尾随的 `\n`
+     *      会被下面的 `s_line_len > 0` 自然忽略（不会执行一条空命令）。
+     *      背景（实测踩到）：用只会发 CR 的终端（PuTTY 默认）时 `AT` 毫无反应，
+     *      而残留的行缓冲会把下一条命令粘成 `ATAT` ⇒ 回 `ERROR`。
+     *   ② **回显可打印字符** ⇒ 原来不回显，敲字屏幕上不动，很容易被当成"串口坏了"。*/
+    if (b == '\r' || b == '\n') {
         if (s_line_len > 0) {
             s_line[s_line_len] = '\0';
+            uart_printf(CONSOLE_UART, "\r\n");  /* 响应从新行开始（输入已在上面回显）*/
             sim_at_run(s_line, NULL, 0);
             s_line_len = 0;
         }
         return;
     }
-    if (b == '\r') {
-        return;
+    if (b >= 0x20u && b < 0x7Fu) {
+        uart_putc(CONSOLE_UART, b);             /* 回显（只回显可打印字符）*/
     }
     if (s_line_len < CONSOLE_LINE_MAX - 1) {
         s_line[s_line_len++] = (char)b;

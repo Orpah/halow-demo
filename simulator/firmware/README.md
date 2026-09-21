@@ -70,14 +70,17 @@ make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
 - SPI1（PA4~PA7）+ IRQ(PB0) 为宿主接口，协议见 `docs/spi_protocol.md`。
 - LED/按键/拨码交互见 `docs/usage.md`。
 
-### ★ 控制台的脾气（上机踩到的，先看这条省半小时）
+### 控制台行为（2026-09-21 上机加固后）
 
-- **行尾必须 `LF`（`\n`）**：`Core/main.c::console_on_byte` **只把 `\n` 当行尾**，`\r` 被直接丢弃，
-  **且不清理行缓冲** ⇒ 用只会发 CR 的终端（PuTTY / SecureCRT 默认）时：① 敲 `AT` **毫无反应**；
-  ② 紧接着的下一条命令会被残留字符**粘成一条**（`AT\r` 后发 `AT\r\n` ⇒ 执行的是 `ATAT` ⇒ `ERROR`）。
-  终端设成发 **LF**（PuTTY 勾 `Implicit LF in every CR`；WindTerm 把发送后缀设为 LF）。
-- **不回显**：敲字屏幕上不动是**正常的**，只有回车后的响应会出现（`OK` / `ERROR` / `XXX:值`+`OK`）。
+- **`\r` 与 `\n` 都当行尾**（CRLF 也行：尾随的 `\n` 不会执行一条空命令）⇒ 终端行尾设置不再敏感。
+- **会回显可打印字符**（输入完敲回车，响应从新行开始）。
+  ⚠ **数据模式例外**：`AT+TXDATA=<len>` 之后那 `<len>` 个字节是**二进制裸帧**，
+  **不当行、也不回显**（`console_on_byte` 里 txdata 分支在最前面）。
 - 应答格式（`sim_at.c` 文件头）：成功 `OK\r\n`、失败 `ERROR\r\n`、取值 `XXX:值\r\nOK\r\n`。
+- ★ **背景（加固前的坑）**：加固前只认 `\n`、`\r` 被丢弃**且不清行缓冲** ⇒ 只会发 CR 的终端
+  （PuTTY 默认）敲 `AT` 毫无反应，且下一条命令会被残留字符粘成一条（`AT\r` 后发 `AT\r\n`
+  ⇒ 实际执行 `ATAT` ⇒ `ERROR`）；而且不回显。**手上是加固前那版**（`text 14818`）时：
+  终端设成发 LF（PuTTY 勾 `Implicit LF in every CR`；WindTerm 发送后缀设 LF）。
 
 ## ✔ 上机记录（2026-09-21，nanoCH32V203）
 
@@ -95,6 +98,9 @@ make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
 
 ★ 上电时是 **AP 模式**（不是 `sim_cfg` 默认的 STA）：nano 上**没有模式拨码** ⇒ `PA1/PB5` 悬空被上拉读高
 ⇒ `dip_read()` = `00` = AP（`sim_led.c` 启动时会把拨码值写进 mode）。`AT+MODE=` 之后能覆盖它。
+
+★ 上面这轮用的是**加固前**那版（`text 14818`）；加固后（`text 14862`，`\r` 也当行尾 + 回显）
+**尚未重烧验证** —— 重烧后应能直接看到：敲字**逐字回显**、`AT\r` / `AT\n` / `AT\r\n` 都回 `OK`。
 
 **仍未验证（如实）**：两板或 PC↔板的 AP↔STA 配对（虚拟空口 `link_rx` 一直 0，没接对端）；
 SPI 宿主口；LED/按键/拨码交互（**nano 板上没有这些器件**）；`AT+TXDATA` 数据面。
