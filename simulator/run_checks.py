@@ -141,6 +141,27 @@ def static_checks():
         if pat not in txt:
             problems.append("simulator/.gitignore 缺少 %s" % pat)
 
+    # (f) SPI 宿主协议层**离线对拍**：设备侧 C（firmware/Simulator/spi_proto.c）
+    #     ↔ 主机侧 Python（tools/spi_frame.py）跑同一批向量逐字节比。
+    #     本机没主机 C 编译器时**可见跳过**（跳过 ≠ 通过）；装上 gcc 或 --cc 指定即可。
+    sp = os.path.join(HERE, "tools", "check_spi_proto.py")
+    if not os.path.isfile(sp):
+        problems.append("缺 tools/check_spi_proto.py（SPI 协议层对拍）")
+    else:
+        r = subprocess.run([PY, sp], cwd=os.path.dirname(sp),
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=300)
+        out_sp = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
+        m = re.search(r"spi_proto cross-check (\d+)/(\d+)", out_sp)
+        if r.returncode == 2 and "[SKIP]" in out_sp:
+            notes.append("spi_proto 对拍: **跳过**（本机无主机 C 编译器；未跑 ≠ 通过）")
+        elif r.returncode == 0 and m and m.group(1) == m.group(2):
+            notes.append("spi_proto 对拍: %s/%s（设备侧 C ↔ 主机侧 Python 逐字节一致，"
+                         "非硬件验证）" % (m.group(1), m.group(2)))
+        else:
+            problems.append("spi_proto 对拍失败（rc=%d）：\n%s"
+                            % (r.returncode, out_sp.strip()[-2000:]))
+
     ok = not problems
     out = ("说明：\n  " + "\n  ".join(notes)
            + ("\n\n问题：\n  " + "\n  ".join(problems) if problems else "\n\n无问题。"))
@@ -181,12 +202,12 @@ def main():
     t0 = time.time()
     ok, out = static_checks()
     secs = time.time() - t0
-    print("\n### 静态检查（py/js/json/tasks/gitignore）")
+    print("\n### 静态检查（py/js/json/tasks/gitignore/spi 对拍）")
     for line in out.splitlines():
-        if line.startswith(("问题", "  py_", "  node", "  JSON", "  tasks")):
+        if line.startswith(("问题", "  py_", "  node", "  JSON", "  tasks", "  spi_")):
             print("  " + line.strip())
     print("  → %s（%.2fs）" % ("通过" if ok else "**失败**", secs))
-    results.append(("静态检查（py/js/json/tasks/gitignore）", ok, secs, out))
+    results.append(("静态检查（py/js/json/tasks/gitignore/spi 对拍）", ok, secs, out))
 
     passed = sum(1 for r in results if r[1])
     total = len(results)

@@ -47,6 +47,7 @@ SRCS = Core/main.c \
        Periph/gpio.c \
        Periph/uart.c \
        Periph/spi_slave.c \
+       Simulator/spi_proto.c \
        Simulator/sim_util.c \
        Simulator/sim_cfg.c \
        Simulator/sim_wifi.c \

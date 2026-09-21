@@ -12,6 +12,7 @@
  * byte is clocked out on the clock right after the last request byte.
  */
 #include "spi_slave.h"
+#include "spi_proto.h"        /* 帧协议层（纯逻辑，可离线对拍）*/
 #include "sim_util.h"
 #include "sim_at.h"
 #include "sim_cfg.h"
@@ -23,14 +24,11 @@
 /* ------------------------------------------------------------------ */
 /* static state                                                       */
 /* ------------------------------------------------------------------ */
-static uint8_t  s_rx_hdr[4];
-static uint8_t  s_rx_hdr_idx;
-static uint8_t  s_rx_cmd;
-static uint16_t s_rx_len, s_rx_idx;
-static uint8_t  s_rx_buf[SIM_SPI_MAX_FRAME];
-static uint8_t  s_frame_done;      /* request frame completed */
+/* 帧装配状态机（协议层）。`buf` 就在这个结构里，RAM 占用与原来单开一个
+ * `s_rx_buf[1700]` 相同。*/
+static spi_proto_rx_t s_rx;
 
-static uint8_t  s_tx_buf[SIM_SPI_MAX_FRAME + 8];
+static uint8_t  s_tx_buf[SPI_PROTO_MAX_FRAME + 8];
 static uint16_t s_tx_len, s_tx_idx;
 
 static uint8_t  s_at_resp[512];
@@ -44,29 +42,16 @@ static void irq_line_set(int level)
     gpio_set_pin(HOST_IRQ_PORT, HOST_IRQ_PIN, (uint8_t)level);
 }
 
-static uint8_t frame_crc(uint8_t cmd, const uint8_t *payload, uint16_t len)
-{
-    uint8_t hdr[3];
-    hdr[0] = cmd;
-    hdr[1] = (uint8_t)(len >> 8);
-    hdr[2] = (uint8_t)(len & 0xFF);
-    return sim_crc8_update(sim_crc8(hdr, 3), payload, len);
-}
-
 /* Build a response and preload the first byte so it is shifted out on the
  * first SCK of the next transaction. */
 static void build_resp(uint8_t cmd, const uint8_t *payload, uint16_t len)
 {
-    uint16_t i;
-
-    s_tx_buf[0] = cmd | SIM_SPI_RESP_FLAG;
-    s_tx_buf[1] = (uint8_t)(len >> 8);
-    s_tx_buf[2] = (uint8_t)(len & 0xFF);
-    s_tx_buf[3] = frame_crc(cmd, payload, len);
-    for (i = 0; i < len && (uint32_t)(4 + i) < sizeof(s_tx_buf); i++) {
-        s_tx_buf[4 + i] = payload[i];
+    /* 帧头+CRC+载荷都由协议层装（`out == payload` 也安全：DATA_RX 就是就地搬）*/
+    uint16_t n = spi_proto_build_resp(s_tx_buf, sizeof(s_tx_buf), cmd, payload, len);
+    if (n == 0) {                                    /* 缓冲不够：如实回 ERROR，不静默截断 */
+        n = spi_proto_build_resp(s_tx_buf, sizeof(s_tx_buf), cmd, (const uint8_t *)"ERROR", 5);
     }
-    s_tx_len = (uint16_t)(4 + len);
+    s_tx_len = n;
     s_tx_idx = 1;                /* tx_buf[0] already preloaded into DATAR */
     HOST_SPI->DATAR = s_tx_buf[0];   /* preload */
 }
@@ -89,9 +74,9 @@ static void build_ok(uint8_t cmd)
 static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
 {
     switch (cmd) {
-    case SIM_SPI_CMD_AT: {
-        char line[SIM_SPI_MAX_FRAME + 1];
-        uint16_t n = len < SIM_SPI_MAX_FRAME ? len : SIM_SPI_MAX_FRAME;
+    case SPI_PROTO_CMD_AT: {
+        char line[SPI_PROTO_MAX_FRAME + 1];
+        uint16_t n = len < SPI_PROTO_MAX_FRAME ? len : SPI_PROTO_MAX_FRAME;
         uint16_t i;
         for (i = 0; i < n; i++) line[i] = (char)payload[i];
         line[n] = '\0';
@@ -101,17 +86,17 @@ static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
         build_resp(cmd, s_at_resp, (uint16_t)sim_strlen((const char *)s_at_resp));
         break;
     }
-    case SIM_SPI_CMD_GET_STATE: {
+    case SPI_PROTO_CMD_GET_STATE: {
         struct sim_state st;
         sim_wifi_fill_state(&st);
         build_resp(cmd, (const uint8_t *)&st, sizeof(st));
         break;
     }
-    case SIM_SPI_CMD_DATA_TX:
+    case SPI_PROTO_CMD_DATA_TX:
         if (sim_wifi_send_data(payload, len) == 0) build_ok(cmd);
         else build_err(cmd);
         break;
-    case SIM_SPI_CMD_DATA_RX: {
+    case SPI_PROTO_CMD_DATA_RX: {
         uint16_t flen = 0;
         if (sim_wifi_take_rx(s_tx_buf + 4, &flen) == 0) {
             build_resp(cmd, s_tx_buf + 4, flen);
@@ -120,7 +105,7 @@ static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
         }
         break;
     }
-    case SIM_SPI_CMD_EVENT: {
+    case SPI_PROTO_CMD_EVENT: {
         char evt[96];
         if (sim_wifi_take_event(evt, sizeof(evt)) == 0) {
             build_resp(cmd, (const uint8_t *)evt, (uint16_t)sim_strlen(evt));
@@ -129,14 +114,14 @@ static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
         }
         break;
     }
-    case SIM_SPI_CMD_PING:
+    case SPI_PROTO_CMD_PING:
         build_resp(cmd, (const uint8_t *)"PONG", 4);
         break;
-    case SIM_SPI_CMD_RESET:
+    case SPI_PROTO_CMD_RESET:
         build_ok(cmd);
         s_reset_req = 1;
         break;
-    case SIM_SPI_CMD_SET_CFG:
+    case SPI_PROTO_CMD_SET_CFG:
         if (len == sizeof(struct sim_cfg)) {
             sim_memcpy(sim_cfg_mutable(), payload, sizeof(struct sim_cfg));
             sim_cfg_mutable()->magic = SIM_CFG_MAGIC;
@@ -146,7 +131,7 @@ static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
             build_err(cmd);
         }
         break;
-    case SIM_SPI_CMD_GET_CFG:
+    case SPI_PROTO_CMD_GET_CFG:
         build_resp(cmd, (const uint8_t *)sim_cfg_get(), sizeof(struct sim_cfg));
         break;
     default:
@@ -160,6 +145,8 @@ static void process_frame(uint8_t cmd, const uint8_t *payload, uint16_t len)
 /* ------------------------------------------------------------------ */
 static void spi_on_rx_byte(uint8_t b)
 {
+    spi_rx_ev_t ev;
+
     /* TX: shift out response bytes (else 0xFF) */
     if (s_tx_idx < s_tx_len) {
         HOST_SPI->DATAR = s_tx_buf[s_tx_idx++];
@@ -167,33 +154,14 @@ static void spi_on_rx_byte(uint8_t b)
         HOST_SPI->DATAR = 0xFF;
     }
 
-    /* After a complete request frame, ignore response-phase bytes. */
-    if (s_frame_done) return;
-
-    if (s_rx_hdr_idx < 4) {
-        s_rx_hdr[s_rx_hdr_idx++] = b;
-        if (s_rx_hdr_idx == 4) {
-            s_rx_cmd = s_rx_hdr[0];
-            s_rx_len = (uint16_t)((s_rx_hdr[1] << 8) | s_rx_hdr[2]);
-            s_rx_idx = 0;
-            if (s_rx_len == 0) {
-                uint8_t crc = sim_crc8(s_rx_hdr, 3);
-                if (crc == s_rx_hdr[3]) process_frame(s_rx_cmd, NULL, 0);
-                else build_err(s_rx_cmd);
-                s_frame_done = 1;
-            } else if (s_rx_len > SIM_SPI_MAX_FRAME) {
-                build_err(s_rx_cmd);
-                s_frame_done = 1;
-            }
-        }
-    } else {
-        if (s_rx_idx < s_rx_len) s_rx_buf[s_rx_idx++] = b;
-        if (s_rx_idx >= s_rx_len) {
-            uint8_t crc = sim_crc8_update(sim_crc8(s_rx_hdr, 3), s_rx_buf, s_rx_len);
-            if (crc == s_rx_hdr[3]) process_frame(s_rx_cmd, s_rx_buf, s_rx_len);
-            else build_err(s_rx_cmd);
-            s_frame_done = 1;
-        }
+    /* 协议层装配（响应阶段的字节会被它自己按 `done` 忽略）*/
+    ev = spi_proto_rx_byte(&s_rx, b);
+    if (ev == SPI_RX_FRAME) {
+        uint16_t plen = 0;
+        const uint8_t *pl = spi_proto_rx_payload(&s_rx, &plen);
+        process_frame(spi_proto_rx_cmd(&s_rx), pl, plen);
+    } else if (ev == SPI_RX_BAD_CRC || ev == SPI_RX_TOO_LONG) {
+        build_err(spi_proto_rx_cmd(&s_rx));
     }
 }
 
@@ -208,13 +176,9 @@ static void spi1_irq(void)
 static void cs_edge(void)
 {
     if (GPIOA->INDR & BIT(HOST_SPI_NSS_PIN)) {
-        /* rising: end of transaction */
-        s_frame_done = 1;
-        s_rx_hdr_idx = 0;
+        spi_proto_cs_end(&s_rx);      /* rising: end of transaction */
     } else {
-        /* falling: start of transaction */
-        s_frame_done = 0;
-        s_rx_hdr_idx = 0;
+        spi_proto_cs_start(&s_rx);    /* falling: start of transaction */
     }
 }
 
@@ -262,8 +226,7 @@ void spi_slave_init(void)
     EXTI->INTENR |= BIT(HOST_SPI_NSS_PIN);
     NVIC_EnableIRQ(EXTI4_IRQn);
 
-    s_rx_hdr_idx = 0;
-    s_frame_done = 1;
+    s_rx.done = 1;               /* 未开始事务前：不接收（靠 CS 下降沿开门）*/
     s_tx_idx = s_tx_len = 0;
     s_reset_req = 0;
 

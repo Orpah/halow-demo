@@ -71,7 +71,8 @@ flowchart LR
 | 板级定义 | `Core/board.h` | 引脚映射、外设基地址、宏开关 |
 | GPIO 驱动 | `Periph/gpio.c` | 引脚模式/电平（LED、按键、拨码、IRQ） |
 | UART 驱动 | `Periph/uart.c` | UART1 控制台、UART2 链路，中断收发 |
-| SPI 从机 | `Periph/spi_slave.c` | SPI1 从机 + 帧协议 + IRQ 通知（见 spi_protocol.md） |
+| SPI 从机（硬件层） | `Periph/spi_slave.c` | SPI1 从机寄存器/中断/CS(EXTI)/IRQ 输出线 + 命令派发 |
+| SPI 帧协议（纯逻辑） | `Simulator/spi_proto.c` | 帧装配状态机/CRC/应答构造；**无寄存器** ⇒ 可在 PC 上与主机模型离线对拍（`tools/check_spi_proto.py`，见 spi_protocol.md §8） |
 | 配置存储 | `Simulator/sim_cfg.c` | 模拟 syscfg：模式/SSID/PSK/信道等，FLASH 掉电保存 |
 | 无线状态机 | `Simulator/sim_wifi.c` | AP/STA/APSTA/GROUP 状态机、配对、RSSI 模型、事件上报 |
 | AT 引擎 | `Simulator/sim_at.c` | AT 解析与命令表（大小写不敏感、`?` 查询） |

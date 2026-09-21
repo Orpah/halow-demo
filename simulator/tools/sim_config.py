@@ -50,19 +50,16 @@ BAUD = 115200
 # ---------------------------------------------------------------------------
 # 通用小工具
 # ---------------------------------------------------------------------------
+# ★ CRC / 帧格式**不在这里再写一份** —— 单一源是 `spi_frame.py`（协议层），
+#   它与设备侧实现（`firmware/Simulator/spi_proto.c`）由 `check_spi_proto.py`
+#   用同一批向量逐字节对拍。原先本文件自己抄了一份 CRC 与应答解析，两边漂移了
+#   不会报错，真机上只表现为“发出去没反应”。
+from spi_frame import (encode_request, parse_response,             # noqa: E402
+                       crc8, crc8_update,                          # 旧名保留：可能有人 from sim_config import
+                       MAX_FRAME, HDR, RESP_FLAG,
+                       CMD_AT, CMD_GET_STATE, CMD_DATA_TX, CMD_DATA_RX,
+                       CMD_EVENT, CMD_PING, CMD_RESET, CMD_SET_CFG, CMD_GET_CFG)
 
-def crc8_update(crc, data):
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            if crc & 0x80:
-                crc = ((crc << 1) ^ 0x07) & 0xFF   # CRC-8/ATM, poly 0x07
-            else:
-                crc = (crc << 1) & 0xFF
-    return crc
-
-def crc8(data):
-    return crc8_update(0, data)
 
 # ---------------------------------------------------------------------------
 # UART 传输（AT 控制台）
@@ -133,18 +130,8 @@ SPI_EP_IN      = 0x82
 SPI_VID        = 0x1A86
 SPI_PIDS       = [0x5512, 0x55DB, 0x55D4, 0x55DE]  # CH341A / CH347x
 
-# 模拟器 SPI 帧协议
-MAX_FRAME = 1700
-CMD_AT = 0x01
-CMD_GET_STATE = 0x02
-CMD_DATA_TX = 0x03
-CMD_DATA_RX = 0x04
-CMD_EVENT = 0x05
-CMD_PING = 0x06
-CMD_RESET = 0x07
-CMD_SET_CFG = 0x08
-CMD_GET_CFG = 0x09
-RESP_FLAG = 0x80
+# 模拟器 SPI 帧协议：常量都从 spi_frame（协议层唯一源）导入，见文件开头。
+# USB 侧（CH341A/CH347x）的 VID/PID/端点才是本文件自己的事。
 
 
 class SpiTransport:
@@ -186,11 +173,8 @@ class SpiTransport:
 
     def exchange(self, cmd, payload=b""):
         """单 CS 事务：先发请求帧，紧接着读回定长响应。"""
-        hdr = bytes([cmd, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF,
-                     crc8(bytes([cmd, (len(payload) >> 8) & 0xFF,
-                                  len(payload) & 0xFF]) + payload)])
-        req = hdr + payload
-        resp_len = 4 + MAX_FRAME
+        req = encode_request(cmd, payload)          # 帧组装 = 协议层
+        resp_len = HDR + MAX_FRAME
         total = len(req) + resp_len
         self.cs(True)
         readback = self.stream(req + bytes([0xFF]) * resp_len)
@@ -198,21 +182,14 @@ class SpiTransport:
         if len(readback) < total:
             sys.exit("SPI 读回长度不足（%d < %d）" % (len(readback), total))
         resp = readback[len(req):len(req) + resp_len]
-        return parse_resp(resp)
+        return parse_response(resp)                 # 应答解析 = 协议层
 
     def close(self):
         pass
 
 
-def parse_resp(resp):
-    if len(resp) < 4:
-        return {"ok": False, "cmd": 0, "payload": b""}
-    cmd = resp[0] & 0x7F
-    ln = (resp[1] << 8) | resp[2]
-    payload = resp[4:4 + ln]
-    crc = crc8(bytes([resp[0] & 0x7F, resp[1], resp[2]]) + payload)
-    ok = (crc == resp[3]) and (resp[0] & RESP_FLAG)
-    return {"ok": ok, "cmd": cmd, "payload": payload}
+# `parse_resp` 保留为同义名（老调用方／文档里这么叫）；实现就是协议层的 parse_response。
+parse_resp = parse_response
 
 
 # ---------------------------------------------------------------------------

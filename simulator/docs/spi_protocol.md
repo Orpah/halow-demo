@@ -38,13 +38,16 @@ host 拉低 `NSS`，发送 4 字节头部 + `LEN` 字节载荷；模拟器同拍
 4..    PAYLOAD   LEN  载荷（host→sim 为请求体；sim→host 为应答体）
 ```
 
-- **LEN 上限**：`SIM_SPI_MAX_FRAME = 1700`（对齐 `DATA_AREA_SIZE`，含以太网头）。
-- **CRC8**：CRC-8/ATM，多项式 `0x07`，初值 `0x00`，MSB-first（校验值 0xF4）。见 `Simulator/sim_util.c`。
+- **LEN 上限**：`SPI_PROTO_MAX_FRAME = 1700`（对齐 `DATA_AREA_SIZE`，含以太网头）。
+- **CRC8**：CRC-8/ATM，多项式 `0x07`，初值 `0x00`，MSB-first（校验值 0xF4）。
+  实现：`Simulator/spi_proto.c` 的 `spi_proto_crc()`（底下的 CRC 位运算用 `sim_util.c` 的 `sim_crc8`）。
 - **NSS 时序（单事务乒乓）**：host 拉低 `NSS`，先发 `4+LEN` 请求字节，然后**紧接着**
   继续发 `0xFF` 占位字节并同时读取 MISO —— 模拟器在收到请求末字节的下一拍开始回发响应，
   因此**请求与响应在同一个 `NSS=0` 事务内完成**。帧结束后拉高 `NSS`。
 - **CS 检测**：模拟器用 PA4(NSS) 的 EXTI 上升/下降沿识别事务边界（软件 NSS），
   响应阶段的占位字节会被忽略，不会被误当成新请求。
+  ⇒ “忽略响应阶段字节”与帧装配状态机在**协议层**里实现（`spi_proto.h` 的
+  `spi_proto_rx_byte()` / `spi_proto_cs_start|end()`），不是写在中断里的临时判断。
 - **全双工**：host 在发送同时读取 MISO；模拟器无待发数据时回 `0xFF`。
   响应长度固定按 `4+1700` 读回（不足部分为 0xFF），由响应头解析实际长度。
 
@@ -66,7 +69,6 @@ host 拉低 `NSS`，发送 4 字节头部 + `LEN` 字节载荷；模拟器同拍
 应答失败统一返回 `ERROR`（ASCII），便于 host 驱动区分。
 
 ## 4. 事件通知（IRQ）
-
 模拟器在有**待收数据帧**或**异步事件**时，将 `IRQ`(PB0) 置高并保持，直到 host
 读取完对应队列：
 
@@ -122,3 +124,34 @@ struct sim_state {
 | AT 路径 | UART 控制台为主 | SPI 亦可（AT_CMD） |
 
 host 驱动把"底层收发"抽象成 `bus_write / bus_recv` 两个函数，即可在两种实现间切换。
+
+## 8. 协议层与**离线对拍**（2026-09-22）
+
+帧格式/CRC/应答布局是纯逻辑，**不该等到上机才能验**。所以这一层被拆出来，两侧各一份实现：
+
+| 侧 | 文件 | 说明 |
+|---|---|---|
+| 设备侧 | `firmware/Simulator/spi_proto.{h,c}` | 帧装配状态机 + CRC + 应答构造；**不碰任何寄存器**（可编进固件，也可在 PC 上跑） |
+| 设备侧（硬件） | `firmware/Periph/spi_slave.c` | 只剩 SPI1 寄存器/中断/CS(EXTI)/IRQ 输出线 + 命令派发 |
+| 主机侧 | `tools/spi_frame.py` | Python 协议模型（同时也给 `tools/sim_config.py` 用，见下） |
+| 主机侧（跑 C） | `tools/spi_proto_cli.c` | 把设备侧源码拿到 PC 上跑的 CLI，**不编进固件** |
+| 向量 | `tools/spi_test_vectors.txt` | 由 Python 模型生成（**勿手改**） |
+
+```powershell
+python tools/check_spi_proto.py              # 对拍：设备侧 C ↔ 主机侧 Python
+python tools/check_spi_proto.py --refresh    # 用 Python 模型重生成向量
+```
+
+判据：退出码 0 且输出 `spi_proto cross-check N/N`（N == 总条数，现 **225**）。
+覆盖：CRC、请求帧、应答帧、**就地应答**（DATA_RX 那条「载荷先落在 tx 缓冲里、再就地补头」的
+重叠搬路径）、以及接收状态机（`frame` / `bad_crc` / `too_long` / 同事务内第二帧被忽略 / CS 分段）。
+本机没主机 C 编译器时**可见跳过**（`[SKIP]`，退出码 2）——**跳过 ≠ 通过**，`run_checks.py`
+会把它标出来。
+
+> ★ **这只是协议层的一致**，不代表 SPI 从机在真机上工作：寄存器配置、EXTI 边沿、
+> 与真实 MACBUS host 的时序**仍未经硬件验证**（见 `docs/backlog.md` §三）。
+> 它挡住的是「帧格式/CRC 两边写岔」这类问题 —— 那类问题的真机表现只是"发出去没反应"，最难查。
+
+> 单一源约定：协议常量（`SPI_PROTO_MAX_FRAME` / `SPI_PROTO_CMD_*` / `SPI_PROTO_RESP_FLAG`）
+> 只写在 `Simulator/spi_proto.h`；`Core/board.h` 只管引脚/端口，不再抄一份协议常量
+> （两份漂移不会报错，只会静默发错帧）。

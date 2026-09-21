@@ -66,6 +66,26 @@ python sim_config.py spi getstate
 > 注意：CH341A 的 CS 极性（`sim_config.py` 顶部 `SPI_CS_LOW/HIGH`）与端点假设
 > 基于 flashrom 的 CH341A 驱动；若你的适配器行为不符，调整这两个常量即可。
 
+### SPI 帧协议层：单一源 + 离线对拍
+
+帧格式（`CMD+LEN+CRC8/ATM+载荷`）原来在本文件与固件 `Periph/spi_slave.c` 里**各写一份**，
+两边漂移了不会报错 —— 真机上只表现为「发出去没反应」。 现在：
+
+| 文件 | 是什么 |
+|---|---|
+| `spi_frame.py` | **主机侧协议模型**（CRC/请求帧/应答帧/应答解析/接收状态机）；`sim_config.py` 从这里 import（不再自己抄一份） |
+| `spi_proto_cli.c` | 把**设备侧**协议层（`firmware/Simulator/spi_proto.c`）拿到 PC 上跑的 CLI；**不编进固件** |
+| `spi_test_vectors.txt` | 对拍向量（**勿手改**，由 Python 模型生成） |
+| `check_spi_proto.py` | 对拍脚本（也是 `run_checks.py` 的一步） |
+
+```powershell
+python tools/check_spi_proto.py            # 退出码 0 且 225/225 = 两侧逐字节一致
+python tools/check_spi_proto.py --refresh  # 用 Python 模型重生成向量
+```
+
+> 本机没主机 C 编译器时**可见跳过**（`[SKIP]`，退出码 2）——跳过 ≠ 通过。
+> 它只证**协议层**一致；寄存器/EXTI/真机时序仍待上机（`docs/backlog.md` §三）。
+
 ## 说明
 
 - UART 模式发送的 AT 命令与固件 `sim_at.c` 命令集一一对应。

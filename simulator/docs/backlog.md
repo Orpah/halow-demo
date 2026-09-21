@@ -47,7 +47,7 @@
 |---|---|---|
 | 掉电保存配置（`sim_cfg_save()`，写 Flash 最后一页） | `firmware/README.md` | **真机阶段**：PC 侧没有“掉电”概念；上机时由用户执行烧录验证 |
 | 换主频（`board.h` → 96MHz PLL） | `firmware/README.md` | 真机阶段，且**只在需要更多算力时**才做（当前 8MHz 够跑） |
-| 从「SPI 从机模拟」接到**真实 TXW8301** | `firmware/README.md` | 真机阶段：需要真实 MACBUS_SPI host 驱动 + 烧录（用户执行） |
+| 从「SPI 从机模拟」接到**真实 TXW8301** | `firmware/README.md` | 真机阶段：需要真实 MACBUS_SPI host 驱动 + 烧录（用户执行）。**协议层已离线对拍**（`python tools/check_spi_proto.py`，225/225，见 `spi_protocol.md` §8）；**寄存器/EXTI/真机时序仍未验证** |
 | `hc01`（HT-HC01）的真实 AT 方言 | `AGENTS.md` §7 | **拿到 HT-HC01 手册**后补方言（现在按泰芯 AH 同款占位，已在档案/UI/README 标注） |
 | 泰芯跨固件互通（TX-AH ↔ TH-RJ45 代次不兼容） | `docs/crossfw-taixin-handoff.md`（不入库） | **等厂商答复/固件镜像**（已记 F-09）；本仓只留结论：同代必通、跨代必不通 |
 | 多实例编排（>2 台虚拟设备一台机跑） | `architecture.md` §8 | 演示需要时再做（现在 `--host-sim` 两台够用；模拟器已支持端口 0 自动分配，多开不冲突） |

@@ -1,7 +1,7 @@
 # halow-demo 自检报告（空口/设备侧）
 
-- 生成时间：2026-09-21 22:51:15
-- HEAD：`c968a7b`
+- 生成时间：2026-09-22 02:10:04
+- HEAD：`f229d84`
 - Python：3.13.14
 - 结果：**3/3 通过**
 
@@ -10,9 +10,9 @@
 
 | 套件 | 结果 | 用时 |
 |---|---|---|
-| 模拟器回归（AT/连接/转发/配对/串口空口/host 数据口） | 通过 | 57.15s |
-| 界面文案字典（zh/en 对齐 + 页面引用无缺失） | 通过 | 0.05s |
-| 静态检查（py/js/json/tasks/gitignore） | 通过 | 0.22s |
+| 模拟器回归（AT/连接/转发/配对/串口空口/host 数据口） | 通过 | 57.04s |
+| 界面文案字典（zh/en 对齐 + 页面引用无缺失） | 通过 | 0.04s |
+| 静态检查（py/js/json/tasks/gitignore/spi 对拍） | 通过 | 4.38s |
 
 ## 模拟器回归（AT/连接/转发/配对/串口空口/host 数据口）
 
@@ -32,14 +32,15 @@ PASS  页面引用的 key 全部在字典里
 文案字典：全部通过（179 个 key，引用 171 个）
 ```
 
-## 静态检查（py/js/json/tasks/gitignore）
+## 静态检查（py/js/json/tasks/gitignore/spi 对拍）
 
 ```
 说明：
-  py_compile: 10 个文件
+  py_compile: 17 个文件
   node --check: 2 个 .js
   JSON: 2 个
-  tasks.json: 30 个任务
+  tasks.json: 42 个任务
+  spi_proto 对拍: 225/225（设备侧 C ↔ 主机侧 Python 逐字节一致，非硬件验证）
 
 无问题。
 ```

@@ -75,19 +75,12 @@
 /* DIP: 00=AP 01=STA 10=GROUP 11=APSTA (switched to GND => 0) */
 
 /* ------------------------------------------------------------------ */
-/* SPI host protocol constants (see docs/spi_protocol.md)              */
+/* SPI host 协议常量（帧格式/命令字）**不在这里** —— 单一源是协议层：          */
+/*   `firmware/Simulator/spi_proto.h`（纯逻辑，可与主机侧 tools/spi_frame.py   */
+/*   离线对拍：python tools/check_spi_proto.py）。别在本文件再抄一份：         */
+/*   两份漂移了不会报错，只会在真机上表现为“发出去没反应”。                    */
+/* 本文件只管**引脚/端口**（见上面 HOST_SPI_* / HOST_IRQ_*）。                  */
 /* ------------------------------------------------------------------ */
-#define SIM_SPI_MAX_FRAME    1700        /* align DATA_AREA_SIZE */
-#define SIM_SPI_CMD_AT       0x01
-#define SIM_SPI_CMD_GET_STATE 0x02
-#define SIM_SPI_CMD_DATA_TX  0x03
-#define SIM_SPI_CMD_DATA_RX  0x04
-#define SIM_SPI_CMD_EVENT    0x05
-#define SIM_SPI_CMD_PING     0x06
-#define SIM_SPI_CMD_RESET    0x07
-#define SIM_SPI_CMD_SET_CFG  0x08
-#define SIM_SPI_CMD_GET_CFG  0x09
-#define SIM_SPI_RESP_FLAG    0x80
 
 /* ------------------------------------------------------------------ */
 /* Interrupt handler attribute                                        */
