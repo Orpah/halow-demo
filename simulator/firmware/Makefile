@@ -69,7 +69,7 @@ endif
 OBJS = $(addprefix $(BUILD)/, $(SRCS:.c=.o))
 OBJS += $(BUILD)/startup.o
 
-all: $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).bin
+all: $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).bin $(BUILD)/$(TARGET).hex
 
 $(BUILD):
 	@$(call MKDIR,$(BUILD))
@@ -90,10 +90,16 @@ $(BUILD)/$(TARGET).elf: $(OBJS) $(LINK)
 $(BUILD)/$(TARGET).bin: $(BUILD)/$(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
 
+# ★ .hex：**自带地址** ⇒ WCHISPTool 「下载方式 = USB」选 .hex 时不用猜起始地址。
+#   （.bin 靠工具自己按某个默认地址写 —— 写错地方就是“烧进去了但一条指令都不执行”，
+#   2026-09-21 实测过的坑，所以两种产物都给。）
+$(BUILD)/$(TARGET).hex: $(BUILD)/$(TARGET).elf
+	$(OBJCOPY) -O ihex $< $@
+
 clean:
 	$(call RMDIR,$(BUILD))
 
-flash: $(BUILD)/$(TARGET).bin
+flash: $(BUILD)/$(TARGET).bin $(BUILD)/$(TARGET).hex
 	@echo "Flash with WCH-Link / MounRiver / openocd:"
 	@echo "  openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \\"
 	@echo "         -c \"program $(BUILD)/$(TARGET).bin 0x00000000 verify reset exit\""
