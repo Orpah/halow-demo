@@ -58,7 +58,8 @@ make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
   openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \
           -c "program build/txw8301-sim.bin 0x00000000 verify reset exit"
   ```
-  或直接用 MounRiver 的下载按钮 / WCHISPTool（下载方式 = USB，选 `.bin`）。
+  或直接用 MounRiver 的下载按钮 / WCHISPTool（**下载方式 = USB**）。
+  ★ `make` 会同时出 `.hex`（**自带地址**，工具不用猜起始地址 ⇒ 更稳）与 `.bin`，WCHISPTool 选两者都能烧。
 - 方式 B：串口 ISP（BOOT0 拉高 + USB-C，WCHISPTool，烧完 BOOT0 拉低复位）。
 - ⚠ **下载完不会自动运行，必须按一次 `RST`**（不按 = "刷完什么也没有"，最容易被当成固件坏了）。
 
@@ -68,6 +69,35 @@ make RISCV_PREFIX='C:/别的工具链/bin/riscv-none-embed-'
 - UART2（PA2/PA3）为虚拟空口，两板 TX↔RX + GND 对连即可模拟 AP↔STA。
 - SPI1（PA4~PA7）+ IRQ(PB0) 为宿主接口，协议见 `docs/spi_protocol.md`。
 - LED/按键/拨码交互见 `docs/usage.md`。
+
+### ★ 控制台的脾气（上机踩到的，先看这条省半小时）
+
+- **行尾必须 `LF`（`\n`）**：`Core/main.c::console_on_byte` **只把 `\n` 当行尾**，`\r` 被直接丢弃，
+  **且不清理行缓冲** ⇒ 用只会发 CR 的终端（PuTTY / SecureCRT 默认）时：① 敲 `AT` **毫无反应**；
+  ② 紧接着的下一条命令会被残留字符**粘成一条**（`AT\r` 后发 `AT\r\n` ⇒ 执行的是 `ATAT` ⇒ `ERROR`）。
+  终端设成发 **LF**（PuTTY 勾 `Implicit LF in every CR`；WindTerm 把发送后缀设为 LF）。
+- **不回显**：敲字屏幕上不动是**正常的**，只有回车后的响应会出现（`OK` / `ERROR` / `XXX:值`+`OK`）。
+- 应答格式（`sim_at.c` 文件头）：成功 `OK\r\n`、失败 `ERROR\r\n`、取值 `XXX:值\r\nOK\r\n`。
+
+## ✔ 上机记录（2026-09-21，nanoCH32V203）
+
+台架：nanoCH32V203（刷本仓 `txw8301-sim.hex`）+ CH347F `P2/UART0` = COM23 ↔ 板 `PA9/PA10`(USART1)，
+115200 8N1。
+
+**已实测成立（T1）**：
+
+| 现象 | 证明了什么 |
+|---|---|
+| 横幅 `TXW8301 Simulator v0.1.0 (CH32V203, no RF)` + `AT console ready.` | 链接基址 `0x0` 对（+ 时钟/GPIO 正常） |
+| `AT`（LF 结尾）→ `OK` | `IRQn_Type` +16 对（RX 中断真的进来了） |
+| `AT+SYSDBG=WNB,1` / `=LMAC,1` → **每秒一行** | 1 ms 时基 + 主循环在转（TIM `INTFR`/`ATRLR`） |
+| `LMAC: link_tx=3818 → 3832…`（**每秒 +2**） | 空口 TX 真的在发字节（AP 信标 500 ms 一次）⇒ **USART2 外设时钟也对**（若时钟没开，`uart_putc` 会卡在等 `TXE` 的死循环，主循环早该冻住）|
+
+★ 上电时是 **AP 模式**（不是 `sim_cfg` 默认的 STA）：nano 上**没有模式拨码** ⇒ `PA1/PB5` 悬空被上拉读高
+⇒ `dip_read()` = `00` = AP（`sim_led.c` 启动时会把拨码值写进 mode）。`AT+MODE=` 之后能覆盖它。
+
+**仍未验证（如实）**：两板或 PC↔板的 AP↔STA 配对（虚拟空口 `link_rx` 一直 0，没接对端）；
+SPI 宿主口；LED/按键/拨码交互（**nano 板上没有这些器件**）；`AT+TXDATA` 数据面。
 
 ## 移植 / 扩展
 - **换主频**：`board.h` 中 `SYSTEM_CLOCK_HZ`，并在 `SystemInit` 配置 PLL。

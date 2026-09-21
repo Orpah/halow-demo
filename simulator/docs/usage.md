@@ -260,6 +260,12 @@ openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \
 - PC 打开串口（CH340C，115200 8N1），发送 `AT` → 返回 `OK`。
 - `AT+VERSION` → 返回模拟器版本。
 
+> ⚠ **行尾必须是 LF（`\n`）**：固件**只认 `\n` 当行尾**，`\r` 被丢弃且不会清行缓冲 —— 用只会发 CR 的
+> 终端（PuTTY 默认）时：敲 `AT` 没反应，下一条命令还会被残留字符粘成 `ERROR`。
+> 解决：PuTTY 勾 `Implicit LF in every CR`，WindTerm/其它终端把发送后缀设成 **LF**。
+> ⚠ 固件**不回显**，敲字屏幕上不动是正常的（回车后才有 `OK`）。
+> ✔ 2026-09-21 已在 nanoCH32V203 上冒烟通过，逐条判据见 `firmware/README.md` 的「上机记录」。
+
 ## 5. 两板联调（AP + STA）
 
 ### 接线
@@ -318,6 +324,8 @@ python tools/sim_config.py COM4 status
 | 现象 | 原因 / 处理 |
 |------|-------------|
 | 串口无 `OK` | 波特率不对（应为 115200）/ 线没接 / BOOT0 状态异常 |
+| 敲 `AT` 完全无反应 | **行尾不是 LF**（本固件只认 `\n`；`\r` 被丢弃且残留行缓冲）。见 §4 的警告；或先确认没搞错线（横幅能出只证明板→PC 那根通）|
+| 命令回 `ERROR` 但看着没打错 | 多半是上一条 CR 结尾的命令**留在行缓冲里**、与本次输入粘成了一条（例：`AT\r` 后发 `AT\r\n` ⇒ 实际执行 `ATAT`）|
 | 两板连不上 | 确认 SSID、BSS_BW、CHAN_LIST 一致；虚拟空口 TX↔RX 交叉且共地 |
 | `AT+RSSI` 恒定 | 默认是注入的固定值（模拟器 `sim_cfg.rssi`，默认 -30）。要看距离/功率的影响就用 `AT+DIST=<米>` 开距离模型（模拟器扩展，`docs/AT_commands.md` §8） |
 | CONN 灯不亮 | 检查 PC13 接线与 `board.h` 中 `CONN_LED_ACTIVE_LOW` |
