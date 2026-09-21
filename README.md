@@ -78,3 +78,13 @@ IoTDB / Web UI，`ui_server.py` :8901）已**整体迁出**到独立仓库：
 ## 相关链接
 1. [TXW8301淘宝链接](https://item.taobao.com/item.htm?id=856103881366&skuId=5660266844543)
 2. [HT-HC01淘宝链接](https://item.taobao.com/item.htm?id=866899093076&skuId=6162648454293)
+
+## 许可
+
+本仓库（我们自己写的源码 / 文档 / 脚本 / 接线与元件资料）采用 **Apache License 2.0**，
+全文见 [`LICENSE`](LICENSE) —— 与同族的 `orpah-over-halow` / `orpah-client-demo` /
+`orpah-openwrt-demo` **同一许可、同一份文本**（可用 `git hash-object LICENSE` 逐字节对照）。
+
+⚠ **第三方素材不在本许可范围内**：厂商手册/PDF、SDK 源码、固件镜像、工具安装包等**不随本仓分发**
+（见 [`simulator/AGENTS.md`](simulator/AGENTS.md) §8「git 提交纪律」）；
+`TXW8301/` 里引用的泰芯 SDK 需要使用者自行取得并遵守其各自许可。

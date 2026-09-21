@@ -11,6 +11,15 @@ ORPAH-over-HaLow 的业务全链路（Router 桥 / 走失表 / 报文集 / ID �
 
 - **本仓库只剩空口/设备侧**：`host/`（`sim.py` 空口仿真 + host 数据口）、`tools/ui/`（TXW8301 Web UI）、
   `firmware/`、`hardware/`、`docs/`。**不要在 `tools/` 里实现 ORPAH 业务**。
+- **`firmware/` 的平台层与 `orpah-client-demo/firmware` 是两份独立副本**（用户 2026-09-21 判定：
+  不抽公共库、不做 submodule，两仓各自独立）⇒ **同一处坑不能在一边修完就算完**。
+  平台层这 **7 个文件**要两侧同步：`ld/link.ld`、`startup/startup_ch32v203.S`、`Core/ch32v20x.h`、
+  `Periph/gpio.{c,h}`、`Periph/uart.{c,h}`。
+  ★ 事实来源：客户端固件**已上真机**（`orpah-client-demo/docs/c3-2b-bench-bringup.md` 的四个真凶：
+  链接基址必须 `0x0`、`IRQn_Type` 必须 +16、`mstatus` 要 `0x1888`、向量表紧接 `.init`、TIM `INTFR`
+  清标志写 0、`uart_init` 要开外设时钟）；**本仓 `firmware/` 从未上机** ⇒ 改完要标「未验证」。
+  2026-09-21 已回灌修好：`d981896`（基址/IRQn/mstatus/向量表）、`8da9c48`（uart 时钟）、
+  `cb1b7a1`（Makefile 在 Win11 上能 `make`）。
 - **两个仓库怎么相接**：业务侧通过 **host 数据口（TCP）** 与本仓库的空口仿真对接；
   帧格式 = `AA 55 TYPE LEN_H LEN_L CRC payload`（CRC-8/ATM 0x07），语义 = SPI MACBUS
   DATA_TX/DATA_RX。业务侧有独立实现 `orpah-over-halow/host_bus.py`（只依赖 TCP + 帧格式，
