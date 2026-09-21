@@ -107,6 +107,314 @@
 			],
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "tmp-show-ws",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\show_ws.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-build",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_rebuild.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-hd-checks2",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\run_checks.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-build2",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_rebuild.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-hd-probe",
+			"type": "shell",
+			"command": "cmd /c \"where make & where riscv-none-elf-gcc & make --version & where sh\"",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-hd-probe2",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_probe.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-hd-make",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_make.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-cmp-fw",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\cmp_fw.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-diff-fw",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\diff_fw.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-artifacts",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_build_artifacts.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-hd-checks3",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\run_checks.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-serial-probe",
+			"type": "shell",
+			"command": "cmd /c C:\\Python313\\python.exe -c \"import serial,serial.tools.list_ports as lp; print('pyserial', serial.__version__); [print(p.device, '|', p.description) for p in lp.comports()]\"",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-serial-probe2",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\serial_probe.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-artifacts2",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\hd_build_artifacts.cmd",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "tmp-fzz-nets",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\tools\\fzz_nets.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-checks4",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\run_checks.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-cmp-svg",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\cmp_svg.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-svg-coords",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\svg_coords.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-svg-coords2",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\svg_coords2.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-fzz-nets2",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\tools\\fzz_nets.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-hd-checks5",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe simulator\\run_checks.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-readme-imgs",
+			"type": "shell",
+			"command": "C:\\Python313\\python.exe C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\readme_imgs.py",
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "tmp-ui-dir",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Get-ChildItem F:\\git\\halow-demo\\simulator\\tools\\ui -Force | Select-Object -ExpandProperty Name; '=== 顶层 images/'; Get-ChildItem F:\\git\\halow-demo\\images | Select-Object -First 12 -ExpandProperty Name",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo\\simulator\\tools\\ui; & 'C:\\Python313\\python.exe' server.py --host-sim --no-browser",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-shot",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; New-Item -ItemType Directory -Force -Path 'F:\\git\\halow-demo\\simulator\\tools\\ui\\images' | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\halow_ui_shot.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-owners",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; foreach ($p in 8899,9001,9000) { $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue; foreach ($x in $c) { $proc = Get-Process -Id $x.OwningProcess -ErrorAction SilentlyContinue; $cl = (Get-CimInstance Win32_Process -Filter (\"ProcessId=\" + $x.OwningProcess)).CommandLine; 'port ' + $p + ' pid=' + $x.OwningProcess + ' start=' + $proc.StartTime + ' cmd=' + $cl } }",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-kill",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; foreach ($p in 8899,9001,9002,9011,9012) { Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { '停 pid=' + $_.OwningProcess + ' （占 ' + $p + '）'; Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; Start-Sleep -Seconds 3; '=== 现在还有谁在听'; foreach ($p in 8899,9001,9002,9011,9012) { if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) { '  ' + $p + ' 还在' } }",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-kill2",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; for ($i=0; $i -lt 4; $i++) { foreach ($p in 8899,9001,9002,9011,9012) { Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }; Start-Sleep -Seconds 2 }; '=== 剩谁在听（应为空）'; foreach ($p in 8899,9001,9002,9011,9012) { $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue; if ($c) { '  ' + $p + ' pid=' + ($c | ForEach-Object { $_.OwningProcess }) -join ',' } }; '=== python 进程'; Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,StartTime",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui2",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo\\simulator\\tools\\ui; & 'C:\\Python313\\python.exe' server.py --host-sim --no-browser",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-shot2",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\halow_ui_shot.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-ui-shot3",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\halow_ui_shot2.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-ui-img-list",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Get-ChildItem F:\\git\\halow-demo\\simulator\\tools\\ui\\images | Select-Object Name,Length",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-doc-img",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Get-ChildItem F:\\git\\halow-demo\\simulator\\docs -Filter *.png -ErrorAction SilentlyContinue | Select-Object Name,Length; '=== 全仓 png（非 .git）'; Get-ChildItem F:\\git\\halow-demo -Recurse -File -Filter *.png -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\\\.git\\\\' } | Select-Object -First 20 -ExpandProperty FullName",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-halow-docimg-track",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo; git ls-files simulator/docs | Select-Object -First 10; '=== git status'; git status --short | Select-Object -First 20",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-ui-readme-links",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo\\simulator\\tools\\ui; '=== 目录'; Get-ChildItem . -Name; '=== README 里的相对链接/图片'; Select-String -Path README.md -Pattern '\\]\\(([^)#]+)' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $p = $_.Groups[1].Value; $ok = Test-Path $p; \"{0,-6} {1}\" -f $ok, $p }",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-chk-links",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\chk_links.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-chk-ui-paths",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\chk_ui_paths.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-chk-links2",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\chk_links.py'; '=== 删临时截图目录'; Remove-Item F:\\git\\halow-demo\\simulator\\tools\\ui\\images -Recurse -Force; Test-Path F:\\git\\halow-demo\\simulator\\tools\\ui\\images",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-commit-halow-docs",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo; git rev-parse --show-toplevel; git add simulator/firmware/README.md simulator/tools/README.md simulator/tools/ui/README.md; git commit -F C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\msg_halow_docs.txt; git show --stat --oneline HEAD",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-audit-readme-figs",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\audit_readme_figs.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-stop-simui",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\stop_simui.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-tasksjson-diff",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo; git rev-parse --show-toplevel; '=== diff stat'; git --no-pager diff --stat -- .vscode/tasks.json; '=== 新增 label 数量'; (git --no-pager diff -- .vscode/tasks.json | Select-String -Pattern '^\\+\\s+\"label\"').Count; '=== 文件总行数 / 任务总数'; (Get-Content .vscode/tasks.json).Count; (Select-String -Path .vscode/tasks.json -Pattern '\"label\"').Count",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-cmp-tasksjson",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; & 'C:\\Python313\\python.exe' 'C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\cmp_tasks_json.py'",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "tmp-commit-tasksjson",
+			"type": "shell",
+			"command": "chcp 65001 | Out-Null; Set-Location F:\\git\\halow-demo; git rev-parse --show-toplevel; git add .vscode/tasks.json; git commit -F C:\\Users\\shi.jinghai-honor\\AppData\\Local\\Temp\\msg_halow_tasks.txt; git --no-pager show --stat --oneline HEAD; '=== 提交后工作区'; git status --short",
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }
