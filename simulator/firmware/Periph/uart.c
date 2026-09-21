@@ -38,6 +38,14 @@ void uart_init(USART_TypeDef *uart, GPIO_TypeDef *port,
         s_cnt++;
     }
 
+    /* ★★ 外设时钟**必须先开**：USART1 在 APB2（BIT14），USART2/3 在 APB1（BIT17/18）。
+     * 漏了这条 ⇒ USART 寄存器不响应，现象是"串口完全不响"（发不出也收不到），很难查。
+     * 放在驱动里而不是 main，是因为**只有这里知道这个 USART 挂在哪条总线上**。
+     * （2026-09-21 补：PC 侧模拟器看不出来，一上真板就现形 —— 同 orpah-client-demo 的修法。）*/
+    if (uart == USART1)      { RCC->APB2PCENR |= RCC_APB2Periph_USART1; }
+    else if (uart == USART2) { RCC->APB1PCENR |= RCC_APB1Periph_USART2; }
+    else if (uart == USART3) { RCC->APB1PCENR |= RCC_APB1Periph_USART3; }
+
     /* TX = AF push-pull, RX = input floating */
     gpio_set_mode(port, tx_pin, GPIO_MODE_AF_PP_50MHZ);
     gpio_set_mode(port, rx_pin, GPIO_MODE_IN_FLOATING);
