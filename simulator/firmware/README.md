@@ -46,13 +46,14 @@ make clean
 
 ## 烧录
 
-- 方式 A（推荐）：**WCH-Link**（SWD）：
+- 方式 A（推荐）：**WCH-Link**（SWD）—— ★ 地址必须是 **`0x00000000`**（与 `ld/link.ld` 的链接基址一致）：
   ```bash
   openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \
-          -c "program build/txw8301-sim.bin 0x08000000 verify reset exit"
+          -c "program build/txw8301-sim.bin 0x00000000 verify reset exit"
   ```
-  或直接用 MounRiver 的下载按钮 / WCHISPTool。
+  或直接用 MounRiver 的下载按钮 / WCHISPTool（下载方式 = USB，选 `.bin`）。
 - 方式 B：串口 ISP（BOOT0 拉高 + USB-C，WCHISPTool，烧完 BOOT0 拉低复位）。
+- ⚠ **下载完不会自动运行，必须按一次 `RST`**（不按 = "刷完什么也没有"，最容易被当成固件坏了）。
 
 ## 运行时行为
 

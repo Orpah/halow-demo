@@ -61,7 +61,7 @@ $(BUILD)/$(TARGET).elf: $(OBJS) $(LINK)
 	$(SIZE) $@
 
 $(BUILD)/$(TARGET).bin: $(BUILD)/$(TARGET).elf
-	$(OBJCOPY) -O binary $@ $<
+	$(OBJCOPY) -O binary $< $@
 
 clean:
 	rm -rf $(BUILD)

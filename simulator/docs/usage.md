@@ -246,7 +246,7 @@ make                 # 生成 build/txw8301-sim.bin
 ```bash
 # 用 WCH 的 ISP/下载工具或 openocd 均可；MounRiver 里直接点下载
 openocd -f interface/wch-link.cfg -f target/ch32v20x.cfg \
-        -c "program build/txw8301-sim.bin 0x08000000 verify reset exit"
+        -c "program build/txw8301-sim.bin 0x00000000 verify reset exit"
 ```
 
 方式 B（串口 ISP，可选）：连接 BOOT0 到高，用 WCHISPTool 通过 USB-C 烧录，

@@ -4,7 +4,7 @@
 ; *   - hardware stack / interrupt nesting  (csrw 0x804, 0x3)
 ; *   - pipelining / instruction prediction (csrw 0xbc0, 0x1f)
 ; *   - mtvec = vector_base | 3 (vectored + direct base)
-; *   - mstatus = 0x88 (MIE | MPIE) then jump to main via mepc/mret
+; *   - mstatus = 0x1888 (MPP=M | MIE | MPIE) then jump to main via mepc/mret
 ; *
 ; * Interrupt handlers use __attribute__((interrupt("WCH-Interrupt-fast")))
 ; * in C (MounRiver toolchain).
@@ -21,7 +21,9 @@ _start:
        index 16+N, i.e. WWDG=16 ... DMA1_Channel8=63)                     */
     /* ------------------------------------------------------------------ */
     .section    .vector,"ax",@progbits
-    .align      6
+    .align      1              /* 2 字节对齐：表紧接 .init（= 0x8），与 WCH startup 一致。
+                                  ★ 别改成 6（64B 对齐）：表会被放到 0x40 ——
+                                  2026-09-21 台架上表现为中断全部不响应。*/
     .global     _vector_base
 _vector_base:
     .option norvc;
@@ -248,8 +250,12 @@ handle_reset:
     /* enable interrupt nesting and hardware stack */
     li     t0, 0x3
     csrw   0x804, t0
-    /* enable global interrupt and privileged mode */
-    li     t0, 0x88
+    /* enable global interrupt AND stay in machine mode (MPP=0b11)
+     * ★ 0x88 = MIE|MPIE 但 MPP=0（mret 后进用户模式）⇒ main 里 CSR 访问出事、
+     *   写 PFIC（0xE000E000）静默失效；0x1888 = MPP=M | MPIE | MIE 才在机器模式。
+     *   （WCH 官方 startup 写的是 0x88；本仓按台架实测改 0x1888 —— 若该内核忽略
+     *   MPP，本条就是等价的显式化；若不忽略，它修的是真问题。）*/
+    li     t0, 0x1888
     csrw   mstatus, t0
     /* configure vector table recognition mode and entry address mode */
     la     t0, _vector_base

@@ -24,8 +24,14 @@ static void tick_init(void)
     RCC->APB1PCENR |= RCC_APB1Periph_TIM2;
 
     TIM2->CTLR1 = 0;
-    TIM2->PSC = SYSTEM_CLOCK_HZ / 1000 - 1;   /* -> 1 kHz */
-    TIM2->ATRLR = 0;                          /* period = 1 ms */
+    TIM2->PSC = SYSTEM_CLOCK_HZ / 1000000UL - 1UL;   /* -> 1 MHz 计数时钟 */
+    TIM2->ATRLR = 1000UL - 1UL;                      /* -> 1000 计数 = 1 ms */
+    TIM2->CNT   = 0u;
+    /* ★ `INTFR` 是 **write-all-bits**：清标志要**写 0**（写 1 反而置位 ⇒ ISR 死风暴；
+     *   依据 WCH `TIM_ClearITPendingBit(): TIMx->INTFR = (uint16_t)~TIM_IT;`）。
+     *   写 `EVGR=UG` 让 PSC/ARR 立刻生效。*/
+    TIM2->EVGR  = 1u;
+    TIM2->INTFR = 0u;
     TIM2->DMAINTENR |= TIM_DMAINTENR_UIE;
     TIM2->CTLR1 |= TIM_CTLR1_CEN | TIM_CTLR1_ARPE;
     NVIC_EnableIRQ(TIM2_IRQn);
