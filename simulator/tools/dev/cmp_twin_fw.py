@@ -5,10 +5,15 @@
 `orpah-client-demo/AGENTS.md` §1），规矩是「**在一侧发现的平台层 bug，改完要在另一侧也改掉**」。
 但两侧大多文件本来就该不同（业务/状态机不同），所以需要一眼看出「哪些同、哪些不同」。
 
-★ 标记的 7 个文件是 AGENTS 点名的**平台层**（两侧必须同步）：
+★ 标记的 7 个文件是 AGENTS 点名的**平台层**（链接脚本/启动文件/串口驱动）：
   ld/link.ld  startup/startup_ch32v203.S  Core/ch32v20x.h
   Periph/gpio.c  Periph/gpio.h  Periph/uart.c  Periph/uart.h
 （2026-09-21 就是这么回灌的：链接基址 0x0、IRQn 偏移、mstatus MPP、TIM INTFR。）
+
+⚠ 口径（2026-09-22 用户明确）：两侧**功能本来就不同**（一边模拟器固件、一边客户端固件），
+所以这些文件**不一致是正常的**。★ 的含义只是「平台层的修复要在两侧都落地」，
+**不是**「要逐字节相同」—— 要盯的是「别漏回灌」，不是「必须一模一样」；
+下面同名一致的才意味着「两边真的没改动」。
 
 用法（在 halow-demo 仓库里跑）：
   python simulator/tools/dev/cmp_twin_fw.py              # 汇总表（同/不同/只在一边）
@@ -88,13 +93,13 @@ def main():
             ba, bb = norm_bytes(a[rel]), norm_bytes(b[rel])
             (same if ba == bb else diff).append((rel, ba, bb))
 
-    print("=== 平台层（★ 两侧必须同步）===")
+    print("=== 平台层（★ 只意味着「平台层修复要两侧都落地」；两侧功能不同 ⇒ 不一致正常）===")
     for rel in sorted(PLATFORM):
         tag = "★"
         if rel in a and rel in b:
             ba, bb = norm_bytes(a[rel]), norm_bytes(b[rel])
             print("  %s %-30s 本仓 %s  另一侧 %s  %s"
-                  % (tag, rel, short(ba), short(bb), "一致" if ba == bb else "**不同**"))
+                  % (tag, rel, short(ba), short(bb), "一致" if ba == bb else "不同"))
         elif rel in a:
             print("  %s %-30s 只在**本仓**有" % (tag, rel))
         elif rel in b:

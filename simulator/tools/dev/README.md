@@ -32,7 +32,7 @@ flowchart LR
 | `check_docs.py` | 每个 README 是否**有图**（图片/`<img>`/mermaid）+ 所有 md 的**相对链接/图片是否真的存在**；`--stats` 出图片数统计，`--inline` 额外提示反引号里的仓内路径 | 改完 README 就跑了它。**退出码 0 = 全过**（坏路径不会报错、只是图不显示，人眼容易漏） |
 | `shot_ui.py` | 用 Playwright + 系统 Edge 截模拟器 UI 的**真实页面**（可 `--frames --rssi 2` 让图里有内容） | 给 README 换图。**别用 VS Code 内嵌浏览器**（绘制面约 364×490 px，超出全黑） |
 | `stop_ui.py` | 清掉 8899/9001/9002/9011/9012 的占用（`--dry` 只看不动手） | 起 UI / 截图前。模拟器**组件端口是固定常量**，多开不报错但数据会错（页面在动、数字不对，很难查） |
-| `cmp_twin_fw.py` | 比对 `halow-demo/simulator/firmware` ↔ `orpah-client-demo/firmware`，**★ 标出必须同步的平台层 7 个文件**（`--diff` 看行级差异） | 改平台层（链接脚本/启动文件/串口驱动）后，确认另一侧也改了 |
+| `cmp_twin_fw.py` | 比对 `halow-demo/simulator/firmware` ↔ `orpah-client-demo/firmware`，★ 标出**平台层** 7 个文件（`--diff` 看行级差异） | 改平台层（链接脚本/启动文件/串口驱动）后，确认另一侧也改了。注意口径：两侧**功能不同 ⇒ 文件不一致是正常的**，★ 只表示「平台层修复要两侧都落地」，**不是**要求逐字节相同 —— 盯的是别漏回灌 |
 | `svg_text.py` | 看 `simulator/hardware/wiring/*.svg` 里每条文字的内容与 x/y/transform（`--grep` 过滤，`--diff` 与 HEAD 比增删与位移） | 手改接线图后核对丝印有没有改坏 |
 | `rebuild_fw_manual.cmd` | **不依赖 make / sh** 的手工编译（逐文件 gcc + 链接），源码用通配收集 | 本机 `make` 失败时（Makefile 走 shell，本机没 sh）。已验证可出 `build/txw8301-sim.{elf,bin,hex}` |
 | `build_fw.cmd` | `make clean && make` + 列产物与 sha256；**开跑前先查 `sh`**，没有就早失败并指路 | 有 sh 的机器 |
