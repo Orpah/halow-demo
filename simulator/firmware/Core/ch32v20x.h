@@ -205,6 +205,8 @@ typedef struct {
 #define RCC_APB1Periph_SPI2     BIT(14)
 #define RCC_APB1Periph_USART2   BIT(17)
 #define RCC_APB1Periph_USART3   BIT(18)
+#define RCC_APB1Periph_I2C1     BIT(21)      /* ★ 2026-09-22：给 ATECC608B 用 */
+#define RCC_APB1Periph_I2C2     BIT(22)
 
 /* ------------------------------------------------------------------ */
 /* USART                                                               */
@@ -277,6 +279,53 @@ typedef struct {
 #define SPI_STATR_RXNE     BIT(0)
 #define SPI_STATR_TXE      BIT(1)
 #define SPI_STATR_BSY      BIT(7)
+
+/* ------------------------------------------------------------------ */
+/* I2C（STM32F1 寄存器布局；CH32V203 = I2C1/I2C2）                       */
+/*   ★ 2026-09-22 为 c4-γ-2（ATECC608B 安全元件）加入。                */
+/*   ⚠ 本文件是**两仓共享的 7 个平台层文件之一**                     */
+/*     （`orpah-client-demo/firmware` ↔ `halow-demo/simulator/firmware`； */
+/*      见 AGENTS §1）⇒ 改一侧就要同步另一侧。这一段两侧都有。       */
+/* ------------------------------------------------------------------ */
+typedef struct {
+    __IO uint32_t CTLR1;   /* 0x00 CR1  */
+    __IO uint32_t CTLR2;   /* 0x04 CR2  */
+    __IO uint32_t OADDR1;  /* 0x08 OAR1 */
+    __IO uint32_t OADDR2;  /* 0x0C OAR2 */
+    __IO uint32_t DATAR;   /* 0x10 DR   */
+    __IO uint32_t STAR1;   /* 0x14 SR1  */
+    __IO uint32_t STAR2;   /* 0x18 SR2  */
+    __IO uint32_t CKCFGR;  /* 0x1C CCR  */
+    __IO uint32_t RTR;     /* 0x20 TRISE*/
+} I2C_TypeDef;
+
+#define I2C1 ((I2C_TypeDef *)0x40005400)
+#define I2C2 ((I2C_TypeDef *)0x40005800)
+
+/* I2C CTLR1 (CR1) bits */
+#define I2C_CTLR1_PE       BIT(0)
+#define I2C_CTLR1_START    BIT(8)
+#define I2C_CTLR1_STOP     BIT(9)
+#define I2C_CTLR1_ACK      BIT(10)
+#define I2C_CTLR1_SWRST    BIT(15)
+/* I2C STAR1 (SR1) bits。⚠ 其中 BERR/ARLO/AF/OVR 是**写 0 清**（同 TIM INTFR 那类坑）*/
+#define I2C_STAR1_SB       BIT(0)
+#define I2C_STAR1_ADDR     BIT(1)
+#define I2C_STAR1_BTF      BIT(2)
+#define I2C_STAR1_RXNE     BIT(6)
+#define I2C_STAR1_TXE      BIT(7)
+#define I2C_STAR1_BERR     BIT(8)
+#define I2C_STAR1_ARLO     BIT(9)
+#define I2C_STAR1_AF       BIT(10)
+#define I2C_STAR1_OVR      BIT(11)
+/* I2C STAR2 (SR2) bits */
+#define I2C_STAR2_MSL      BIT(0)
+#define I2C_STAR2_BUSY     BIT(1)
+#define I2C_STAR2_TRA      BIT(2)
+/* I2C CKCFGR (CCR) bits */
+#define I2C_CKCFGR_DUTY    BIT(14)
+#define I2C_CKCFGR_FS      BIT(15)
+#define I2C_CTLR2_FREQ_MASK 0x3Fu
 
 /* ------------------------------------------------------------------ */
 /* TIM (STM32F1-style; base 0x40000000 = TIM2)                         */
