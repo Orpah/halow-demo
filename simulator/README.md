@@ -132,6 +132,14 @@ python server.py --host-sim        # 进程内启动 AP+STA 两台 PC 模拟器�
 - 回归测试：`python host/run_tests.py`（**48/48 通过**；结果同时写进 `host/test_results.txt`）。
 - 一键自检：`python run_checks.py`（套件 = 模拟器回归 + 界面文案字典 + 静态检查 py/js/json/tasks，
   报告写 `simulator/checks_report.md`）。
+- **CI（GitHub Actions）= 同一套三块自检，换机器 / 换系统再跑一遍** ✓ ——
+  `.github/workflows/checks.yml` 是 **Linux / Windows / macOS 三栏**，各跑**同一份**
+  `python simulator/run_checks.py` ✓。★ 最值钱的是 **Windows 栏** ✓：本仓记过的几个坑都是
+  Windows 专属（`subprocess` 按 GBK 解码 ✗、`shutil.which("sh")` 找到 WSL 的 bash ✗、
+  固定端口在 Windows 上**静默串扰** ✗）—— 平常只在一台机器上被验过 ✗。
+  ★ 它**不证明** ✗：不是真机、也不上机 ✗（空口/设备侧的结论只认真机实测 —— 这里跑的是
+  `host/` 那份纯软件模拟器 + 离线对拍 ✓）；`node --check` 在没装 node 时是**可见地跳过** ✓
+  （三栏 runner 都自带 node ⇒ 那项应当真的跑到 ✓）；也不覆盖真机固件"能不能烧 / 跑得对" ✗。
 - **给上层程序用的数据面**（不是 AT 敲帧）：`--host <port>` 开一个 host 数据口，
   语义对齐 SPI MACBUS 的 DATA_TX/DATA_RX —— 见 [docs/host_port.md](docs/host_port.md)。
 - 界面截图：`docs/ui_simplified_demo.png`（混合设备演示）、`docs/ui_hostsim_demo.png`、

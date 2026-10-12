@@ -46,7 +46,7 @@
   [PASS] 第 9 节起点：B 已连上
   [PASS] LOSS=100%：帧被丢（对端 rx 不变 + 本机回 TX DATA FAIL）  (rx 0->0 drops=1)
   [PASS] LOSS=0%：帧正常送达  (rx=1)
-  [PASS] ASSOC_FAIL=100%：B 连不上且重试计数在涨  (conn=ASSOCIATING fails=4)
+  [PASS] ASSOC_FAIL=100%：B 连不上且重试计数在涨  (conn=ASSOCIATING fails=5)
   [PASS] ASSOC_FAIL=0%：自动恢复连接
   [PASS] RAW：STA 学到了 AP 的槽数与自己的槽位  (slots=4 slot=0)
   [PASS] RAW：窗口外 send_data 受理但排队（不是丢）  (rc=0 q=1 defer=1)

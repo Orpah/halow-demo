@@ -1,0 +1,73 @@
+# 第三方环境交叉验证 —— ★ 先读这段：它**证明什么**、**不证明什么**
+#
+# 证明 ✓：换一台机器、换一套系统之后，本仓那三块**离线**自检照样全过 ——
+#   `python simulator/run_checks.py`：
+#     ① **模拟器回归**（`host/run_tests.py`：AT / 自动连接 / 数据转发 / 配对 / family=tah 方言 /
+#        串口空口 / **host 数据口** ✓）→ 结果写 `host/test_results.txt`；
+#     ② **界面文案字典**（`tools/ui/chk_i18n.py`：zh/en 键集一致 + 每个键恰好两次 +
+#        页面引用的 key 全在字典里 ✓）；
+#     ③ **静态检查**（全部 `.py` 可编译 / 全部 `.js` 过 `node --check` / `.json` 可解析 /
+#        `.vscode/tasks.json` 自洽 / `.gitignore` 覆盖字节码 / **SPI 宿主协议层离线对拍**：
+#        设备侧 C ↔ 主机侧 Python 逐字节一致 ✓）。
+#
+# ★ 本仓最该被 CI 抓的，是 **Windows 与 POSIX 的差异**（AGENTS 里记的那几条，都只在一台机器上被验过 ✗）：
+#   · `subprocess` 输出默认按 GBK/936 解码 ✗ ⇒ 读线程 `UnicodeDecodeError`、`stderr` 变 `None`
+#     （连带断言消息自己炸 ✗）；
+#   · `shutil.which("sh")` 会找到 **WSL 的 bash.exe** ✗（它看不到 `F:/…` 路径 ⇒ 假失败）；
+#   · 文本一律 UTF-8、打印中文要先 `sys.stdout.reconfigure` ✗。
+#   ⇒ 三栏（Linux / Windows / macOS）跑的是**同一份** `simulator/run_checks.py` ✓，口径只有一份 ✓。
+#
+# 不证明 ✗（三条，别读成"CI 绿 = 能用"）：
+#   ① **不是真机、也不上机** ✗ —— 空口/设备侧的结论只认**真机实测**（TX-AH / TH-RJ45 那些记录 ✓）；
+#      这里跑的是 `host/` 那份**纯软件模拟器** ✓ 与**离线**对拍 ✓ —— 真机联调仍在手边的台架上 ✓。
+#   ② **`node` 缺了会"明确跳过"** ✗ —— 静态检查里 `node --check` 在没装 node 时是**可见地跳过** ✓
+#      （本仓口径：缺东西不许默默当通过 ✗）；三栏 runner 都自带 node ✓ ⇒ 那项**应当真的跑到** ✓
+#      （跑没跑看日志 ✓）。"记下版本"那步就是为了这个 —— node 在不在日志里能看到 ✓。
+#   ③ **不覆盖真机固件"能不能烧 / 跑得对"** ✗ —— `firmware/`（CH32V203 参考骨架）的时序与中断
+#      语义属于 MounRiver 那份工具链 + 真板子 ✓；CI 只做**离线**那几块 ✓。
+name: checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false            # 一个系统红，别的照样跑完 ✓（三栏一起看才有意义 ✓）
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux
+          - os: windows-latest
+            label: Windows（★ 最值钱的一栏：AGENTS 里那些 Windows 专属坑 ✓）
+          - os: macos-latest
+            label: macOS
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 记下这台机器的版本（日志留痕；`node` 在不在也一并记 ✓）
+        shell: pwsh
+        run: |
+          Write-Host "OS     : $($env:RUNNER_OS) $($env:ImageOS)"
+          Write-Host "python : $(python --version 2>&1)"
+          Write-Host "node   : $(node --version 2>&1)"
+
+      - name: 一键自检（口径 = 退出码 0 且输出无 FAIL/Traceback）
+        run: python simulator/run_checks.py
+
+      - name: 把报告捞出来（失败时也留档；三栏各一份）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checks_report-${{ matrix.os }}
+          path: simulator/checks_report.md
+          if-no-files-found: warn
