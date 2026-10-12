@@ -252,7 +252,22 @@ def main():
     print("== 6. 串口空口（PC <-> 真实 CH32V203 板 UART2） ==")
     # 用 socketpair 模拟串口线：A/B 两个 core 都走 Link 的串口传输（_SerialPeer）。
     # 只关心链路是否通过"串口"建立（beacon/assoc/连接 + 数据帧）。
-    import serial as _rs
+    # ★ 本节只需要一个**可被替掉的 Serial 类**（不用真串口）⇒ 没装 pyserial 时**自己塞桩模块**。
+    #   本文件开头承诺"无第三方依赖"，而 2026-10-12 CI 三栏就是因为这里 `import serial`
+    #   抛 ModuleNotFoundError 把**整套回归**崩掉（Linux/macOS/Windows 全红）。
+    try:
+        import serial as _rs
+    except ImportError:
+        import types
+        _rs = types.ModuleType("serial")
+
+        class _StubSerial:                  # 只为让 sim.py 的 serial.Serial(...) 有个可替换的名字
+            def __init__(self, *a, **kw):
+                raise RuntimeError("桩模块：请先把 serial.Serial 换成假串口")
+
+        _rs.Serial = _StubSerial
+        sys.modules["serial"] = _rs
+        print("  [注] 本机没装 pyserial ⇒ 用桩模块（本节不用真串口，不影响判据）")
     _real_serial = _rs.Serial
     _sa, _sb = socket.socketpair()
     _sa.setblocking(False)

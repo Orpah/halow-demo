@@ -9,6 +9,15 @@ import os
 import subprocess
 import sys
 
+# ★ 本脚本会 print 中文/框线字符 ⇒ 输出统一 UTF-8。
+#   Windows 上 stdout 是**管道**时按 locale 编码（CI 上是 cp1252）⇒ 直接 print 中文/`─` 会
+#   UnicodeEncodeError 崩掉（2026-10-12 Windows 栏就是这么崩的；Linux/macOS 没事）。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                       # noqa: BLE001
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULT = os.path.join(HERE, "test_results.txt")
 
@@ -32,7 +41,7 @@ for line in txt.splitlines():
 # ★ 失败时把正文**打到 stdout**（不只写文件）——gate/CI 只转发 stdout，而“红但说不出为什么”
 #   最费时间（2026-10-12 CI 三栏同红、日志里一条原因都没有，就是因为详情只落在文件里）。
 if code != 0:
-    print("── test_sim.py 输出尾部（失败详情）──")
+    print("-- test_sim.py 输出尾部（失败详情）--")
     for line in txt.splitlines()[-25:]:
         print(line)
 print(f"returncode={code}  报告: {os.path.relpath(RESULT, os.path.dirname(HERE))}")
