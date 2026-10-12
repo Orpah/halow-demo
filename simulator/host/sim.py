@@ -572,6 +572,8 @@ class Wifi:
         self._next_retry = 0
         self._next_keepalive = 0
         self._last_peer = 0
+        # 复位（AT+MODE=…）之后是否**又发过** ASSOC_REQ：决定收到的 ASSOC_RESP 采不采信
+        self._assoc_req_after_reset = False
 
     # ---------------- 信号（RSSI） -------------
     def _injected_dbm(self):
@@ -723,6 +725,13 @@ class Wifi:
                 return
             if len(p) < 2 or p[0] != 0:
                 return
+            # ★ 复位后**没再发过**关联请求 ⇒ 这是上一轮请求的**迟到应答**，丢弃。
+            #   实测（2026-10-12）：`AT+MODE=STA` 会 reset() 把 conn 清成 IDLE，但那时
+            #   2 s 周期保活刚发出去的 ASSOC_REQ，它的应答会在复位**之后**落地 → 把状态
+            #   又刷回 CONNECTED，于是 `AT+ASSOC_FAIL=100` 从此打不中它（5 次里 3 次
+            #   `conn=CONNECTED fails=0`，回归因此假红）。
+            if not self._assoc_req_after_reset:
+                return
             if self.conn != CONN_CONNECTED:      # 去重
                 self.emit("+CONNECTED")
             # 第 3/4 字节（可选）= AP 分给本 STA 的 RAW 槽位 / 槽位数（0xFF / 0 = 未开）
@@ -843,6 +852,7 @@ class Wifi:
                 else:
                     req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
                     self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
+                    self._assoc_req_after_reset = True
                 self._next_retry = now + 0.5
         if c.mode in (MODE_STA, MODE_APSTA) and self.conn == CONN_CONNECTED:
             if now - self._last_peer > 3:
@@ -852,6 +862,7 @@ class Wifi:
             if now >= self._next_keepalive:
                 req = bytes([len(c.ssid)]) + c.ssid.encode() + c.mac + bytes([c.txpower & 0xFF])
                 self.core.link.send(LINK_TYPE_ASSOC_REQ, req)
+                self._assoc_req_after_reset = True
                 self._next_keepalive = now + 2.0
         # RAW/TWT：窗口一开就把排队的帧发出去（窗口外只是**等**，不是丢）
         if self.tx_queue and self.raw_window_open() and self.twt_awake():
@@ -926,6 +937,8 @@ class Wifi:
         self._next_retry = 0
         self._next_keepalive = 0
         self._last_peer = 0
+        # 复位把连接态清成 IDLE；此时**还没发过**新的关联请求（见 ASSOC_RESP 处理）
+        self._assoc_req_after_reset = False
 
 
 # ---------------------------------------------------------------------------

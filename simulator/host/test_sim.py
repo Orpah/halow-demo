@@ -429,10 +429,16 @@ def main():
     b.send("AT+ASSOC_FAIL=100")
     b.send("AT+MODE=STA")
     b.pump(0.4)
-    time.sleep(2.0)
+    # 用例名写的是「重试计数**在涨**」，那就得真的量到增长：原先 sleep 2 s 后只看一眼
+    # `fails > 0`，既没等出证据（偶发假红）、也没量增长（名不副实）——都违反本仓
+    # 「等待一律用 waiting 式有界等待、不猜次数」的约定。重试节奏实测 ≈0.5 s/次。
+    left = wait_until(lambda: coreB.wifi.assoc_fails > 0
+                      and coreB.wifi.conn != sim.CONN_CONNECTED, timeout=3.0)
+    n1 = coreB.wifi.assoc_fails
+    grow = left and wait_until(lambda: coreB.wifi.assoc_fails > n1, timeout=2.0)
     check("ASSOC_FAIL=100%：B 连不上且重试计数在涨",
-          coreB.wifi.conn != sim.CONN_CONNECTED and coreB.wifi.assoc_fails > 0,
-          f"conn={coreB.wifi.conn_str()} fails={coreB.wifi.assoc_fails}")
+          grow,
+          f"conn={coreB.wifi.conn_str()} fails={n1}->{coreB.wifi.assoc_fails}")
     b.send("AT+ASSOC_FAIL=0")
     b.pump(0.3)
     time.sleep(1.5)
