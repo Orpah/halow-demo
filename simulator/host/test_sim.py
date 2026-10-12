@@ -494,13 +494,33 @@ def main():
     b.send("AT+MODE=STA")
     b.pump(0.4)
     time.sleep(1.5)
-    # 睡着时收到的下行帧丢掉
-    wait_until(lambda: not coreB.wifi.twt_awake(), timeout=3.0)
+    # 睡着时收到的下行帧丢掉。
+    # ★ 两个前提都必须先**等出来**，否则在慢机器上是掷硬币（2026-10-12 Linux 栏实测
+    #   `drops=0` 假红）：
+    #   ① 发送端是 AP ⇒ `send_data` 有 `if mode == AP and not self.sta: return -1`
+    #      （AP 8 s 没听到 STA 就清关联表）——表空就**根本不受理**，不是"没丢"；
+    #   ② 接收端要**确实睡着**：窗口相位锚在**上一个 beacon** 上，而 beacon 每 0.5 s 一次
+    #      ⇒ 相位在收帧前被重新锚定一下，帧就可能落进新开的 50 ms 醒窗里（低频、约百分之几）
+    #      ⇒ 所以这里**有界重试**（最多 3 次），而不是发一帧就断言。
+    #   本地复现不出（12 个 CPU 负载进程下连跑 4 次都 48/48）⇒ 失败详情里带上诊断字段，
+    #   下一次红就能直接指名（rc=-1 就是①，rc=0 且非睡着就是②）。
+    wait_until(lambda: coreB.wifi.conn == sim.CONN_CONNECTED, timeout=5.0)
+    wait_until(lambda: coreA.wifi.sta, timeout=5.0)
     d0 = coreB.wifi.twt_sleep_drops
-    coreA.wifi.send_data(bytes([0xFF] * 6) + coreB.cfg.mac + bytes([0x88, 0xB5]) + b"TWT-DL")
-    time.sleep(0.3)
+    tries, rc = 0, None
+    while tries < 3:
+        tries += 1
+        if not wait_until(lambda: not coreB.wifi.twt_awake(), timeout=3.0):
+            break
+        rc = coreA.wifi.send_data(bytes([0xFF] * 6) + coreB.cfg.mac
+                                  + bytes([0x88, 0xB5]) + b"TWT-DL")
+        if wait_until(lambda: coreB.wifi.twt_sleep_drops > d0, timeout=0.5):
+            break
+        time.sleep(0.2)               # 等到下一个睡眠窗口再试（有界：最多 3 次）
     check("TWT：睡着时下行数据帧被丢（计数 twt_drop 增加）",
-          coreB.wifi.twt_sleep_drops > d0, f"drops={coreB.wifi.twt_sleep_drops}")
+          coreB.wifi.twt_sleep_drops > d0,
+          f"drops={coreB.wifi.twt_sleep_drops - d0} 尝试={tries} rc={rc} "
+          f"AP的sta表={len(coreA.wifi.sta)} 睡着={not coreB.wifi.twt_awake()}")
     # 睡着时自己要发的帧排队，醒来后送达
     wait_until(lambda: not coreB.wifi.twt_awake(), timeout=3.0)
     r1 = coreA.wifi.rx_pkts

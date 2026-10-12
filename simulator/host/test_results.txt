@@ -52,7 +52,7 @@
   [PASS] RAW：窗口外 send_data 受理但排队（不是丢）  (rc=0 q=1 defer=1)
   [PASS] RAW：窗口一开，排队的帧送达对端  (rx 1->2)
   [PASS] TWT 配置读回 TWT:2000,50
-  [PASS] TWT：睡着时下行数据帧被丢（计数 twt_drop 增加）  (drops=1)
+  [PASS] TWT：睡着时下行数据帧被丢（计数 twt_drop 增加）  (drops=1 尝试=1 rc=0 AP的sta表=1 睡着=True)
   [PASS] TWT：睡着时 send_data 受理但排队  (rc=0 q=1 defer=1)
   [PASS] TWT：醒来后排队帧送达对端  (rx 2->3)
 == 10. 收尾 ==
