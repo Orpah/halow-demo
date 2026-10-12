@@ -132,8 +132,8 @@ ORPAH-over-HaLow 的业务全链路（Router 桥 / 走失表 / 报文集 / ID �
 - ★★ **CI = 第三方环境交叉验证**（2026-10-12 加 ✓）：`.github/workflows/checks.yml` ——
   `ubuntu-latest` / `windows-latest` / `macos-latest` 三栏（`fail-fast: false` ✓）各跑**同一份**
   `python simulator/run_checks.py` ✓。
-  ★ 本仓最值钱的是 **Windows 栏** ✓：AGENTS 里记的那几条都是 **Windows 专属**（`subprocess` 按
-  GBK 解码 ✗、`shutil.which("sh")` 找到 WSL 的 bash ✗、固定端口在 Windows 上**静默串扰** ✗）
+  ★ **Windows 栏**量的是本仓记过的那几条 **Windows 专属**假设（`subprocess` 按 GBK 解码 ✗、
+  `shutil.which("sh")` 找到 WSL 的 bash ✗、固定端口在 Windows 上**静默串扰** ✗）
   —— 它们平常只在**一台**机器上被验过 ✗ ⇒ 干净机器上跑一遍才知道是真是假 ✓。
   **它不证明** ✗：① **不是真机、也不上机**（空口/设备侧的结论只认真机实测 ✓；这里跑的是
   `host/` 那份纯软件模拟器 + 离线对拍 ✓）；② `node --check` 在没装 node 时是**可见地跳过** ✓

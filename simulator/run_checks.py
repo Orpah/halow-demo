@@ -194,8 +194,14 @@ def main():
                 secs += dt
             outs.append(out)
             for line in out.splitlines():
-                if re.search(r"\[FAIL\]|结果:|^FAIL|OK$|Traceback", line):
+                if re.search(r"\[FAIL\]|结果[:：]|^FAIL|OK$|Traceback", line):
                     print("  " + line.strip())
+        if not ok:
+            # ★ 失败时把子进程输出**打到 stdout**（不只写报告）—— CI 的日志包只带 stdout，
+            #   而“红但说不出为什么”最费时间（2026-10-12 三栏同红就是这么来的）。
+            print("  ── 失败详情（子进程输出尾 25 行）──")
+            for line in out.splitlines()[-25:]:
+                print("  | " + line.rstrip())
         print("  → %s（%.2fs）" % ("通过" if ok else "**失败**", secs))
         results.append((title, ok, secs, "\n".join(outs)))
 

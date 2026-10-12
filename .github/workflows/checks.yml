@@ -44,7 +44,7 @@ jobs:
           - os: ubuntu-latest
             label: Linux
           - os: windows-latest
-            label: Windows（★ 最值钱的一栏：AGENTS 里那些 Windows 专属坑 ✓）
+            label: Windows
           - os: macos-latest
             label: macOS
     steps:

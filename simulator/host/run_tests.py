@@ -27,7 +27,13 @@ with open(RESULT, "w", encoding="utf-8", newline="\n") as f:
 
 # 把关键结论回显到终端（以前只 print returncode，得去翻文件才知道过没过）
 for line in txt.splitlines():
-    if line.startswith("结果:") or "[FAIL]" in line or line.startswith("TIMEOUT"):
+    if line.startswith(("结果:", "结果：")) or "[FAIL]" in line or line.startswith("TIMEOUT"):
+        print(line)
+# ★ 失败时把正文**打到 stdout**（不只写文件）——gate/CI 只转发 stdout，而“红但说不出为什么”
+#   最费时间（2026-10-12 CI 三栏同红、日志里一条原因都没有，就是因为详情只落在文件里）。
+if code != 0:
+    print("── test_sim.py 输出尾部（失败详情）──")
+    for line in txt.splitlines()[-25:]:
         print(line)
 print(f"returncode={code}  报告: {os.path.relpath(RESULT, os.path.dirname(HERE))}")
 sys.exit(code)
