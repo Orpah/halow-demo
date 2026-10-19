@@ -23,3 +23,5 @@ TXW8301/images/
 # 实测照片 / 截图（按需手动 add，默认不入库）
 images/XuantieDebugServer.png
 images/ch347_pid_55de_test.jpg
+# VS Code 自动追加的一次性任务（AGENTS:181-184 要求提交前清理；本文件改由人手工维护，默认不入库）
+.vscode/tasks.json
