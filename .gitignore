@@ -10,3 +10,16 @@ simulator/docs/crossfw-taixin-handoff.md
 # Python（TXW8301/tools 下的脚本会 import / 编译出这些）
 __pycache__/
 *.pyc
+# ---- 2026-10-19 补：未入库的第三方素材 / 构建产物 ----
+# 厂商固件编译输出（TXW8301/tools 的 mk 会写这里；非我们的源码，不随仓分发）
+TXW8301/out/
+
+# 厂商工具截图（Zadig / libusb-win32 / J-Link 界面；第三方图形，无授权不分发）
+TXW8301/images/
+
+# 临时输出目录（内含 orpah 参考资料图；需要时另存到 docs/ 再入库）
+/out/
+
+# 实测照片 / 截图（按需手动 add，默认不入库）
+images/XuantieDebugServer.png
+images/ch347_pid_55de_test.jpg
